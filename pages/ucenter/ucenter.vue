@@ -78,6 +78,54 @@
 						</view>
 					</view> -->
 				</view>
+
+				<view class="tp-panel tp-flex tp-flex-col tp-mg-t-20">
+					<view
+						class="tp-panel-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-20 tp-pd-l-r-10"
+						hover-class="tp-panel-item-hover"
+						@click="openFaq">
+						<view class="tp-flex-1 tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-mg-l-15">
+							<view>{{ $t('pages.faq') }}</view>
+							<view class="iconfont iconjiantou1"></view>
+						</view>
+					</view>
+					<view
+						class="tp-panel-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-20 tp-pd-l-r-10"
+						hover-class="tp-panel-item-hover"
+						@click="openContent('user_policy')">
+						<view class="tp-flex-1 tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-mg-l-15">
+							<view>{{ $t('pages.userPolicy') }}</view>
+							<view class="iconfont iconjiantou1"></view>
+						</view>
+					</view>
+					<view
+						class="tp-panel-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-20 tp-pd-l-r-10"
+						hover-class="tp-panel-item-hover"
+						@click="openContent('privacy_policy')">
+						<view class="tp-flex-1 tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-mg-l-15">
+							<view>{{ $t('pages.privacyPolicy') }}</view>
+							<view class="iconfont iconjiantou1"></view>
+						</view>
+					</view>
+					<view
+						class="tp-panel-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-20 tp-pd-l-r-10"
+						hover-class="tp-panel-item-hover"
+						@click="openSubmitFeedback">
+						<view class="tp-flex-1 tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-mg-l-15">
+							<view>{{ $t('pages.submitFeedback') }}</view>
+							<view class="iconfont iconjiantou1"></view>
+						</view>
+					</view>
+					<view
+						class="tp-panel-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-20 tp-pd-l-r-10"
+						hover-class="tp-panel-item-hover"
+						@click="openMyFeedback">
+						<view class="tp-flex-1 tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-mg-l-15">
+							<view>{{ $t('pages.myFeedback') }}</view>
+							<view class="iconfont iconjiantou1"></view>
+						</view>
+					</view>
+				</view>
 				<view class="quitLogin" @click="toQuitLogin" v-if="$login.isLoginType().isLogin">
 					{{ $t('ucenter.logout') }}
 				</view>
@@ -148,6 +196,39 @@
 		})
 	},
 		methods: {
+			ensureLogin() {
+				if (this.$login.isLoginType().isLogin) return true
+				uni.showToast({
+					title: this.$t('pages.pleaseLogin'),
+					icon: 'none'
+				})
+				uni.navigateTo({
+					url: '/pages/login/login'
+				})
+				return false
+			},
+			openFaq() {
+				uni.navigateTo({
+					url: '/pages/content/faq'
+				})
+			},
+			openContent(key) {
+				uni.navigateTo({
+					url: '/pages/content/page?key=' + key
+				})
+			},
+			openSubmitFeedback() {
+				if (!this.ensureLogin()) return
+				uni.navigateTo({
+					url: '/pages/feedback/submit'
+				})
+			},
+			openMyFeedback() {
+				if (!this.ensureLogin()) return
+				uni.navigateTo({
+					url: '/pages/feedback/my-feedback'
+				})
+			},
 			//退出登录
 			toQuitLogin() {
 				uni.showLoading({
@@ -162,6 +243,7 @@
 							uni.removeStorageSync('ywId')
 							uni.removeStorageSync('email')
 							uni.removeStorageSync('password')
+							uni.removeStorageSync('tenant_id')
 							this.API.apiRequest('/api/v1/push-id/logout', {
 								push_id: push_id
 							}, 'post').then(res => {

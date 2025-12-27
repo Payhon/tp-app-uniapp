@@ -43,6 +43,14 @@
 				<!-- <text>{{ $t('pages.login.noAccount') || 'No account?' }}</text> -->
 				<text class="link-text" @tap="goToRegister">{{ $t('pages.login.registerButton') }}</text>
 			</view>
+
+			<view class="foot-tip center policy-links">
+				<text class="link-text" @tap="openContent('user_policy')">{{ $t('pages.userPolicy') }}</text>
+				<text class="sep">|</text>
+				<text class="link-text" @tap="openContent('privacy_policy')">{{ $t('pages.privacyPolicy') }}</text>
+				<text class="sep">|</text>
+				<text class="link-text" @tap="openFaq">{{ $t('pages.faq') }}</text>
+			</view>
 		</view>
 		<!-- 授权登录 -->
 		<uni-popup ref="authPopup" type="bottom">
@@ -270,6 +278,12 @@ export default {
 					uni.setStorageSync('email', this.email)
 					uni.setStorageSync('password', this.password)
 					uni.setStorageSync('access_token', res.data.token)
+					// 获取并缓存租户ID（用于 APP 内容接口 X-TenantID Header）
+					this.API.apiRequest('/api/v1/user/tenant/id', {}, 'get').then(rsp => {
+						if (rsp && rsp.code == 200 && rsp.data) {
+							uni.setStorageSync('tenant_id', rsp.data)
+						}
+					}).catch(() => {})
 					uni.switchTab({
 						url: '../fishery-monitor/fishery-monitor'
 					});
@@ -322,6 +336,16 @@ export default {
 			uni.navigateTo({
 				url: './register'
 			});
+		},
+		openContent(key) {
+			uni.navigateTo({
+				url: '/pages/content/page?key=' + key
+			})
+		},
+		openFaq() {
+			uni.navigateTo({
+				url: '/pages/content/faq'
+			})
 		},
 	}
 }

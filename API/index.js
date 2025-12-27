@@ -10,9 +10,14 @@ export const apiRequest = (url, data, method) => {
 	//设置请求前拦截器
 	http.interceptor.request = (config) => {
 		let token = uni.getStorageSync("access_token")
+		let tenantId = uni.getStorageSync("tenant_id")
 		delete config.header['x-token']
+		delete config.header['X-TenantID']
 		if (token) {
 			config.header['x-token'] = token
+		}
+		if (tenantId) {
+			config.header['X-TenantID'] = tenantId
 		}
 		let server = uni.getStorageSync("serverAddress")
 		// console.log("server",server);

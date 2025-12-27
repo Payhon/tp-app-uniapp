@@ -13,7 +13,16 @@ export const AVAILABLE_LANGUAGES = [
 ];
 
 const systemLanguage = uni.getSystemInfoSync().language;
-const locale = uni.getStorageSync('language') || systemLanguage || 'zh-CN';
+const rawLocale = uni.getStorageSync('language') || systemLanguage || 'en-US';
+let locale = rawLocale;
+if (rawLocale && (rawLocale.toLowerCase().startsWith('zh') || rawLocale.toLowerCase() === 'zh-cn')) {
+  locale = 'zh-CN'
+} else if (rawLocale === 'en-US') {
+  locale = 'en-US'
+} else {
+  // Other languages default to en-US
+  locale = 'en-US'
+}
 const i18n = new VueI18n({
   locale: locale,
   messages: {

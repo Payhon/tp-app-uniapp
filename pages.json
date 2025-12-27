@@ -79,6 +79,46 @@
 			}
 		},
 		{
+			"path": "pages/content/page",
+			"style": {
+				"navigationBarTitleText": "%pages.contentPage%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/content/faq",
+			"style": {
+				"navigationBarTitleText": "%pages.faq%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/feedback/submit",
+			"style": {
+				"navigationBarTitleText": "%pages.submitFeedback%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/feedback/my-feedback",
+			"style": {
+				"navigationBarTitleText": "%pages.myFeedback%",
+				"enablePullDownRefresh": true,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/feedback/detail",
+			"style": {
+				"navigationBarTitleText": "%pages.feedbackDetail%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
 			"path": "pages/fishery-monitor/addMonitor",
 			"style": {
 				"navigationBarTitleText": "%pages.addDevice%",
