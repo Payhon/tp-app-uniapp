@@ -147,15 +147,34 @@ export default {
 			return this.backgroundColor
 		}
 	},
-	mounted() {
-		const fixSize = () => {
-			const { windowWidth, windowHeight, windowTop, safeAreaInsets } = uni.getSystemInfoSync()
-			this.popupWidth = windowWidth
-			this.popupHeight = windowHeight + windowTop
-			// 是否适配底部安全区
-			if(this.safeArea){
-				this.safeAreaInsets = safeAreaInsets
-			}else{
+		mounted() {
+			const fixSize = () => {
+				let windowWidth = 0
+				let windowHeight = 0
+				let windowTop = 0
+				let safeAreaInsets = 0
+				// #ifdef MP-WEIXIN
+				try {
+					const winInfo = wx.getWindowInfo ? wx.getWindowInfo() : {}
+					windowWidth = winInfo.windowWidth || 0
+					windowHeight = winInfo.windowHeight || 0
+					windowTop = winInfo.windowTop || 0
+					safeAreaInsets = winInfo.safeAreaInsets || 0
+				} catch (e) {}
+				// #endif
+				// #ifndef MP-WEIXIN
+				const info = uni.getSystemInfoSync()
+				windowWidth = info.windowWidth || 0
+				windowHeight = info.windowHeight || 0
+				windowTop = info.windowTop || 0
+				safeAreaInsets = info.safeAreaInsets || 0
+				// #endif
+				this.popupWidth = windowWidth
+				this.popupHeight = windowHeight + windowTop
+				// 是否适配底部安全区
+				if(this.safeArea){
+					this.safeAreaInsets = safeAreaInsets
+				}else{
 				this.safeAreaInsets = 0
 			}
 		}

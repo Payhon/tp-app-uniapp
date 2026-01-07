@@ -2,8 +2,8 @@
 	<view class="modal-container" :class="{show: showValue}" @touchmove.stop @click.stop='cancel(2)'>
 		<view class="modal-content" v-if="showValue" @click.stop>
 			<slot name='title'>
-				<view class="modal-title" :class="{'modal-title-padding': !text}" v-if='title'>
-					{{title}}
+				<view class="modal-title" :class="{'modal-title-padding': !text}" v-if="titleText">
+					{{ titleText }}
 				</view>
 			</slot>
 			<slot name='text'>
@@ -13,10 +13,10 @@
 			</slot>
 			<view class="modal-row">
 				<view class="modal-col" :style="cancelStyle" hover-class="modal-hover" v-if="!noCancel" @click='cancel(1)'>
-					{{cancelText}}
+					{{ cancelTextComputed }}
 				</view>
 				<view class="modal-col modal-confirm" :style="confirmStyle" hover-class="modal-hover" @click='confirm'>
-					{{confirmText}}
+					{{ confirmTextComputed }}
 				</view>
 			</view>
 		</view>
@@ -29,7 +29,7 @@
 		props: {
 			title: {
 				type: String,
-				default: '提示'
+				default: ''
 			},
 			text: {
 				type: String,
@@ -41,14 +41,14 @@
 			},
 			cancelText: {
 				type: String,
-				default: '取消'
+				default: ''
 			},
 			cancelStyle: {
 				type: [String, Object]
 			},
 			confirmText: {
 				type: String,
-				default: '确定'
+				default: ''
 			},
 			confirmStyle: {
 				type: [String, Object]
@@ -65,6 +65,17 @@
 		data(){
 			return{
 				showValue: this.value
+			}
+		},
+		computed: {
+			titleText() {
+				return this.title || this.$t('common.tip')
+			},
+			cancelTextComputed() {
+				return this.cancelText || this.$t('common.cancel')
+			},
+			confirmTextComputed() {
+				return this.confirmText || this.$t('common.ok')
 			}
 		},
 		watch: {

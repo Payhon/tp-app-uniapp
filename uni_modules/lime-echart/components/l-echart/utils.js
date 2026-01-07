@@ -22,7 +22,29 @@ export function compareVersion(v1, v2) {
 	}
 	return 0
 }
-const systemInfo = uni.getSystemInfoSync();
+	function getSystemInfo() {
+		// #ifdef MP-WEIXIN
+		try {
+			const baseInfo = wx.getAppBaseInfo ? wx.getAppBaseInfo() : {}
+			const deviceInfo = wx.getDeviceInfo ? wx.getDeviceInfo() : {}
+			const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : {}
+			return {
+				SDKVersion: baseInfo.SDKVersion || '',
+				platform: deviceInfo.platform || '',
+				pixelRatio: windowInfo.pixelRatio || 1
+			}
+		} catch (e) {
+			return { SDKVersion: '', platform: '', pixelRatio: 1 }
+		}
+		// #endif
+
+		try {
+			return uni.getSystemInfoSync()
+		} catch (e) {
+			return {}
+		}
+	}
+	const systemInfo = getSystemInfo();
 function gte(version) {
 	// 截止 2023-03-22 mac pc小程序不支持 canvas 2d
 	let { SDKVersion, platform } = systemInfo;
@@ -67,7 +89,7 @@ export function wrapTouch(event) {
 	}
 	return event;
 }
-export const devicePixelRatio = uni.getSystemInfoSync().pixelRatio
+export const devicePixelRatio = systemInfo.pixelRatio || 1
 // #endif
 // #ifdef APP-NVUE
 export function base64ToPath(base64) {

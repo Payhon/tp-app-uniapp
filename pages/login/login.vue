@@ -1,435 +1,421 @@
 <template>
-	<view class="tp-login-box plain-layout">
-		<view class="plain-header tp-flex tp-flex-row tp-flex-a-c">
-			<image class="brand-logo" src="/static/icon/logo.png" mode="heightFix" />
-			<view class="lang-switch tp-flex tp-flex-row tp-flex-a-c" @tap="showLanguagePopup">
-				<text class="lang-label">{{ currentLanguage }}</text>
-				<text class="lang-arrow">›</text>
+	<view class="auth-page">
+		<image class="page-bg" src="/static/image/bg.png" mode="aspectFill" />
+		<view class="brand">
+			<image class="brand-logo" src="/static/image/logo.png" mode="heightFix" />
+		</view>
+
+		<view class="auth-card">
+				<view class="tabs">
+					<view class="tab" :class="{ active: activeTab === 'phone' }" @tap="activeTab = 'phone'">
+						<text class="tab-text">{{ $t('auth.login.tabAccount') }}</text>
+						<view class="tab-line" v-if="activeTab === 'phone'"></view>
+					</view>
+					<view class="tab" :class="{ active: activeTab === 'email' }" @tap="activeTab = 'email'">
+						<text class="tab-text">{{ $t('auth.login.tabEmail') }}</text>
+						<view class="tab-line" v-if="activeTab === 'email'"></view>
+					</view>
+				</view>
+
+			<view class="form">
+				<view class="ipt">
+					<uni-icons :type="activeTab === 'phone' ? 'phone-filled' : 'email-filled'" size="20" color="#9ca3af" />
+					<input
+						class="ipt-input"
+						type="text"
+						:placeholder="activeTab === 'phone' ? $t('auth.login.placeholderPhone') : $t('auth.login.placeholderEmail')"
+						placeholder-class="ipt-placeholder"
+						v-model="identifier"
+					/>
+				</view>
+
+				<view class="ipt">
+					<uni-icons type="locked-filled" size="20" color="#9ca3af" />
+					<input
+						class="ipt-input"
+						type="text"
+						password="true"
+						:placeholder="$t('auth.login.placeholderPassword')"
+						placeholder-class="ipt-placeholder"
+						v-model="password"
+					/>
+				</view>
+
+				<view class="policy-row">
+						<checkbox-group @change="onAgreeChange">
+							<label class="policy-label">
+								<checkbox value="1" :checked="agree" color="#0b3bb6" style="transform:scale(0.8)" />
+								<text class="policy-text">{{ $t('auth.policy.agreePrefix') }}</text>
+								<text class="policy-link" @tap.stop="openContent('user_policy')">{{ $t('auth.policy.userAgreement') }}</text>
+								<text class="policy-text">{{ $t('auth.policy.and') }}</text>
+								<text class="policy-link" @tap.stop="openContent('privacy_policy')">{{ $t('auth.policy.privacyPolicy') }}</text>
+							</label>
+						</checkbox-group>
+					</view>
+
+				<button class="primary-btn" :loading="loading" :disabled="!canSubmit" @tap="doLogin">{{ $t('auth.login.loginBtn') }}</button>
+
+				<view class="links">
+					<text class="link" @tap="goRegister">{{ $t('auth.login.createAccount') }}</text>
+					<text class="link muted" @tap="goForgot">{{ $t('auth.login.forgotPassword') }}</text>
+				</view>
 			</view>
 		</view>
-		<view class="plain-container">
-			<view class="card-title plain-title">{{ $t('pages.login.title') }}</view>
 
-			<view class="form-area">
-				<view class="tp-ipt">
-					<view class="inputicon">
-						<uni-icons type="person-filled" size="28" color="#4f46e5" />
-					</view>
-					<input type="text" placeholder-class="tp-plc" :placeholder="$t('pages.login.emailPlaceholder')"
-						v-model="email" />
-				</view>
-				<view class="tp-ipt">
-					<view class="inputicon">
-						<uni-icons type="locked-filled" size="28" color="#4f46e5" />
-					</view>
-					<input type="text" placeholder-class="tp-plc" :placeholder="$t('pages.login.passwordPlaceholder')"
-						password=true v-model="password" />
-				</view>
-				<view class="tp-ipt">
-					<view class="inputicon">
-						<uni-icons type="cloud-upload-filled" size="28" color="#4f46e5" />
-					</view>
-					<input type="text" placeholder-class="tp-plc" placeholder="http://demo.thingspanel.cn"
-						v-model="server" @input="serverChange" />
-				</view>
+		<view class="other">
+			<text class="other-title">{{ $t('auth.login.otherMethods') }}</text>
+			<!-- #ifdef MP-WEIXIN -->
+			<view class="wx-btn" @tap="doWxmpLogin">
+				<uni-icons type="weixin" size="34" color="#22c55e" />
 			</view>
-
-			<view class="btn-group">
-				<button class="tp-btn primary" :loading="loading"
-					@tap="doLoginSubmit">{{ $t('pages.login.loginButton') }}</button>
-			</view>
-
-			<view class="foot-tip center" style="margin-top: 0;">
-				<!-- <text>{{ $t('pages.login.noAccount') || 'No account?' }}</text> -->
-				<text class="link-text" @tap="goToRegister">{{ $t('pages.login.registerButton') }}</text>
-			</view>
-
-			<view class="foot-tip center policy-links">
-				<text class="link-text" @tap="openContent('user_policy')">{{ $t('pages.userPolicy') }}</text>
-				<text class="sep">|</text>
-				<text class="link-text" @tap="openContent('privacy_policy')">{{ $t('pages.privacyPolicy') }}</text>
-				<text class="sep">|</text>
-				<text class="link-text" @tap="openFaq">{{ $t('pages.faq') }}</text>
-			</view>
+			<!-- #endif -->
 		</view>
-		<!-- 授权登录 -->
-		<uni-popup ref="authPopup" type="bottom">
-			<authorize @getuserinfo="getAuth" @cancel="toCloseLogin"></authorize>
-		</uni-popup>
-		<!-- 消息提示框 -->
-		<cys-toast ref="toast" :msg="toast.msg" direction="row" location="top"></cys-toast>
 	</view>
 </template>
 
 <script>
-// 
-import {
-	mapState,
-	mapMutations
-} from "vuex";
-import uniIcons from "@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue";
-import login from "../../store/login";
-import { AVAILABLE_LANGUAGES, changeLanguage } from '@/lang/index.js'
-// 
+import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
+import { loginByPassword, wxmpLogin } from '@/service/app-auth'
+
 export default {
 	components: {
 		uniIcons
 	},
 	data() {
 		return {
-			disabled: true,
-			loading: false,
-			email: '',
+			activeTab: 'phone',
+			identifier: '',
 			password: '',
-			server: '',
-			currentLanguage: AVAILABLE_LANGUAGES.find(
-				lang => lang.code === (uni.getStorageSync('language') || 'zh-CN')
-			)?.label || '中文',
-			toast: {
-				msg: ''
-			},
+			agree: true,
+			loading: false
 		}
 	},
-	// 
-	watch: {
-		email() {
-			this.onBtnChange();
-		},
-		password() {
-			this.onBtnChange();
-		}
-	},
-	onShow() {
-		try {
-			uni.setNavigationBarTitle({
-				title: this.$t('pages.loginTitle')
-			});
-		} catch (e) {
-			console.warn('设置导航栏标题失败:', e);
-		}
-		
-		// 同步语言标签
-		this.syncLanguageLabel();
-		
-		this.server = uni.getStorageSync('serverAddress') || '';
-		if (uni.getStorageSync('email') && uni.getStorageSync('password')) {
-			this.email = uni.getStorageSync('email');
-			this.password = uni.getStorageSync('password');
-			this.toLogin();
+	computed: {
+		canSubmit() {
+			return !!this.identifier && !!this.password && !!this.agree && !this.loading
 		}
 	},
 	methods: {
-		serverChange(v) {
-			console.log("serverChange", v.detail.value)
-			// uni.setStorageSync('serverAddress', v.detail.value)
+		onAgreeChange(e) {
+			this.agree = Array.isArray(e.detail.value) && e.detail.value.includes('1')
 		},
-		showLanguagePopup() {
-			uni.showActionSheet({
-				itemList: AVAILABLE_LANGUAGES.map(lang => lang.label),
-				success: (res) => {
-					const selectedLang = AVAILABLE_LANGUAGES[res.tapIndex];
-					changeLanguage(selectedLang.code);
-					this.currentLanguage = selectedLang.label;
-					// 更新导航栏标题
-					try {
-						uni.setNavigationBarTitle({
-							title: this.$t('pages.loginTitle')
-						});
-					} catch (e) {
-						console.warn('设置导航栏标题失败:', e);
-					}
-				}
-			});
-		},
-		syncLanguageLabel() {
-			const locale = this.$i18n ? this.$i18n.locale : 'zh-CN';
-			this.currentLanguage = AVAILABLE_LANGUAGES.find(
-				lang => lang.code === locale
-			)?.label || '中文';
-		},
-		// 取消授权
-		toCloseLogin() {
-			this.$refs.authPopup.close()
-		},
-		//取消登录
-		doLoginCancel() {
-			uni.navigateBack(-1)
-		},
-		// 改变按钮状态
-		onBtnChange() {
-			if (this.email && this.password) {
-				this.disabled = false;
-				return;
+		validateIdentifier() {
+			const v = String(this.identifier || '').trim()
+			if (!v) return { ok: false, msg: this.activeTab === 'phone' ? this.$t('auth.login.placeholderPhone') : this.$t('auth.login.placeholderEmail') }
+			if (this.activeTab === 'email') {
+				const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+				if (!emailRegex.test(v)) return { ok: false, msg: this.$t('auth.login.invalidEmail') }
+				return { ok: true }
 			}
-			this.disabled = true;
+			const phoneRegex = /^1[3-9]\d{9}$/
+			if (!phoneRegex.test(v.replace(/\s+/g, ''))) return { ok: false, msg: this.$t('auth.login.invalidPhone') }
+			return { ok: true }
 		},
-		// 验证邮箱格式
-		validateEmail() {
-			if (!this.email || !this.email.trim()) {
-				this.handleError(this.$t('pages.login.errors.emailRequired'));
-				return false;
-			}
-			const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-			if (!emailRegex.test(this.email.trim())) {
-				this.handleError(this.$t('pages.login.errors.invalidEmail'));
-				return false;
-			}
-			return true;
-		},
-		// 验证密码
 		validatePassword() {
-			if (!this.password || !this.password.trim()) {
-				this.handleError(this.$t('pages.login.errors.passwordRequired'));
-				return false;
-			}
-			return true;
-		},
-		// 翻译服务器错误消息
-		translateErrorMessage(message) {
-			if (!message) {
-				return this.$t('pages.login.errors.loginFailed');
-			}
-			// 常见错误消息映射
-			const errorMap = {
-				'邮箱或密码错误': 'pages.login.errors.emailOrPasswordError',
-				'用户不存在': 'pages.login.errors.userNotFound',
-				'账号已被禁用': 'pages.login.errors.accountDisabled',
-				'未授权': 'pages.login.errors.unauthorized',
-				'Email or password is incorrect': 'pages.login.errors.emailOrPasswordError',
-				'User not found': 'pages.login.errors.userNotFound',
-				'Account has been disabled': 'pages.login.errors.accountDisabled',
-				'Unauthorized': 'pages.login.errors.unauthorized',
-			};
-			// 检查密码长度验证错误（支持多种格式）
-			if (message.includes('Password') && (message.includes('failed validation') || message.includes('At least') || message.includes('至少'))) {
-				return this.$t('pages.login.errors.passwordTooShort');
-			}
-			// 检查是否有对应的翻译键
-			if (errorMap[message]) {
-				return this.$t(errorMap[message]);
-			}
-			// 如果没有匹配，返回原始消息（可能是已经翻译过的）
-			return message;
-		},
-		//登录
-		doLoginSubmit: function () {
-			// 前端校验
-			if (!this.validateEmail() || !this.validatePassword()) {
-				return;
-			}
-			// #ifdef MP-WEIXIN
-			if (uni.getStorageSync('isAuth') == '1') {
-				this.toLogin()
-			} else {
-				this.$refs.authPopup.open()
-			}
-			// #endif
-			// #ifdef APP-PLUS
-			this.toLogin()
-			// #endif
-			// #ifdef H5
-			this.toLogin()
-			// #endif
-		},
-		// 
-		toLogin() {
-			if (this.server) {
-				uni.setStorageSync('serverAddress', this.server)
-			} else {
-				uni.setStorageSync('serverAddress', 'http://demo.thingspanel.cn')
-			}
-			uni.showLoading({
-				title: this.$t('pages.login.loading')
-			});
-			let data = {
-				email: this.email,
-				password: this.password
-			};
-			let cid = '';
-			this.API.apiRequest('/api/v1/login', {
-				email: this.email,
-				password: this.password
-			}, 'post').then(res => {
-				if (res.code == 200) {
-					// Get push ID
-					uni.getPushClientId({
-						success: (res) => {
-							cid = res.cid;
-							console.log("Client Id for push notification: " + cid);
-						},
-						fail(err) {
-							console.log(err)
-						}
-					});
-					this.API.apiRequest('/api/v1/push-id', {
-						// according to design spec, user id and device tyep is also required param, 
-						// user_id: this.email
-						// device_type: ???
-						push_id: cid
-					}, 'post').then(res => {
-						if (res.statusCode === 200) {
-							uni.setStorageSync('push_id', cid);
-							console.log("Register client push ID in server successfully");
-						}
-					}).catch(err => {
-						uni.setStorageSync('push_id', cid);
-						console.log("Failed to register client push ID in server");
-					})
-					uni.setStorageSync('email', this.email)
-					uni.setStorageSync('password', this.password)
-					uni.setStorageSync('access_token', res.data.token)
-					// 获取并缓存租户ID（用于 APP 内容接口 X-TenantID Header）
-					this.API.apiRequest('/api/v1/user/tenant/id', {}, 'get').then(rsp => {
-						if (rsp && rsp.code == 200 && rsp.data) {
-							uni.setStorageSync('tenant_id', rsp.data)
-						}
-					}).catch(() => {})
-					uni.switchTab({
-						url: '../fishery-monitor/fishery-monitor'
-					});
-					uni.showToast({
-						title: this.$t('pages.login.loginSuccess'),
-						icon: 'none'
-					});
-				} else {
-					// 翻译服务器返回的错误消息
-					const translatedMessage = this.translateErrorMessage(res.message);
-					this.handleError(translatedMessage);
-				}
-			}).catch(err => {
-				this.handleError(this.$t('pages.login.networkError')); // 处理网络错误
-			}).finally(() => {
-				uni.hideLoading()
-			})
-		},
-		handleError(message) {
-			this.toast.msg = message;
-			//this.$refs.toast.show();
-			uni.showToast({
-				title: message,
-				icon: 'none'
-			});
-		},
-		//获取授权
-		getAuth() {
-			var that = this;
-			//判断是否授权
-			uni.getUserProfile({
-				desc: this.$t('pages.login.authDescription'),
-				success(infoRes) {
-					const userInfo = infoRes.userInfo;
-					uni.setStorageSync('isAuth', '1')
-					that.$refs.authPopup.close()
-					that.toLogin()
-				},
-				fail: err => {
-					console.log('Authorization failed:', err);
-				}
-			});
-		},
-		goToRegister() {
-			if (this.server) {
-				uni.setStorageSync('serverAddress', this.server)
-			} else {
-				uni.setStorageSync('serverAddress', 'http://demo.thingspanel.cn')
-			}
-			uni.navigateTo({
-				url: './register'
-			});
+			if (!String(this.password || '').trim()) return { ok: false, msg: this.$t('auth.login.placeholderPassword') }
+			return { ok: true }
 		},
 		openContent(key) {
 			uni.navigateTo({
 				url: '/pages/content/page?key=' + key
 			})
 		},
-		openFaq() {
+		goRegister() {
 			uni.navigateTo({
-				url: '/pages/content/faq'
+				url: '/pages/login/register'
 			})
 		},
+		goForgot() {
+			uni.navigateTo({
+				url: '/pages/login/forgot'
+			})
+		},
+		async afterLoginSuccess(token) {
+			uni.setStorageSync('access_token', token)
+
+			// 获取并缓存租户ID（用于 APP 内容接口 X-TenantID Header）
+			this.API.apiRequest('/api/v1/user/tenant/id', {}, 'GET')
+				.then((rsp) => {
+					if (rsp && rsp.code === 200 && rsp.data) uni.setStorageSync('tenant_id', rsp.data)
+				})
+				.catch(() => {})
+
+			// #ifdef APP-PLUS
+			try {
+				uni.getPushClientId({
+					success: (res) => {
+						const cid = res && res.cid ? res.cid : ''
+						if (!cid) return
+						this.API.apiRequest('/api/v1/push-id', { push_id: cid }, 'POST')
+							.then(() => uni.setStorageSync('push_id', cid))
+							.catch(() => uni.setStorageSync('push_id', cid))
+					}
+				})
+			} catch (e) {}
+			// #endif
+
+			uni.switchTab({
+				url: '/pages/fishery-monitor/fishery-monitor'
+			})
+		},
+		async doLogin() {
+			if (this.loading) return
+			if (!this.agree) {
+				uni.showToast({ title: this.$t('auth.toast.pleaseAgree'), icon: 'none' })
+				return
+			}
+			const idRes = this.validateIdentifier()
+			if (!idRes.ok) {
+				uni.showToast({ title: idRes.msg, icon: 'none' })
+				return
+			}
+			const pwdRes = this.validatePassword()
+			if (!pwdRes.ok) {
+				uni.showToast({ title: pwdRes.msg, icon: 'none' })
+				return
+			}
+
+			this.loading = true
+			try {
+				const resp = await loginByPassword(this.identifier, this.password)
+				if (resp && resp.code === 200 && resp.data && resp.data.token) {
+					await this.afterLoginSuccess(resp.data.token)
+					uni.showToast({ title: this.$t('auth.login.success'), icon: 'none' })
+				} else {
+					uni.showToast({ title: (resp && resp.message) || this.$t('auth.login.failed'), icon: 'none' })
+				}
+			} catch (e) {
+				uni.showToast({ title: this.$t('auth.toast.networkError'), icon: 'none' })
+			} finally {
+				this.loading = false
+			}
+		},
+		// #ifdef MP-WEIXIN
+		async doWxmpLogin() {
+			if (this.loading) return
+			if (!this.agree) {
+				uni.showToast({ title: this.$t('auth.toast.pleaseAgree'), icon: 'none' })
+				return
+			}
+			this.loading = true
+			try {
+				const loginRes = await new Promise((resolve, reject) => {
+					uni.login({
+						provider: 'weixin',
+						success: resolve,
+						fail: reject
+					})
+				})
+				const resp = await wxmpLogin(loginRes.code)
+				if (resp && resp.code === 200 && resp.data && resp.data.token) {
+					await this.afterLoginSuccess(resp.data.token)
+					uni.showToast({ title: this.$t('auth.login.success'), icon: 'none' })
+				} else {
+					uni.showToast({ title: (resp && resp.message) || this.$t('auth.login.failed'), icon: 'none' })
+				}
+			} catch (e) {
+				uni.showToast({ title: this.$t('auth.login.failedRetry'), icon: 'none' })
+			} finally {
+				this.loading = false
+			}
+		}
+		// #endif
 	}
 }
 </script>
 
 <style>
-@import url("@/common/login.css");
-
-.plain-layout {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: flex-start;
-	background-image: url('/static/image/bg.png');
-	background-size: cover;
-	background-position: top center;
-	background-repeat: no-repeat;
-	gap: 40rpx;
-	min-height: 100vh;
+page {
+	background: #f6f7fb;
 }
 
-.plain-header {
-	margin-top: 30rpx;
-	width: 100%;
-	max-width: 640rpx;
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
+	.auth-page {
+		min-height: 100vh;
+		padding: 80rpx 40rpx 60rpx;
+		box-sizing: border-box;
+		background: #f6f7fb;
+		position: relative;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+	}
+
+	.page-bg {
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 100%;
+		height: 100%;
+		z-index: 0;
+	}
+
+	.brand,
+	.auth-card,
+	.other {
+		position: relative;
+		z-index: 1;
+	}
+
+	.brand {
+		width: 100%;
+		display: flex;
+		justify-content: center;
+		margin-top: 10rpx;
+	margin-bottom: 40rpx;
 }
 
 .brand-logo {
-	height: 60rpx;
+	height: 90rpx;
 }
 
-.lang-switch {
-	padding: 10rpx 20rpx;
-	border-radius: 12rpx;
-	border: 1rpx solid rgba(100, 108, 255, 0.3);
-	background: rgba(100, 108, 255, 0.1);
-	color: #646cff;
-	font-size: 26rpx;
-	cursor: pointer;
-	transition: all 0.3s ease;
-	display: flex;
-	align-items: center;
-	gap: 8rpx;
-}
-
-.lang-switch:active {
-	background: rgba(100, 108, 255, 0.2);
-	transform: scale(0.98);
-}
-
-.lang-label {
-	font-weight: 500;
-}
-
-.lang-arrow {
-	font-size: 32rpx;
-	color: #646cff;
-	opacity: 0.6;
-	font-weight: 300;
-}
-
-.plain-container {
-	flex: 1;
+.auth-card {
 	width: 100%;
+	max-width: 680rpx;
+	background: rgba(255, 255, 255, 0.92);
+	backdrop-filter: blur(10rpx);
+	border-radius: 34rpx;
+	padding: 36rpx 32rpx 30rpx;
+	box-shadow: 0 18rpx 60rpx rgba(15, 23, 42, 0.12);
+}
+
+.tabs {
+	display: flex;
+	gap: 56rpx;
+	padding: 8rpx 10rpx 18rpx;
+}
+
+.tab {
+	position: relative;
+	padding-bottom: 16rpx;
+}
+
+.tab-text {
+	font-size: 28rpx;
+	font-weight: 700;
+	color: #94a3b8;
+}
+
+.tab.active .tab-text {
+	color: #0f172a;
+}
+
+.tab-line {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	margin: 0 auto;
+	width: 64rpx;
+	height: 6rpx;
+	border-radius: 6rpx;
+	background: #0b3bb6;
+}
+
+.form {
+	margin-top: 14rpx;
 	display: flex;
 	flex-direction: column;
-	align-items: left;
-	justify-content: center;
 	gap: 24rpx;
 }
 
-.plain-title {
-	text-align: left;
-	margin-bottom: 12rpx;
+.ipt {
+	height: 86rpx;
+	border-radius: 18rpx;
+	background: #f4f6fb;
+	padding: 0 22rpx;
+	display: flex;
+	align-items: center;
+	gap: 18rpx;
 }
 
-.plain-container .form-area,
-.plain-container .btn-group,
-.plain-container .foot-tip {
-	width: 100%;
-	max-width: 640rpx;
-	align-self: center;
+.ipt-input {
+	flex: 1;
+	font-size: 28rpx;
+	color: #0f172a;
+}
+
+.ipt-placeholder {
+	color: #94a3b8;
+	font-size: 26rpx;
+}
+
+.policy-row {
+	margin-top: 2rpx;
+}
+
+.policy-label {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6rpx;
+}
+
+.policy-text {
+	font-size: 24rpx;
+	color: #64748b;
+}
+
+.policy-link {
+	font-size: 24rpx;
+	color: #0b3bb6;
+	font-weight: 600;
+}
+
+.primary-btn {
+	margin-top: 12rpx;
+	height: 92rpx;
+	line-height: 92rpx;
+	border-radius: 46rpx;
+	background: #0b3bb6;
+	color: #fff;
+	font-size: 30rpx;
+	font-weight: 700;
+}
+
+.primary-btn[disabled] {
+	opacity: 0.55;
+}
+
+.links {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 6rpx 8rpx 0;
+}
+
+.link {
+	font-size: 26rpx;
+	color: #0b3bb6;
+	font-weight: 700;
+}
+
+.link.muted {
+	color: #94a3b8;
+	font-weight: 600;
+}
+
+.other {
+	margin-top: 46rpx;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 18rpx;
+}
+
+.other-title {
+	font-size: 24rpx;
+	color: #94a3b8;
+}
+
+.wx-btn {
+	width: 86rpx;
+	height: 86rpx;
+	border-radius: 43rpx;
+	background: rgba(255, 255, 255, 0.9);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-shadow: 0 10rpx 35rpx rgba(15, 23, 42, 0.1);
 }
 </style>

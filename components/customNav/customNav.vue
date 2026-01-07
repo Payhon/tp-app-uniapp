@@ -11,6 +11,8 @@
 </template>
 
 <script>
+	import { getDeviceInfo, getWindowInfo } from '@/common/platform'
+
 	export default {
 		data() {
 			return {
@@ -44,19 +46,19 @@
 			let userDeatail = this.$login.isLoginType();
 		},
 		onReady() {
-			const {
-				statusBarHeight,
-				platform
-			} = uni.getSystemInfoSync();
+			// #ifdef MP-WEIXIN
+			const winInfo = getWindowInfo()
+			const devInfo = getDeviceInfo()
+			const statusBarHeight = winInfo.statusBarHeight || 0
+			const platform = devInfo.platform || ''
 			//页面的高度
-			uni.setStorageSync('pageHeight', uni.getSystemInfoSync().windowHeight + 'px');
+			uni.setStorageSync('pageHeight', (winInfo.windowHeight || 0) + 'px');
 			// 状态栏高度
 			uni.setStorageSync('statusBarHeight', statusBarHeight);
-			// #ifdef MP-WEIXIN
-			const {
-				top,
-				height
-			} = uni.getMenuButtonBoundingClientRect();
+				const {
+					top,
+					height
+				} = uni.getMenuButtonBoundingClientRect();
 			// 胶囊按钮高度 一般是32 如果获取不到就使用32
 			uni.setStorageSync('menuButtonHeight', height ? height : 32);
 			// 判断胶囊按钮信息是否成功获取
@@ -72,8 +74,14 @@
 				'navigationBarHeight') + 'px';
 			this.topHeight = navigationBarAndStatusBarHeight;
 			this.paddingTop = uni.getStorageSync('statusBarHeight') / 2 + 'px';
-			this.imgTop = uni.getStorageSync('statusBarHeight') + uni.getStorageSync('navigationBarHeight') -40 + 'rpx';
-			uni.setStorageSync('contentPaddingTop', navigationBarAndStatusBarHeight);
+				this.imgTop = uni.getStorageSync('statusBarHeight') + uni.getStorageSync('navigationBarHeight') -40 + 'rpx';
+				uni.setStorageSync('contentPaddingTop', navigationBarAndStatusBarHeight);
+				// #endif
+
+			// #ifndef MP-WEIXIN
+			const info = uni.getSystemInfoSync()
+			uni.setStorageSync('pageHeight', (info.windowHeight || 0) + 'px')
+			uni.setStorageSync('statusBarHeight', info.statusBarHeight || 0)
 			// #endif
 		},
 		mounted() {

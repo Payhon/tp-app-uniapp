@@ -15,29 +15,29 @@
 		<div class="mask" :class="{'show':showPicker}" @tap="maskTap" catchtouchmove="true"></div>
 		<view class="pf-picker-cnt" :class="{'show':showPicker}">
 			<view class="pf-picker-hd" catchtouchmove="true">
-				<view class="pf-picker-btn" @tap="pickerCancel">取消</view>
-				<view class="pf-picker-tit">选择时间</view>
-				<view class="pf-picker-btn" :style="{'color':themeColor}" @tap="pickerConfirm">确定</view>
+				<view class="pf-picker-btn" @tap="pickerCancel">{{ $t('common.cancel') }}</view>
+				<view class="pf-picker-tit">{{ $t('components.datePicker.title') }}</view>
+				<view class="pf-picker-btn" :style="{'color':themeColor}" @tap="pickerConfirm">{{ $t('common.ok') }}</view>
 			</view>
 			<view class="pf-picker-view">
 				<picker-view indicator-style="height:80rpx;" :value="value" @change="bindChange">
 					<picker-view-column v-if="yearStr">
-						<view class="item" v-for="(item,index) in datas.years" :key="index">{{item}}年</view>
+						<view class="item" v-for="(item,index) in datas.years" :key="index">{{item}}{{ $t('components.datePicker.suffix.year') }}</view>
 					</picker-view-column>
 					<picker-view-column v-if="monthStr">
-						<view class="item" v-for="(item,index) in datas.months" :key="index">{{item}}月</view>
+						<view class="item" v-for="(item,index) in datas.months" :key="index">{{item}}{{ $t('components.datePicker.suffix.month') }}</view>
 					</picker-view-column>
 					<picker-view-column v-if="dayStr">
-						<view class="item"  v-for="(item,index) in datas.days" :key="index">{{item}}日</view>
+						<view class="item"  v-for="(item,index) in datas.days" :key="index">{{item}}{{ $t('components.datePicker.suffix.day') }}</view>
 					</picker-view-column>
 					<picker-view-column v-if="hours">
-						<view class="item" v-for="(item,index) in datas.hours" :key="index">{{item}}时</view>
+						<view class="item" v-for="(item,index) in datas.hours" :key="index">{{item}}{{ $t('components.datePicker.suffix.hour') }}</view>
 					</picker-view-column>
 					<picker-view-column v-if="minutes">
-						<view class="item" v-for="(item,index) in datas.minutes" :key="index">{{item}}分</view>
+						<view class="item" v-for="(item,index) in datas.minutes" :key="index">{{item}}{{ $t('components.datePicker.suffix.minute') }}</view>
 					</picker-view-column>
 					<picker-view-column v-if="seconds">
-						<view class="item" v-for="(item,index) in datas.seconds" :key="index">{{item}}秒</view>
+						<view class="item" v-for="(item,index) in datas.seconds" :key="index">{{item}}{{ $t('components.datePicker.suffix.second') }}</view>
 					</picker-view-column>
 				</picker-view>
 			</view>

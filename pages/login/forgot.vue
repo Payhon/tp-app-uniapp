@@ -7,9 +7,9 @@
 			</view>
 		</view>
 
-			<view class="auth-card">
-			<view class="title">{{ $t('auth.register.title') }}</view>
-			<view class="subtitle">{{ $t('auth.register.subtitle') }}</view>
+		<view class="auth-card">
+			<view class="title">{{ $t('auth.forgot.title') }}</view>
+			<view class="subtitle">{{ $t('auth.forgot.subtitle') }}</view>
 
 			<view class="form">
 				<view class="ipt">
@@ -37,12 +37,7 @@
 					</view>
 				</view>
 
-				<button class="primary-btn" :disabled="nextDisabled" :loading="loadingNext" @tap="nextStep">{{ $t('auth.register.next') }}</button>
-
-				<view class="bottom">
-					<text class="bottom-text">{{ $t('auth.register.hasAccount') }}</text>
-					<text class="bottom-link" @tap="goLogin">{{ $t('auth.register.goLogin') }}</text>
-				</view>
+				<button class="primary-btn" :disabled="nextDisabled" :loading="loadingNext" @tap="nextStep">{{ $t('auth.forgot.next') }}</button>
 			</view>
 		</view>
 	</view>
@@ -94,9 +89,6 @@ export default {
 		goBack() {
 			uni.navigateBack()
 		},
-		goLogin() {
-			uni.navigateTo({ url: '/pages/login/login' })
-		},
 		clearTimer() {
 			if (this.timer) clearInterval(this.timer)
 			this.timer = null
@@ -117,7 +109,7 @@ export default {
 			}
 			this.loadingCode = true
 			try {
-				const resp = await sendVerifyCode(this.identifier, 'REGISTER')
+				const resp = await sendVerifyCode(this.identifier, 'RESET_PASSWORD')
 				if (resp && resp.code === 200) {
 					uni.showToast({ title: this.$t('auth.register.codeSent'), icon: 'none' })
 					this.startCountdown()
@@ -135,7 +127,7 @@ export default {
 			this.loadingNext = true
 			try {
 				const url =
-					'/pages/login/register-password?identifier=' +
+					'/pages/login/forgot-reset?identifier=' +
 					encodeURIComponent(String(this.identifier || '').trim()) +
 					'&code=' +
 					encodeURIComponent(String(this.verifyCode || '').trim())
@@ -286,23 +278,5 @@ page {
 
 .primary-btn[disabled] {
 	opacity: 0.55;
-}
-
-.bottom {
-	margin-top: 10rpx;
-	display: flex;
-	justify-content: center;
-	gap: 12rpx;
-}
-
-.bottom-text {
-	font-size: 26rpx;
-	color: #94a3b8;
-}
-
-.bottom-link {
-	font-size: 26rpx;
-	color: #0b3bb6;
-	font-weight: 700;
 }
 </style>

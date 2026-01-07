@@ -39,7 +39,7 @@
 						<!-- Left: Icon & Info -->
 						<view class="tp-flex tp-flex-row tp-flex-1 tp-overflow-hidden">
 							<!-- Icon -->
-							<view class="device-icon-wrapper tp-flex tp-flex-j-c tp-flex-a-c" :class="+item.is_online == 1 ? 'online' : 'offline'">
+							<view class="device-icon-wrapper tp-flex tp-flex-j-c tp-flex-a-c" :class="item.is_online == 1 ? 'online' : 'offline'">
 								<image v-if="item.image_url" :src="item.image_url" class="device-img" mode="aspectFit"></image>
 								<text v-else class="iconfont iconequipment"></text>
 							</view>
@@ -59,9 +59,9 @@
 
 						<!-- Right: Status -->
 						<view class="device-status tp-flex tp-flex-col tp-flex-a-e tp-flex-j-c">
-							<view class="status-badge" :class="+item.is_online == 1 ? 'status-on' : 'status-off'">
+							<view class="status-badge" :class="item.is_online == 1 ? 'status-on' : 'status-off'">
 								<view class="dot"></view>
-								<text>{{ +item.is_online == 1 ? $t('pages.deviceDetail.online') : $t('pages.deviceDetail.offline') }}</text>
+								<text>{{ item.is_online == 1 ? $t('pages.deviceDetail.online') : $t('pages.deviceDetail.offline') }}</text>
 							</view>
 						</view>
 					</view>
@@ -132,9 +132,10 @@ var Dissolved_Oxygen1, PH1, temperature1;
 import {
 	mapState
 } from "vuex";
-import dayjs from 'dayjs';
-import { deviceList as deviceListApi } from '@/service/device'
-import { updateTabbarText } from '@/lang/index'
+	import dayjs from 'dayjs';
+	import { deviceList as deviceListApi } from '@/service/device'
+	import { updateTabbarText } from '@/lang/index'
+	import { getDeviceInfo, getWindowInfo } from '@/common/platform'
 //
 export default {
 	data() {
@@ -198,15 +199,15 @@ export default {
 	},
 	// 
 	onReady() {
-		const {
-			statusBarHeight,
-			platform
-		} = uni.getSystemInfoSync();
+		// #ifdef MP-WEIXIN
+		const winInfo = getWindowInfo()
+		const devInfo = getDeviceInfo()
+		const statusBarHeight = winInfo.statusBarHeight || 0
+		const platform = devInfo.platform || ''
 		//页面的高度
-		uni.setStorageSync('pageHeight', uni.getSystemInfoSync().windowHeight + 'px');
+		uni.setStorageSync('pageHeight', (winInfo.windowHeight || 0) + 'px');
 		// 状态栏高度
 		uni.setStorageSync('statusBarHeight', statusBarHeight);
-		// #ifdef MP-WEIXIN
 		const {
 			top,
 			height
@@ -228,25 +229,44 @@ export default {
 			'navigationBarHeight') - this.ktxStatusHeight + 100 + 'px';
 		// #endif
 
-		let systemInfo = uni.getSystemInfoSync();
+		// #ifndef MP-WEIXIN
+		const info = uni.getSystemInfoSync()
+		uni.setStorageSync('pageHeight', (info.windowHeight || 0) + 'px')
+		uni.setStorageSync('statusBarHeight', info.statusBarHeight || 0)
+		// #endif
+
+		// #ifdef MP-WEIXIN
+		this.statusBarHeight = (statusBarHeight || 25) + 'px'
+		// #endif
+		// #ifndef MP-WEIXIN
+		const systemInfo = uni.getSystemInfoSync()
 		this.statusBarHeight = (systemInfo.statusBarHeight || 25) + 'px'
+		// #endif
 
 	},
 	//
 	onLoad(options) {
 		this.$store.commit('zerOingOffser'); //清空日志页码
 		this.$store.commit('zerOingEqupPage'); //清空设备页码
-
-		let systemInfo = wx.getSystemInfoSync();
+		// #ifdef MP-WEIXIN
+		const winInfo = getWindowInfo()
 		// px转换到rpx的比例
-		let pxToRpxScale = 750 / systemInfo.windowWidth;
+		const pxToRpxScale = 750 / (winInfo.windowWidth || 375)
 		// 状态栏的高度
-		let ktxStatusHeight = systemInfo.statusBarHeight * pxToRpxScale;
+		const ktxStatusHeight = (winInfo.statusBarHeight || 0) * pxToRpxScale
 		this.ktxStatusHeight = ktxStatusHeight
-		// 导航栏的高度
-		let navigationHeight = 44 * pxToRpxScale;
 		this.marginTop = (ktxStatusHeight || 50) + 'rpx';
 		this.marginConTop = (ktxStatusHeight || 20) + 'rpx'
+		// #endif
+
+		// #ifndef MP-WEIXIN
+		const systemInfo = uni.getSystemInfoSync()
+		const pxToRpxScale2 = 750 / (systemInfo.windowWidth || 375)
+		const ktxStatusHeight2 = (systemInfo.statusBarHeight || 0) * pxToRpxScale2
+		this.ktxStatusHeight = ktxStatusHeight2
+		this.marginTop = (ktxStatusHeight2 || 50) + 'rpx'
+		this.marginConTop = (ktxStatusHeight2 || 20) + 'rpx'
+		// #endif
 		this.isLogin = this.$login.isLoginType().isLogin
 		// this.ywData = []
 		// this.showData()
@@ -347,6 +367,21 @@ export default {
 		},
 		// 点击设备
 		clickDevice(data, dataIndex) {
+			// 小程序端使用原生详情页，避免 web-view 依赖外部 H5 页面导致渲染层报错
+			// #ifdef MP-WEIXIN
+			const q = [
+				`device_id=${encodeURIComponent(data.id || '')}`,
+				`device_name=${encodeURIComponent(data.name || '')}`,
+				`type=${encodeURIComponent(data.type || '')}`,
+				`latest_ts_name=${encodeURIComponent(data.latest_ts_name || '')}`,
+				`state=${encodeURIComponent(data.is_online || '')}`
+			].join('&')
+			uni.navigateTo({
+				url: `/pages/fishery-monitor/deviceDetail?${q}`
+			})
+			return
+			// #endif
+
 			const token = uni.getStorageSync("access_token");
 			const serverUrl = uni.getStorageSync('serverAddress');
 			const url = `${serverUrl}/device-details-app?d_id=${data.id}&token=${token}`;

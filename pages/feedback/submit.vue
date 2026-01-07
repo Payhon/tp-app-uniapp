@@ -30,6 +30,8 @@
 </template>
 
 <script>
+	import { getDeviceInfo } from '@/common/platform'
+
 	export default {
 		data() {
 			return {
@@ -75,12 +77,12 @@
 				if (tenantId) h['X-TenantID'] = tenantId
 				return h
 			},
-			getDeviceMeta() {
-				const info = uni.getSystemInfoSync()
-				let appVersion = ''
-				// #ifdef APP-PLUS
-				appVersion = plus.runtime.version || ''
-				// #endif
+				getDeviceMeta() {
+					const info = getDeviceInfo()
+					let appVersion = ''
+					// #ifdef APP-PLUS
+					appVersion = plus.runtime.version || ''
+					// #endif
 				return {
 					platform: info.platform || '',
 					app_version: appVersion,
@@ -277,4 +279,3 @@
 		color: #fff;
 	}
 </style>
-

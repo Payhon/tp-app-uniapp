@@ -10,8 +10,75 @@ export default {
     none: '无',
     close: '关闭',
     ok: '确定',
+    tip: '提示',
     search: '搜索',
     noData: '暂无数据',
+  },
+  auth: {
+    sessionExpired: '您的登录已过期,请重新登录!',
+    policy: {
+      agreePrefix: '阅读并同意',
+      and: '和',
+      userAgreement: '《用户协议》',
+      privacyPolicy: '《隐私政策》'
+    },
+    toast: {
+      pleaseAgree: '请先阅读并同意协议',
+      networkError: '网络异常，请稍后重试',
+      missingParams: '参数缺失，请返回重试',
+      passwordMismatch: '两次密码不一致'
+    },
+    login: {
+      tabAccount: '账号登录',
+      tabEmail: '邮箱登录',
+      placeholderPhone: '请输入手机号',
+      placeholderEmail: '请输入邮箱',
+      placeholderPassword: '请输入密码',
+      loginBtn: '登录',
+      createAccount: '创建账号',
+      forgotPassword: '忘记密码？',
+      otherMethods: '其他登录方式',
+      invalidEmail: '邮箱格式不正确',
+      invalidPhone: '手机号格式不正确',
+      success: '登录成功',
+      failed: '登录失败',
+      failedRetry: '登录失败，请稍后重试'
+    },
+    register: {
+      title: '创建账号',
+      subtitle: '输入您的手机号或邮箱',
+      placeholderIdentifier: '请输入手机号或邮箱',
+      placeholderCode: '请输入验证码',
+      getCode: '获取验证码',
+      sending: '发送中...',
+      codeSent: '验证码已发送',
+      sendFailed: '发送失败',
+      next: '下一步',
+      hasAccount: '有一个账号？',
+      goLogin: '去登录',
+      invalidIdentifier: '请输入正确的手机号或邮箱',
+      success: '注册成功',
+      failed: '注册失败'
+    },
+    password: {
+      setTitle: '设置密码',
+      setSubtitle: '设置您的登录密码8-16位，含字母+数字',
+      resetTitle: '设置新密码',
+      placeholderPassword: '请输入密码',
+      placeholderConfirm: '请再次输入密码',
+      registerBtn: '注册',
+      resetBtn: '重置',
+      pwdRequired: '请输入密码',
+      pwdLength: '密码需为8-16位',
+      pwdRule: '密码需包含字母和数字',
+      resetSuccess: '重置成功',
+      resetFailed: '重置失败'
+    },
+    forgot: {
+      title: '忘记密码',
+      subtitle: '输入您的手机号或邮箱',
+      next: '下一步'
+    }
   },
   login: {
     title: '登录',
@@ -44,6 +111,9 @@ export default {
   pages: {
     loginTitle: '登录',
     register: '注册',
+    registerPasswordTitle: '设置密码',
+    forgotPasswordTitle: '忘记密码',
+    resetPasswordTitle: '设置新密码',
     notifyTitle: '告警信息',
     notifyDetailTitle: '告警详情',
     deviceList: '设备列表',
@@ -588,6 +658,10 @@ export default {
       completeTimeCondition: '请将“时间条件”信息补充完整（“时间条件”中所有字段均为必填）',
       unknownConditionType: '未知的条件类型',
       editSceneLinkage: '编辑场景联动',
+      addCondition: '新增条件',
+      deleteCondition: '删除条件',
+      addConditionGroup: '新增条件组',
+      deleteConditionGroup: '删除条件组',
       addSceneLinkage: '新增场景联动',
     },
     sceneDetail: {
@@ -665,6 +739,7 @@ export default {
       repeatCycle: '重复周期',
       startTime: '起始时间',
       endTime: '结束时间',
+      weekday: '周几',
       everyHour: '每小时',
       everyDay: '每天',
       everyWeek: '每周',
@@ -675,7 +750,26 @@ export default {
       weekTip: '例: "周一, 18:33" 表示每周一的18:33触发',
       monthTip: '例: "1日, 9:00" 表示每月1日的09:00触发',
       day: '日',
-      executionRule: '执行日期时间规则'
+      executionRule: '执行日期时间规则',
+      cronExample1: '每2分钟触发;',
+      cronExample2: '每两小时触发;',
+      cronExample3: '每天上午的10:15触发;',
+      cronExample4: '在每天下午2点到下午2:55期间的每5分钟触发;',
+      cronExample5: '在每天下午2点到2:55期间和下午6点到6:55期间的每5分钟触发;',
+      cronExample6: '周一至周五的上午10:15触发;',
+      cronExample7: '每月15日上午10:15触发;',
+      daySuffix: '日'
+    },
+    datePicker: {
+      title: '选择时间',
+      suffix: {
+        year: '年',
+        month: '月',
+        day: '日',
+        hour: '时',
+        minute: '分',
+        second: '秒'
+      }
     },
     notifyDialog: {
       confirmText: '点击确定{action}警告',
@@ -690,6 +784,17 @@ export default {
       pwdTip: '请设置6位及以上包含数字、字母和特殊符号中至少两种组合的密码！',
       confirmBtn: '确认修改',
       successMsg: '设置成功！'
+    },
+    uCharts: {
+      canvasIdTip: '注意：请在uCharts组件传入canvasId，以免单页多图产生图表错乱！',
+      error: {
+        invalidType: '参数错误：props参数中type类型不正确',
+        invalidTypeShort: '参数错误：props参数中type不正确',
+        missingCategories: '数据错误：chartData中缺少categories',
+        invalidChartDataType: '参数错误：chartData数据类型错误',
+        requestErrorPrefix: '请求错误：',
+        defaultSeriesName: '默认分组'
+      }
     }
   }
 }

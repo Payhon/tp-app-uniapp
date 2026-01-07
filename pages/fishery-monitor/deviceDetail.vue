@@ -202,10 +202,11 @@
 </template>
 
 <script>
-import dayjs from 'dayjs'
-import * as echarts from 'echarts';
-import uCharts from '@/components/u-charts/u-charts.min.js';
-import customNav from '@/components/customNav/customNav.vue';
+	import dayjs from 'dayjs'
+	import * as echarts from 'echarts';
+	import uCharts from '@/components/u-charts/u-charts.min.js';
+	import customNav from '@/components/customNav/customNav.vue';
+	import { getWindowInfo } from '@/common/platform'
 var canvaLineA = null;
 var canvaLineB = null;
 export default {
@@ -291,7 +292,7 @@ export default {
 		}
 	},
 	onLoad(options) {
-		let systemInfo = uni.getSystemInfoSync();
+		const systemInfo = getWindowInfo()
 		this.token = uni.getStorageSync("access_token")
 		this.statusBarHeight = (systemInfo.statusBarHeight || 25) + 'px'
 

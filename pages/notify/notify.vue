@@ -17,9 +17,9 @@
 					<view class="card-inner">
 						<!-- Alert Description Header -->
 						<view class="alert-header">
-							<view class="alert-badge" :class="getLevelClass(item.alarm_level)">
+							<view class="alert-badge" :class="levelClassMap[item.alarm_level] || levelClassMap.default">
 								<view class="badge-dot"></view>
-								<text class="badge-text">{{$t(`pages.notify.alarmLevels.${item.alarm_level}`)}}</text>
+								<text class="badge-text">{{$t('pages.notify.alarmLevels.' + (item.alarm_level || 'default'))}}</text>
 							</view>
 							<text class="alert-desc">{{item.warning_description}}</text>
 						</view>
@@ -47,7 +47,7 @@
 		<NotofyDialog 
 			:visible="showDialog" 
 			@close="closeDialog" 
-			:id="handleInfo.id" 
+			:alarm-id="handleInfo.id" 
 			:status="handleInfo.status" />
 		
 		<!-- Scroll to Top Button -->
@@ -75,6 +75,15 @@ export default {
 				id: '',
 				status: ''
 			},
+			levelClassMap: {
+				H: 'level-high',
+				M: 'level-medium',
+				L: 'level-low',
+				'1': 'level-high',
+				'2': 'level-medium',
+				'3': 'level-low',
+				default: 'level-default'
+			},
 			showScrollTop: false // 控制回到顶部按钮显示
 		}
 	},
@@ -98,14 +107,6 @@ export default {
 		},
 		formatDate(date) {
 			return dayjs(date).format('YYYY-MM-DD HH:mm')
-		},
-		getLevelClass(level) {
-			const levelMap = {
-				'1': 'level-high',
-				'2': 'level-medium',
-				'3': 'level-low'
-			}
-			return levelMap[level] || 'level-default'
 		},
 		closeDialog(refresh){
 			this.showDialog = false

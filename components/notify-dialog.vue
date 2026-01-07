@@ -22,7 +22,7 @@ export default {
       type: Boolean,
       default: false,
     },
-    id:{
+    alarmId:{
       type: [String,Number],
       default: ''
     },
@@ -39,7 +39,7 @@ export default {
   methods:{
     confirm(){
       this.API.apiRequest('/api/v1/alarm/info', {
-        id: this.id, 
+        id: this.alarmId, 
         processing_result: this.status, 
         processing_instructions: this.content
       }, 'put').then(res => {

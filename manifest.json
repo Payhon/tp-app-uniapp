@@ -1,7 +1,7 @@
 {
-    "name" : "ThingsPanel",
-    "appid" : "__UNI__0B0F90D",
-    "description" : "ThingsPanel物联网平台",
+    "name" : "FJiaBMS",
+    "appid" : "__UNI__40EADE1",
+    "description" : "富嘉 BMS",
     "versionName" : "1.0.0",
     "versionCode" : 101,
     "transformPx" : false,
@@ -95,7 +95,7 @@
     "quickapp" : {},
     /* 小程序特有相关 */
     "mp-weixin" : {
-        "appid" : "wxbc1e8f62010a7db6",
+        "appid" : "wx40d17175f91bdbf0",
         "setting" : {
             "urlCheck" : false
         },
@@ -113,5 +113,7 @@
     "uniStatistics" : {
         "enable" : false
     },
-    "fallbackLocale" : "zh-Hans"
+    "fallbackLocale" : "zh-Hans",
+    "vueVersion" : "2",
+    "locale" : "zh-Hans"
 }

@@ -10,11 +10,11 @@
 	.navIcon {
 		// padding-top: -10rpx;
 		padding-left: 23rpx;
-		image {
-			width: 40rpx;
-			height: 40rpx;
-			vertical-align: middle;
-		}
+		width: 60rpx;
+		height: 60rpx;
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
 	}
 	.title {
 		font-size: 34rpx;

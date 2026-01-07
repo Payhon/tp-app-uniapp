@@ -85,7 +85,7 @@ export default {
 	},
 	mounted() {
 		if(this.canvasId=='uchartsid'){
-			console.warn("注意：请在uCharts组件传入canvasId，以免单页多图产生图表错乱！")
+			console.warn(this.$t('components.uCharts.canvasIdTip'))
 		}
 		if (this.type && config.type.includes(this.type)) {
 			this.defaultOpts = Object.assign({},config[this.type])
@@ -93,7 +93,7 @@ export default {
 		} else {
 			this.mixinDatacomLoading = false
 			this.showchart = false
-			this.mixinDatacomErrorMessage = '参数错误：props参数中type类型不正确'
+			this.mixinDatacomErrorMessage = this.$t('components.uCharts.error.invalidType')
 		}
 		uni.onWindowResize(res => {
 			this.init()
@@ -104,7 +104,7 @@ export default {
 			if (!this.type || !config.type.includes(this.type)) {
 				this.mixinDatacomLoading = false
 				this.showchart = false
-				this.mixinDatacomErrorMessage = '参数错误：props参数中type不正确'
+				this.mixinDatacomErrorMessage = this.$t('components.uCharts.error.invalidTypeShort')
 				return
 			}
 			if (typeof val === 'object') {
@@ -112,7 +112,7 @@ export default {
 					if (config.categories.includes(this.type) && val.categories.length == 0 ) {
 						this.mixinDatacomLoading = false
 						this.showchart = false
-						this.mixinDatacomErrorMessage = '数据错误：chartData中缺少categories'
+						this.mixinDatacomErrorMessage = this.$t('components.uCharts.error.missingCategories')
 					} else {
 						this.mixinDatacomLoading = false
 						this.mixinDatacomErrorMessage = null
@@ -130,7 +130,7 @@ export default {
 			} else {
 				this.mixinDatacomLoading = false
 				this.showchart = false
-				this.mixinDatacomErrorMessage = '参数错误：chartData数据类型错误'
+				this.mixinDatacomErrorMessage = this.$t('components.uCharts.error.invalidChartDataType')
 			}
 		}
 	},
@@ -149,7 +149,7 @@ export default {
 						if (config.categories.includes(this.type) && this.chartData.categories.length == 0) {
 							this.mixinDatacomLoading = false
 							this.showchart = false
-							this.mixinDatacomErrorMessage = '数据错误：chartData中缺少categories'
+							this.mixinDatacomErrorMessage = this.$t('components.uCharts.error.missingCategories')
 						} else {
 							this.init()
 						}
@@ -163,7 +163,7 @@ export default {
 						} else {
 							this.mixinDatacomLoading = false
 							this.showchart = false
-							this.mixinDatacomErrorMessage = '请求错误：' + err
+							this.mixinDatacomErrorMessage = this.$t('components.uCharts.error.requestErrorPrefix') + err
 						}
 					});
 			}else{
@@ -193,7 +193,7 @@ export default {
 				}
 			})
 			if(series.length==0){
-				let seriesname="默认分组"
+				let seriesname=this.$t('components.uCharts.error.defaultSeriesName')
 				if(this.chartData.series.length>0){
 					seriesname=this.chartData.series[0].name
 				}

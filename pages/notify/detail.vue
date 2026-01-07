@@ -7,9 +7,9 @@
 			<view class="tp-panel alert-card">
 				<view class="card-inner">
 					<view class="alert-header">
-						<view class="alert-badge" :class="getLevelClass(detail.alarm_level)">
+						<view class="alert-badge" :class="levelClassMap[detail.alarm_level] || levelClassMap.default">
 							<view class="badge-dot"></view>
-							<text class="badge-text">{{$t(`pages.notify.alarmLevels.${detail.alarm_level || 'default'}`)}}</text>
+							<text class="badge-text">{{$t('pages.notify.alarmLevels.' + (detail.alarm_level || 'default'))}}</text>
 						</view>
 						<!-- <text class="alert-desc">{{detail.warning_description || '--'}}</text> -->
 					</view>
@@ -29,7 +29,7 @@
 						</view>
 						<view class="meta-item">
 							<text class="meta-label">{{$t('pages.notify.alarmStatus')}}</text>
-							<text class="meta-value status-value">{{$t(`pages.notify.alarmStatuses.${detail.alarm_status || 'default'}`)}}</text>
+							<text class="meta-value status-value">{{$t('pages.notify.alarmStatuses.' + (detail.alarm_status || 'default'))}}</text>
 						</view>
 					</view>
 				</view>
@@ -92,6 +92,15 @@ export default {
 			detail: {
 				alarm_device_list: [],
 				created_at: ''
+			},
+			levelClassMap: {
+				H: 'level-high',
+				M: 'level-medium',
+				L: 'level-low',
+				'1': 'level-high',
+				'2': 'level-medium',
+				'3': 'level-low',
+				default: 'level-default'
 			}
 		}
 	},
@@ -148,14 +157,6 @@ export default {
 				return parsed.format('YYYY-MM-DD HH:mm')
 			}
 			return date || '--'
-		},
-		getLevelClass(level) {
-			const levelMap = {
-				'1': 'level-high',
-				'2': 'level-medium',
-				'3': 'level-low'
-			}
-			return levelMap[level] || 'level-default'
 		}
 	}
 }

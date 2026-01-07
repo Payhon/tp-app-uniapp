@@ -1,19 +1,19 @@
-<template name="aui-toast">
-	<!-- 有图标 -->
-	<view class="aui-toast aui-toast-middle" :class="{'aui-toast-row': direction=='row'}" v-if="SHOW && icon">
-		<view class="aui-toast-main">
-			<view class="aui-toast-icon"><image :src="icon" /></view>
-			<view class="aui-toast-msg" v-html="msg"></view>
+	<template name="aui-toast">
+		<!-- 有图标 -->
+		<view class="aui-toast aui-toast-middle" :class="{'aui-toast-row': direction=='row'}" v-if="SHOW && icon">
+			<view class="aui-toast-main">
+				<view class="aui-toast-icon"><image class="aui-toast-icon-img" :src="icon" /></view>
+				<view class="aui-toast-msg" v-html="msg"></view>
+			</view>
 		</view>
-	</view>
-	<!-- 无图标 -->
-	<view class="aui-toast" :class="{'aui-toast-bottom': location=='bottom', 'aui-toast-middle': location=='middle','aui-toast-top': location=='top'}" v-else-if="SHOW && !icon" :style="{top:toastTop}">
-		<view class="aui-toast-main">
-			<view class="aui-toast-icon"><image src="@/static/icon/tip_icon.png" /></view>
-			<view class="aui-toast-msg" v-html="msg"></view>
+		<!-- 无图标 -->
+		<view class="aui-toast" :class="{'aui-toast-bottom': location=='bottom', 'aui-toast-middle': location=='middle','aui-toast-top': location=='top'}" v-else-if="SHOW && !icon" :style="{top:toastTop}">
+			<view class="aui-toast-main">
+				<view class="aui-toast-icon"><image class="aui-toast-icon-img" src="@/static/icon/tip_icon.png" /></view>
+				<view class="aui-toast-msg" v-html="msg"></view>
+			</view>
 		</view>
-	</view>
-</template>
+	</template>
 <script>
 	export default {
 		name: "aui-toast",
@@ -104,15 +104,15 @@
 	.aui-toast-top .aui-toast-main{
 		display: flex;
 	}
-	.aui-toast-top .aui-toast-main .aui-toast-icon{
-		display: inline-block;
-		margin-right: 10rpx;
-	}
-	.aui-toast-top .aui-toast-main .aui-toast-icon image{
-		width: 30rpx;
-		height: 30rpx;
-		vertical-align: middle;
-	}
+		.aui-toast-top .aui-toast-main .aui-toast-icon{
+			display: inline-block;
+			margin-right: 10rpx;
+		}
+		.aui-toast-top .aui-toast-icon-img{
+			width: 30rpx;
+			height: 30rpx;
+			vertical-align: middle;
+		}
 	.aui-toast-row .aui-toast-main .aui-toast-msg{
 		display: inline-block;
 		margin: 0 0 0 10px;
@@ -151,10 +151,10 @@
 		font-size: 14px;
 		vertical-align: middle;
 	}
-	.aui-toast-middle .aui-toast-main .aui-toast-icon image{
-		width: 30px;
-		height: 30px;
-	}
+		.aui-toast-middle .aui-toast-icon-img{
+			width: 30px;
+			height: 30px;
+		}
 	/* toast 从底部弹出显示动画 */
 	@-ms-keyframes aui-toast-from-bottom{
 		0%{bottom: 30px;opacity: 0;}

@@ -10,8 +10,75 @@ export default {
     none: 'None',
     close: 'Close',
     ok: 'OK',
+    tip: 'Tip',
     search: 'Search',
     noData: 'No Data',
+  },
+  auth: {
+    sessionExpired: 'Your session has expired, please sign in again!',
+    policy: {
+      agreePrefix: 'I have read and agree to',
+      and: 'and',
+      userAgreement: 'Terms of Service',
+      privacyPolicy: 'Privacy Policy'
+    },
+    toast: {
+      pleaseAgree: 'Please agree to the terms first',
+      networkError: 'Network error, please try again later',
+      missingParams: 'Missing parameters, please go back and retry',
+      passwordMismatch: 'Passwords do not match'
+    },
+    login: {
+      tabAccount: 'Account Sign In',
+      tabEmail: 'Email Sign In',
+      placeholderPhone: 'Phone number',
+      placeholderEmail: 'Email',
+      placeholderPassword: 'Password',
+      loginBtn: 'Sign In',
+      createAccount: 'Create account',
+      forgotPassword: 'Forgot password?',
+      otherMethods: 'Other sign-in methods',
+      invalidEmail: 'Invalid email format',
+      invalidPhone: 'Invalid phone number',
+      success: 'Signed in',
+      failed: 'Sign in failed',
+      failedRetry: 'Sign in failed, please try again later'
+    },
+    register: {
+      title: 'Create account',
+      subtitle: 'Enter your phone or email',
+      placeholderIdentifier: 'Phone or email',
+      placeholderCode: 'Verification code',
+      getCode: 'Get code',
+      sending: 'Sending...',
+      codeSent: 'Code sent',
+      sendFailed: 'Send failed',
+      next: 'Next',
+      hasAccount: 'Already have an account?',
+      goLogin: 'Sign In',
+      invalidIdentifier: 'Please enter a valid phone or email',
+      success: 'Sign up successful',
+      failed: 'Sign up failed'
+    },
+    password: {
+      setTitle: 'Set password',
+      setSubtitle: '8-16 chars, letters + numbers',
+      resetTitle: 'Set new password',
+      placeholderPassword: 'Password',
+      placeholderConfirm: 'Confirm password',
+      registerBtn: 'Sign Up',
+      resetBtn: 'Reset',
+      pwdRequired: 'Please enter password',
+      pwdLength: 'Password must be 8-16 characters',
+      pwdRule: 'Password must contain letters and numbers',
+      resetSuccess: 'Reset successful',
+      resetFailed: 'Reset failed'
+    },
+    forgot: {
+      title: 'Forgot password',
+      subtitle: 'Enter your phone or email',
+      next: 'Next'
+    }
   },
   login: {
     title: 'Sign In',
@@ -46,6 +113,9 @@ export default {
   pages: {
     loginTitle: 'Sign In',
     register: 'Sign Up',
+    registerPasswordTitle: 'Set password',
+    forgotPasswordTitle: 'Forgot password',
+    resetPasswordTitle: 'Set new password',
     notifyTitle: 'Alerts',
     notifyDetailTitle: 'Alert Details',
     deviceList: 'Device List',
@@ -588,6 +658,10 @@ export default {
       completeTimeCondition: 'Please complete all time condition fields (all fields are required)',
       unknownConditionType: 'Unknown condition type',
       editSceneLinkage: 'Edit Scene Linkage',
+      addCondition: 'Add condition',
+      deleteCondition: 'Delete condition',
+      addConditionGroup: 'Add condition group',
+      deleteConditionGroup: 'Delete condition group',
       addSceneLinkage: 'Add Scene Linkage',
     },
     sceneDetail: {
@@ -665,6 +739,7 @@ export default {
       repeatCycle: 'Repeat Cycle',
       startTime: 'Start Time',
       endTime: 'End Time',
+      weekday: 'Weekday',
       everyHour: 'Every Hour',
       everyDay: 'Every Day',
       everyWeek: 'Every Week',
@@ -675,7 +750,26 @@ export default {
       weekTip: 'Example: "Monday, 18:33" means trigger at 18:33 every Monday',
       monthTip: 'Example: "1st, 9:00" means trigger at 09:00 on the 1st of every month',
       day: 'Day',
-      executionRule: 'Execution Date Time Rule'
+      executionRule: 'Execution Date Time Rule',
+      cronExample1: 'Triggers every 2 minutes;',
+      cronExample2: 'Triggers every 2 hours;',
+      cronExample3: 'Triggers at 10:15 AM every day;',
+      cronExample4: 'Triggers every 5 minutes between 2:00 PM and 2:55 PM every day;',
+      cronExample5: 'Triggers every 5 minutes between 2:00-2:55 PM and 6:00-6:55 PM every day;',
+      cronExample6: 'Triggers at 10:15 AM Monday to Friday;',
+      cronExample7: 'Triggers at 10:15 AM on the 15th of every month;',
+      daySuffix: ''
+    },
+    datePicker: {
+      title: 'Select time',
+      suffix: {
+        year: 'Y',
+        month: 'M',
+        day: 'D',
+        hour: 'h',
+        minute: 'm',
+        second: 's'
+      }
     },
     notifyDialog: {
       confirmText: 'Click confirm to {action} alert',
@@ -690,6 +784,17 @@ export default {
       pwdTip: 'Please set a password with 6 or more characters containing at least two of the following: numbers, letters, and special symbols',
       confirmBtn: 'Confirm changes',
       successMsg: 'Settings updated successfully!'
+    },
+    uCharts: {
+      canvasIdTip: 'Note: Please pass a unique canvasId to uCharts to avoid chart conflicts on the same page.',
+      error: {
+        invalidType: 'Parameter error: invalid `type` in props.',
+        invalidTypeShort: 'Parameter error: invalid `type` in props.',
+        missingCategories: 'Data error: `chartData.categories` is required.',
+        invalidChartDataType: 'Parameter error: invalid `chartData` type.',
+        requestErrorPrefix: 'Request error: ',
+        defaultSeriesName: 'Default'
+      }
     }
   }
 }

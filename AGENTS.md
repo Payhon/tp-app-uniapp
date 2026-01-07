@@ -24,6 +24,7 @@ This is a uni-app project typically run via HBuilderX.
 
 - Indentation: follow existing files (most `.vue` files use tabs).
 - Vue SFCs: keep `<template>`, `<script>`, `<style>` sections tidy and minimal; avoid large inline logic in templates.
+- i18n: all user-facing text must use multi-language keys (`$t('...')` in `.vue`, `this.$t('...')` in page scripts, and `i18n.t('...')` in non-Vue modules like `API/*.js`).
 - Naming:
   - Pages/components: kebab-case filenames (e.g. `pages/fishery-monitor/fishery-monitor.vue`).
   - JS variables/functions: `camelCase`; constants: `SCREAMING_SNAKE_CASE` when appropriate.

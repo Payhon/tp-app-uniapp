@@ -1,6 +1,7 @@
 import login from '../store/login'
 import http from './interface'
-
+import i18n from '@/lang/index'
+import $C from '@/common/config'
 /**
  * 将业务所有接口统一起来便于维护
  * 如果项目很大可以将 url 独立成文件，接口分成不同的模块
@@ -10,7 +11,7 @@ export const apiRequest = (url, data, method) => {
 	//设置请求前拦截器
 	http.interceptor.request = (config) => {
 		let token = uni.getStorageSync("access_token")
-		let tenantId = uni.getStorageSync("tenant_id")
+		let tenantId = $C.tenantId
 		delete config.header['x-token']
 		delete config.header['X-TenantID']
 		if (token) {
@@ -19,25 +20,24 @@ export const apiRequest = (url, data, method) => {
 		if (tenantId) {
 			config.header['X-TenantID'] = tenantId
 		}
-		let server = uni.getStorageSync("serverAddress")
+		let server = $C.apiBaseUrl
 		// console.log("server",server);
-		if (server) {
-			config.baseUrl = server
-		}
+		config.baseUrl = server
+		
 		return config;
 	}
 	//设置请求结束后拦截器
-	http.interceptor.response = async (response) => {
-		const statusCode = response.data.code;
-		if (statusCode === 401 || statusCode === 403 || statusCode === 402) {
-			uni.showModal({
-				title: '提示',
-				content: '您的登录已过期,请重新登录!',
-				showCancel: false,
-				success: function(res) {
-					uni.clearStorageSync() //清空所有缓存
-					uni.navigateTo({
-						url: '/pages/login/login'
+		http.interceptor.response = async (response) => {
+			const statusCode = response.data.code;
+			if (statusCode === 401 || statusCode === 403 || statusCode === 402) {
+				uni.showModal({
+					title: i18n.t('common.tip'),
+					content: i18n.t('auth.sessionExpired'),
+					showCancel: false,
+					success: function(res) {
+						uni.clearStorageSync() //清空所有缓存
+						uni.navigateTo({
+							url: '/pages/login/login'
 					})
 				},
 			})

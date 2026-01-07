@@ -230,6 +230,7 @@
 	import {
 		mapState
 	} from "vuex";
+	import { getDeviceInfo, getWindowInfo } from '@/common/platform'
 	//
 	export default {
 		data() {
@@ -281,20 +282,20 @@
 			}
 		},
 		// 
-		onReady() {
-			const {
-				statusBarHeight,
-				platform
-			} = uni.getSystemInfoSync();
-			//页面的高度
-			uni.setStorageSync('pageHeight', uni.getSystemInfoSync().windowHeight + 'px');
-			// 状态栏高度
-			uni.setStorageSync('statusBarHeight', statusBarHeight);
-			// #ifdef MP-WEIXIN
-			const {
-				top,
-				height
-			} = uni.getMenuButtonBoundingClientRect();
+			onReady() {
+				// #ifdef MP-WEIXIN
+				const winInfo = getWindowInfo()
+				const devInfo = getDeviceInfo()
+				const statusBarHeight = winInfo.statusBarHeight || 0
+				const platform = devInfo.platform || ''
+				//页面的高度
+				uni.setStorageSync('pageHeight', (winInfo.windowHeight || 0) + 'px');
+				// 状态栏高度
+				uni.setStorageSync('statusBarHeight', statusBarHeight);
+				const {
+					top,
+					height
+				} = uni.getMenuButtonBoundingClientRect();
 			// 胶囊按钮高度 一般是32 如果获取不到就使用32
 			uni.setStorageSync('menuButtonHeight', height ? height : 32);
 			// 判断胶囊按钮信息是否成功获取
@@ -308,28 +309,43 @@
 			// 导航栏和状态栏高度
 			var navigationBarAndStatusBarHeight = uni.getStorageSync('statusBarHeight') + uni.getStorageSync(
 				'navigationBarHeight') + 'px';
-			this.topHeight = uni.getStorageSync('statusBarHeight') + uni.getStorageSync(
-				'navigationBarHeight') - this.ktxStatusHeight + 100 + 'px';
-			// #endif
-		},
+				this.topHeight = uni.getStorageSync('statusBarHeight') + uni.getStorageSync(
+					'navigationBarHeight') - this.ktxStatusHeight + 100 + 'px';
+				// #endif
+
+				// #ifndef MP-WEIXIN
+				const info = uni.getSystemInfoSync()
+				uni.setStorageSync('pageHeight', (info.windowHeight || 0) + 'px')
+				uni.setStorageSync('statusBarHeight', info.statusBarHeight || 0)
+				// #endif
+			},
 		//
-		onLoad(options) {
+			onLoad(options) {
 			this.$store.commit('zerOingOffser'); //清空日志页码
 			this.$store.commit('zerOingEqupPage'); //清空设备页码
-			
-			let systemInfo = wx.getSystemInfoSync();
-			// px转换到rpx的比例
-			let pxToRpxScale = 750 / systemInfo.windowWidth;
-			// 状态栏的高度
-			let ktxStatusHeight = systemInfo.statusBarHeight * pxToRpxScale;
-			this.ktxStatusHeight = ktxStatusHeight
-			// 导航栏的高度
-			let navigationHeight = 44 * pxToRpxScale;
-			this.marginTop = ktxStatusHeight + 'rpx';
-			this.marginConTop = ktxStatusHeight + 12 + 'rpx'
-			this.isLogin = this.$login.isLoginType().isLogin
-			// this.ywData = []
-			// this.showData()
+
+				// #ifdef MP-WEIXIN
+				const winInfo = getWindowInfo()
+				// px转换到rpx的比例
+				const pxToRpxScale = 750 / (winInfo.windowWidth || 375)
+				// 状态栏的高度
+				const ktxStatusHeight = (winInfo.statusBarHeight || 0) * pxToRpxScale
+				this.ktxStatusHeight = ktxStatusHeight
+				this.marginTop = ktxStatusHeight + 'rpx';
+				this.marginConTop = ktxStatusHeight + 12 + 'rpx'
+				// #endif
+
+				// #ifndef MP-WEIXIN
+				const systemInfo = uni.getSystemInfoSync()
+				const pxToRpxScale2 = 750 / (systemInfo.windowWidth || 375)
+				const ktxStatusHeight2 = (systemInfo.statusBarHeight || 0) * pxToRpxScale2
+				this.ktxStatusHeight = ktxStatusHeight2
+				this.marginTop = ktxStatusHeight2 + 'rpx'
+				this.marginConTop = ktxStatusHeight2 + 12 + 'rpx'
+				// #endif
+				this.isLogin = this.$login.isLoginType().isLogin
+				// this.ywData = []
+				// this.showData()
 
 		},
 		onShow() {

@@ -163,10 +163,18 @@ export default {
 			document.addEventListener('mousewheel', this.mousewheel)
 		}
 		// #endif
-		// #ifdef MP-WEIXIN || MP-TOUTIAO || MP-ALIPAY
-		const { platform } = uni.getSystemInfoSync();
-		this.isPC = /windows/i.test(platform)
-		// #endif
+			// #ifdef MP-WEIXIN
+			let platform = ''
+			try {
+				const deviceInfo = wx.getDeviceInfo ? wx.getDeviceInfo() : {}
+				platform = deviceInfo.platform || ''
+			} catch (e) {}
+			this.isPC = /windows/i.test(platform)
+			// #endif
+			// #ifdef MP-TOUTIAO || MP-ALIPAY
+			const { platform: otherPlatform } = uni.getSystemInfoSync();
+			this.isPC = /windows/i.test(otherPlatform)
+			// #endif
 		this.use2dCanvas = this.type === '2d' && canIUseCanvas2d()
 	},
 	mounted() {

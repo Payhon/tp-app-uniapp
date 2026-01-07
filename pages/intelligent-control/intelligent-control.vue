@@ -104,7 +104,7 @@
 
       <!-- Empty State -->
       <view class="empty-state" v-else>
-        <text class="empty-text">{{ $t('pages.intelligentControl.noData') || '暂无数据' }}</text>
+        <text class="empty-text">{{ $t('pages.intelligentControl.noData') }}</text>
       </view>
     </view>
 

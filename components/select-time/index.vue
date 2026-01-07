@@ -34,9 +34,9 @@
     <!-- 范围 -->
     <template v-if="data.time_condition_type === '0'">
       <view class="item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing">
-      	<uni-datetime-picker placeholder="起始时间" :clear-icon="false" :hide-second="true" :end="data.v2" v-model="data.v1" @change="v1DateTimeChange"/>
+      	<uni-datetime-picker :placeholder="$t('components.selectTime.startTime')" :clear-icon="false" :hide-second="true" :end="data.v2" v-model="data.v1" @change="v1DateTimeChange"/>
         <text class="zhi">-</text>
-        <uni-datetime-picker placeholder="结束时间" :clear-icon="false" :hide-second="true" :start="data.v1" v-model="data.v2" @change="v2DateTimeChange"/>
+        <uni-datetime-picker :placeholder="$t('components.selectTime.endTime')" :clear-icon="false" :hide-second="true" :start="data.v1" v-model="data.v2" @change="v2DateTimeChange"/>
       </view>
     </template>
     
@@ -52,7 +52,7 @@
         
         <view class="tp-flex-1 tp-flex">
           <view class="tp-flex-1"></view>
-          <uni-tooltip class="tooltip" content='例: 33:00" 表示每小时的第33分钟触发'>
+          <uni-tooltip class="tooltip" :content="$t('components.selectTime.hourTip')">
             <uni-icons type="help-filled" size="36rpx" color="#999"></uni-icons>
           </uni-tooltip>
         </view>
@@ -66,7 +66,7 @@
         
         <view class="tp-flex-1 tp-flex">
           <view class="tp-flex-1"></view>
-          <uni-tooltip class="tooltip" content='例: "18:33" 表示每天的18:33触发'>
+          <uni-tooltip class="tooltip" :content="$t('components.selectTime.dayTip')">
             <uni-icons type="help-filled" size="36rpx" color="#999"></uni-icons>
           </uni-tooltip>
         </view>
@@ -75,7 +75,7 @@
       <!-- 3 每周 -->
       <view v-if="data.v1 === '3'" class="item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing">
       	<CustomSelect
-      	  placeholder="周几" 
+      	  :placeholder="$t('components.selectTime.weekday')" 
       	  :options="weekOptions"
       	  v-model="data.v3"
       	></CustomSelect>
@@ -85,7 +85,7 @@
             <view class="uni-input" :class="!data.v4 && 'placeholder'">{{data.v4 || 'hh:mm'}}</view>
           </picker>
           
-          <uni-tooltip v-if="data.v3" class="tooltip" content='例: "周一, 18:33" 表示每周一的18:33触发'>
+          <uni-tooltip v-if="data.v3" class="tooltip" :content="$t('components.selectTime.weekTip')">
             <uni-icons type="help-filled" size="36rpx" color="#999"></uni-icons>
           </uni-tooltip>
         </view>
@@ -94,7 +94,7 @@
       <!-- 4 每月 -->
       <view v-if="data.v1 === '4'" class="item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing">
       	<CustomSelect
-      	  placeholder="日" 
+      	  :placeholder="$t('components.selectTime.day')" 
       	  :options="dateOptions"
           @change="dateChange"
       	  v-model="date"
@@ -105,7 +105,7 @@
           	<view class="uni-input" :class="!time && 'placeholder'">{{time || 'hh:mm'}}</view>
           </picker>
           
-          <uni-tooltip v-if="date" class="tooltip" content='例: "1日, 9:00" 表示每月1日的09:00触发'>
+          <uni-tooltip v-if="date" class="tooltip" :content="$t('components.selectTime.monthTip')">
             <uni-icons type="help-filled" size="36rpx" color="#999"></uni-icons>
           </uni-tooltip>
         </view>
@@ -113,19 +113,19 @@
       
       <!-- 5 自定义cron -->
       <view v-if="data.v1 === '5'" class="item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing">
-      	<input class="uni-input" placeholder="执行日期时间规则" v-model="data.v3"/>
+      	<input class="uni-input" :placeholder="$t('components.selectTime.executionRule')" v-model="data.v3"/>
         
         <uni-tooltip class="tooltip tooltip-c">
           <uni-icons type="help-filled" size="36rpx" color="#999" @tap="ttt"></uni-icons>
           <template slot="content">
             <text>
-              <strong style="margin-right: 16rpx;">0/2 * * * *</strong>每2分钟触发;<br>
-              <strong style="margin-right: 16rpx;">0 0/2 * * *</strong>每两小时触发;<br>
-              <strong style="margin-right: 16rpx;">15 10 * * *</strong>每天上午的10:15触发;<br>
-              <strong style="margin-right: 16rpx;">0/5 14 * * *</strong>在每天下午2点到下午2:55期间的每5分钟触发;<br>
-              <strong style="margin-right: 16rpx;">0/5 14,18 * * *</strong>在每天下午2点到2:55期间和下午6点到6:55期间的每5分钟触发;<br>
-              <strong style="margin-right: 16rpx;">15 10 ? *</strong>周一至周五的上午10:15触发;<br>
-              <strong style="margin-right: 16rpx;">15 10 15 * *</strong>每月15日上午10:15触发;
+              <strong style="margin-right: 16rpx;">0/2 * * * *</strong>{{ $t('components.selectTime.cronExample1') }}<br>
+              <strong style="margin-right: 16rpx;">0 0/2 * * *</strong>{{ $t('components.selectTime.cronExample2') }}<br>
+              <strong style="margin-right: 16rpx;">15 10 * * *</strong>{{ $t('components.selectTime.cronExample3') }}<br>
+              <strong style="margin-right: 16rpx;">0/5 14 * * *</strong>{{ $t('components.selectTime.cronExample4') }}<br>
+              <strong style="margin-right: 16rpx;">0/5 14,18 * * *</strong>{{ $t('components.selectTime.cronExample5') }}<br>
+              <strong style="margin-right: 16rpx;">15 10 ? *</strong>{{ $t('components.selectTime.cronExample6') }}<br>
+              <strong style="margin-right: 16rpx;">15 10 15 * *</strong>{{ $t('components.selectTime.cronExample7') }}
             </text>
           </template>
         </uni-tooltip>
@@ -164,13 +164,13 @@
         ],
         minuteOptions: [],
         weekOptions: [
-          { value: '2', label: '周一' },
-          { value: '3', label: '周二' },
-          { value: '4', label: '周三' },
-          { value: '5', label: '周四' },
-          { value: '6', label: '周五' },
-          { value: '7', label: '周六' },
-          { value: '1', label: '周日' },
+          { value: '2', label: this.$t('pages.sceneRuleDetail.monday') },
+          { value: '3', label: this.$t('pages.sceneRuleDetail.tuesday') },
+          { value: '4', label: this.$t('pages.sceneRuleDetail.wednesday') },
+          { value: '5', label: this.$t('pages.sceneRuleDetail.thursday') },
+          { value: '6', label: this.$t('pages.sceneRuleDetail.friday') },
+          { value: '7', label: this.$t('pages.sceneRuleDetail.saturday') },
+          { value: '1', label: this.$t('pages.sceneRuleDetail.sunday') },
         ],
         dateOptions: [],
         date: '',
@@ -210,7 +210,7 @@
         let dateOptions = []
         for (let i = 0; i < 31; i++) {
           const date = i + 1 + ''
-          dateOptions.push({ value: date, label: date + '日' })
+          dateOptions.push({ value: date, label: date + this.$t('components.selectTime.daySuffix') })
         }
         this.dateOptions = dateOptions
       },

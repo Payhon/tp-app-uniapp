@@ -2,17 +2,23 @@
 	export default {
 		onLaunch: function() {
 			// console.log('App Launch')
-			uni.getPushClientId({  
-				// success: (res) => {
-				// 	console.log('客户端推送标识cid:', res.cid);
-				// },
-				fail(err) {  
-						console.log(err)  
+			// #ifdef APP-PLUS
+			try {
+				if (typeof uni.getPushClientId === 'function') {
+					uni.getPushClientId({
+						// success: (res) => {
+						// 	console.log('客户端推送标识cid:', res.cid);
+						// },
+						fail() {}
+					})
 				}
-			});
+			} catch (e) {}
+			// #endif
 		},
 		async onShow() {
 			// console.log('App Show')
+			// #ifdef APP-PLUS
+			if (typeof uni.onPushMessage !== 'function') return
 			uni.onPushMessage(async (res) => {
 				// console.log("收到推送消息：",res) //监听推送消息
 				if (res.type == 'receive') {  
@@ -39,6 +45,7 @@
 					}
 				}
 			});
+			// #endif
 		},
 		methods: {
 			async fetchAlarmInfo(url, headers) {

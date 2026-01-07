@@ -4,27 +4,27 @@
 
 			<view class="tp-pd-t-b-30"></view>
 
-			<view class="tp-flex tp-login-welcome tp-flex-col tp-mg-t-b-50">
-				<view>{{ $t('components.login.welcome') }}</view>
-				<view class="tp-mg-t-05">{{ $t('components.login.welcomeSubtitle') }}</view>
-			</view>
+				<view class="tp-flex tp-login-welcome tp-flex-col tp-mg-t-b-50">
+					<view class="tp-login-title">{{ $t('components.login.welcome') }}</view>
+					<view class="tp-login-subtitle tp-mg-t-05">{{ $t('components.login.welcomeSubtitle') }}</view>
+				</view>
 
 			<view
-				class="tp-ipt tp-box-sizing tp-mg-t-b-20 tp-pd-t-b-15 tp-pd-l-r-30 tp-flex tp-flex-row tp-flex-j-l tp-flex-a-c">
-				<view class="iconfont iconwode tp-mg-r-15"></view>
-				<input type="text" placeholder-class="tp-plc" :placeholder="$t('components.login.accountPlaceholder')" v-model="email" />
-			</view>
+					class="tp-ipt tp-box-sizing tp-mg-t-b-20 tp-pd-t-b-15 tp-pd-l-r-30 tp-flex tp-flex-row tp-flex-j-l tp-flex-a-c">
+					<view class="iconfont iconwode tp-mg-r-15"></view>
+					<input class="tp-login-input" type="text" placeholder-class="tp-plc" :placeholder="$t('components.login.accountPlaceholder')" v-model="email" />
+				</view>
 			<view
-				class="tp-ipt tp-box-sizing tp-mg-t-b-20 tp-pd-t-b-15 tp-pd-l-r-30 tp-flex tp-flex-row tp-flex-j-l tp-flex-a-c">
-				<view class="iconfont iconmima tp-mg-r-15"></view>
-				<input type="text" placeholder-class="tp-plc" :placeholder="$t('components.login.passwordPlaceholder')" v-model="password" password=true />
-			</view>
+					class="tp-ipt tp-box-sizing tp-mg-t-b-20 tp-pd-t-b-15 tp-pd-l-r-30 tp-flex tp-flex-row tp-flex-j-l tp-flex-a-c">
+					<view class="iconfont iconmima tp-mg-r-15"></view>
+					<input class="tp-login-input" type="text" placeholder-class="tp-plc" :placeholder="$t('components.login.passwordPlaceholder')" v-model="password" password=true />
+				</view>
 
-			<view class="tp-remember-password tp-mg-b-20">
-				<label class="tp-flex tp-flex-row tp-flex-j-l tp-flex-a-c tp-mg-l-25">
-					<checkbox value="cb" checked="true" color="#000000" /> {{ $t('components.login.rememberPassword') }}
-				</label>
-			</view>
+				<view class="tp-remember-password tp-mg-b-20">
+					<label class="tp-flex tp-flex-row tp-flex-j-l tp-flex-a-c tp-mg-l-25 tp-remember-label">
+						<checkbox class="tp-remember-checkbox" value="cb" checked="true" color="#000000" /> {{ $t('components.login.rememberPassword') }}
+					</label>
+				</view>
 
 			<button class="tp-btn tp-mg-t-50" :loading="loading" :class="{'vc-btn-disabled':disabled}"
 				@tap="doLoginSubmit">{{ $t('components.login.loginButton') }}</button>
@@ -125,13 +125,13 @@
 
 	.tp-login-welcome {}
 
-	.tp-login-welcome>view:first-child {
+	.tp-login-title {
 		font-size: 42rpx;
 		font-weight: bold;
 		color: #0F0F0F;
 	}
 
-	.tp-login-welcome>view:last-child {
+	.tp-login-subtitle {
 		font-size: 26rpx;
 		font-weight: 500;
 		color: #999999;
@@ -144,26 +144,26 @@
 		border-radius: 42rpx;
 	}
 
-	.tp-login-box>.tp-ipt>view.iconfont {
+	.tp-login-box>.tp-ipt>.iconfont {
 		font-size: 36rpx;
 		color: #999999;
 		font-weight: bold;
 	}
 
-	.tp-login-box>.tp-ipt>input {
+	.tp-login-input {
 		width: 100%;
 		color: #666666;
 	}
 
 	.tp-remember-password {}
 
-	.tp-remember-password>label {
+	.tp-remember-label {
 		font-size: 28rpx;
 		font-weight: 500;
 		color: #666666;
 	}
 
-	.tp-remember-password>label>checkbox {
+	.tp-remember-checkbox {
 		transform: scale(0.6);
 	}
 

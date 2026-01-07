@@ -2,12 +2,25 @@
  * 通用uni-app网络请求
  * 基于 Promise 对象实现更简单的 request 使用方式，支持请求和响应拦截
  */
-let baseUrl = ''
-if( uni.getStorageSync('serverAddress')) {
-	baseUrl = uni.getStorageSync('serverAddress')
-} else {
-	baseUrl = "http://demo.thingspanel.cn"
+const DEFAULT_BASE_URL_DEV = 'https://fjbms.yz6688.cn'
+const DEFAULT_BASE_URL_PROD = 'https://fjbms.com'
+
+function normalizeBaseUrl(url) {
+	if (!url) return ''
+	url = String(url).trim()
+	if (url.endsWith('/')) url = url.slice(0, -1)
+	return url
 }
+
+function resolveBaseUrl() {
+	const stored = normalizeBaseUrl(uni.getStorageSync('serverAddress'))
+	// 兼容历史默认值：如果仍是 demo 地址则回退到当前环境默认 host
+	if (stored && stored !== 'http://demo.thingspanel.cn' && stored !== 'https://demo.thingspanel.cn') return stored
+	// 开发环境默认走测试环境，生产环境默认走生产环境
+	return process.env.NODE_ENV === 'development' ? DEFAULT_BASE_URL_DEV : DEFAULT_BASE_URL_PROD
+}
+
+let baseUrl = resolveBaseUrl()
 export default {
 	config: {
 		// baseUrl: "http://cc.jszjcc.com",  //测试地址
@@ -28,11 +41,7 @@ export default {
 		response: null
 	},
 	request(options) {
-		if( uni.getStorageSync('serverAddress')) {
-			this.config.baseUrl = uni.getStorageSync('serverAddress')
-		} else {
-			this.config.baseUrl = "http://demo.thingspanel.cn"
-		}
+		this.config.baseUrl = resolveBaseUrl()
 		if (!options) {
 			options = {}
 		}
@@ -44,9 +53,8 @@ export default {
 		// 	options.baseUrl =  server
 		// }
 		options.dataType = options.dataType || this.config.dataType
-		if (!options.url.startsWith("http://")) {
-			options.url = options.baseUrl + options.url
-		}
+		const isAbsUrl = options.url.startsWith('http://') || options.url.startsWith('https://')
+		if (!isAbsUrl) options.url = normalizeBaseUrl(options.baseUrl) + options.url
 		// console.log(options.url)
 		options.data = options.data || {}
 		options.method = options.method || this.config.method
@@ -67,8 +75,8 @@ export default {
 						response = newResponse
 					}
 				}
-				// 统一的响应日志记录
-				if (statusCode === 200 || statusCode === 201 || statusCode === 500) { //成功
+				// 统一的响应日志记录（后端通常会返回统一 JSON，错误时也可能是 4xx）
+				if (statusCode === 200 || statusCode === 201 || statusCode === 400 || statusCode === 401 || statusCode === 402 || statusCode === 403 || statusCode === 422 || statusCode === 500) {
 					resolve(response);
 				} else {
 					reject(response)

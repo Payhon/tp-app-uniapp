@@ -1,8 +1,8 @@
 import Vue from 'vue'
-import { App } from 'vue';
 import VueI18n from 'vue-i18n'
 import enUS from './en-US'
 import zhCN from './zh-CN'
+import { getSystemLanguage } from '@/common/platform'
 
 Vue.use(VueI18n)
 
@@ -12,7 +12,7 @@ export const AVAILABLE_LANGUAGES = [
   { code: 'en-US', label: 'English' }
 ];
 
-const systemLanguage = uni.getSystemInfoSync().language;
+const systemLanguage = getSystemLanguage();
 const rawLocale = uni.getStorageSync('language') || systemLanguage || 'en-US';
 let locale = rawLocale;
 if (rawLocale && (rawLocale.toLowerCase().startsWith('zh') || rawLocale.toLowerCase() === 'zh-cn')) {
@@ -31,19 +31,22 @@ const i18n = new VueI18n({
   }
 })
 
+// Keep in sync with pages.json tabBar order
+const TABBAR_I18N_KEYS = ['pages.deviceList', 'pages.intelligentControlTitle', 'pages.myAccount']
+
 // Function to update tabBar texts with translation keys
 export const updateTabbarText = () => {
-  const tabBar = __uniConfig.tabBar
-  if (tabBar && tabBar.list) {
+  try {
+    if (!uni || typeof uni.setTabBarItem !== 'function') return
     setTimeout(() => {
-      tabBar.list.forEach((tab, index) => {
+      TABBAR_I18N_KEYS.forEach((key, index) => {
         uni.setTabBarItem({
           index,
-          text: i18n.t(tab.key)
+          text: i18n.t(key)
         })
       })
     }, 100)
-  }
+  } catch (e) {}
 }
 
 // Function to change language
