@@ -27,80 +27,97 @@
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				list: [],
-				expanded: {},
-				page: 1,
-				pageSize: 20,
-				total: 0,
-				loading: false
-			}
-		},
-		computed: {
-			hasMore() {
-				return this.list.length < this.total
-			}
-		},
-		onLoad() {
-			uni.setNavigationBarTitle({
-				title: this.$t('pages.faq')
-			})
-			this.load(true)
-		},
-		onReachBottom() {
-			if (this.hasMore && !this.loading) {
-				this.loadMore()
-			}
-		},
-		methods: {
-			getLang() {
-				return uni.getStorageSync('language') || 'zh-CN'
-			},
-			getAppId() {
-				// #ifdef APP-PLUS
-				return plus.runtime.appid
-				// #endif
-				return uni.getStorageSync('app_appid') || ''
-			},
-			toggle(id) {
-				this.$set(this.expanded, id, !this.expanded[id])
-			},
-			load(reset) {
-				const appid = this.getAppId()
-				if (!appid) return
-				if (reset) {
-					this.page = 1
-					this.list = []
-					this.total = 0
-					this.expanded = {}
-				}
-				this.loading = true
-				this.API.apiRequest('/api/v1/app/content/faqs', {
-					appid: appid,
-					lang: this.getLang(),
-					page: this.page,
-					page_size: this.pageSize
-				}, 'get').then(res => {
-					if (res && res.code == 200) {
-						const data = res.data || {}
-						this.total = data.total || 0
-						const next = data.list || []
-						this.list = this.list.concat(next)
-					}
-				}).catch(() => {}).finally(() => {
-					this.loading = false
-				})
-			},
-			loadMore() {
-				if (!this.hasMore) return
-				this.page += 1
-				this.load(false)
-			}
-		}
+<script setup lang="ts">
+import { computed, getCurrentInstance, ref } from 'vue'
+import { onLoad, onReachBottom } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+declare const plus: { runtime: { appid: string } }
+
+type FaqItem = {
+	id: number
+	question?: string
+	answer_html?: string
+	is_pinned?: boolean
+}
+type FaqListRes = { total?: number; list?: FaqItem[] }
+type ApiResponse<T> = { code: number; data: T }
+
+const { t } = useI18n()
+
+const list = ref<FaqItem[]>([])
+const expanded = ref<Record<number, boolean>>({})
+const page = ref<number>(1)
+const pageSize = ref<number>(20)
+const total = ref<number>(0)
+const loading = ref<boolean>(false)
+
+const hasMore = computed(() => list.value.length < total.value)
+
+const getLang = (): string => uni.getStorageSync('language') || 'zh-CN'
+
+const getAppId = (): string => {
+	// #ifdef APP-PLUS
+	return plus.runtime.appid
+	// #endif
+	return uni.getStorageSync('app_appid') || ''
+}
+
+const getApiRequest = () => {
+	const { proxy } = getCurrentInstance() || {}
+	return (proxy as any)?.API?.apiRequest as
+		| (<T>(url: string, params: Record<string, unknown>, method: string) => Promise<ApiResponse<T>>)
+		| undefined
+}
+
+const toggle = (id: number) => {
+	expanded.value[id] = !expanded.value[id]
+}
+
+const load = async (reset: boolean) => {
+	const appid = getAppId()
+	if (!appid) return
+	const apiRequest = getApiRequest()
+	if (!apiRequest) return
+
+	if (reset) {
+		page.value = 1
+		list.value = []
+		total.value = 0
+		expanded.value = {}
 	}
+
+	loading.value = true
+	try {
+		const res = await apiRequest<FaqListRes>(
+			'/api/v1/app/content/faqs',
+			{ appid, lang: getLang(), page: page.value, page_size: pageSize.value },
+			'get'
+		)
+		if (res && res.code == 200) {
+			total.value = res.data?.total || 0
+			const next = res.data?.list || []
+			list.value = list.value.concat(next)
+		}
+	} finally {
+		loading.value = false
+	}
+}
+
+const loadMore = () => {
+	if (!hasMore.value) return
+	page.value += 1
+	load(false)
+}
+
+onLoad(() => {
+	uni.setNavigationBarTitle({ title: t('pages.faq') })
+	load(true)
+})
+
+onReachBottom(() => {
+	if (hasMore.value && !loading.value) loadMore()
+})
 </script>
 
 <style>
@@ -152,4 +169,3 @@
 		line-height: 1.6;
 	}
 </style>
-

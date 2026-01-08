@@ -59,40 +59,30 @@
     </view>
   </template>
   
-  <script>
-  export default {
-    name: 'DashboardGauge',
-    props: {
-      // 电池电量
-      soc: {
-        type: Number,
-        default: 80
-      },
-      // 健康度
-      soh: {
-        type: Number,
-        default: 96
-      }
-    },
-    data() {
-      return {
-        // 这里的长度是根据 SVG 路径模拟计算的大约长度
-        totalLength: 320 
-      };
-    },
-    computed: {
-      // 计算左侧进度偏移
-      leftOffset() {
-        const percentage = Math.min(Math.max(this.soc, 0), 100);
-        return this.totalLength - (this.totalLength * (percentage / 100));
-      },
-      // 计算右侧进度偏移
-      rightOffset() {
-        const percentage = Math.min(Math.max(this.soh, 0), 100);
-        return this.totalLength - (this.totalLength * (percentage / 100));
-      }
-    }
-  };
+  <script setup lang="ts">
+  import { computed } from 'vue'
+
+  type Props = {
+    soc?: number
+    soh?: number
+  }
+
+  const props = withDefaults(defineProps<Props>(), {
+    soc: 80,
+    soh: 96,
+  })
+
+  const totalLength = 320
+
+  const leftOffset = computed(() => {
+    const percentage = Math.min(Math.max(props.soc, 0), 100)
+    return totalLength - totalLength * (percentage / 100)
+  })
+
+  const rightOffset = computed(() => {
+    const percentage = Math.min(Math.max(props.soh, 0), 100)
+    return totalLength - totalLength * (percentage / 100)
+  })
   </script>
   
   <style lang="scss" scoped>

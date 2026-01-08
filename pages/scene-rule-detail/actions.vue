@@ -45,267 +45,223 @@
     </view>
     
     <!-- 消息提示框 -->
-    <cys-toast ref="toast" :msg="toast.msg" location="top"></cys-toast>
+    <cys-toast ref="toastRef" :msg="toast.msg" location="top"></cys-toast>
   </view>
 </template>
 
-<script>
-  import CustomSelect from '@/components/custom-select.vue'
-  import SelectScene from './select-scene.vue'
-  import SelectNotice from './select-notice.vue'
-  import SelectActionDevices from './select-action-devices.vue'
-  
-  const actionTypeOptions = [
-    { value: '1', label: this.$t('pages.sceneRuleDetail.actionType1') },
-    { value: '2', label: this.$t('pages.sceneRuleDetail.actionType2') },
-    { value: '3', label: this.$t('pages.sceneRuleDetail.actionType3') },
-  ]
-  
-  export default {
-    components: {
-      CustomSelect,
-      SelectScene,
-      SelectNotice,
-      SelectActionDevices,
-    },
-    props: {
-      list: {
-        type: Array,
-        default: () => ([]),
-      },
-    },
-    watch: {
-      list: {
-        handler  (n, o) {
-          this.initActions (n)
-        },
-        immediate: true,
-      },
-    },
-    data () {
-      return {
-        toast: {
-        	msg: ''
-        },
-        actions: [],
-        actionTypeOptions,
-      }
-    },
-    created () {
-      console.log(this.list, this.actions)
-    },
-    methods: {
-      // 响应式获取
-      getOptions (action_type) {
-        // 显示未选过的和当前的（如果存在）
-        console.log(action_type)
-        if (!this.actions.length) {
-          return actionTypeOptions
-        } else {
-          const options = actionTypeOptions.filter(action => {
-            // 如果选项在 actions 中已存在，且不与当前相同，则去除
-            return !(action.value !== action_type && this.actions.findIndex(item => item.action_type === action.value) >= 0)
-          })
-          console.log(options)
-          return options
-        }
-      },
-      initActions (list) {
-        list = JSON.parse(JSON.stringify(list))
-        const actions = []
-        const actionTypeList = new Set(list.map(action => {
-          action.$index = Math.random()
-          return action.action_type
-        }))
-        actionTypeList.forEach(actionType => {
-          actions.push({
-            $index: Math.random(),
-            action_type: actionType,
-            actions: list.filter(action => action.action_type === actionType),
-          })
-        })
-        this.actions = actions
-        
-        console.log('initActions', this.actions)
-      },
-      actionTypeChange (action_type, index) {
-        console.log(action_type, index)
-        
-        const action = this.actions[index] || {}
-              
-        this.$set(this.actions, index, {
-          $index: Math.random(),
-          action_type, // 1-操作设备 2-触发告警 3-激活场景
-          actions: [
-            {
-              action_type,
-              $index: action.$index,
-              business_id: "", // 项目id
-              asset_id: "", // 分组id
-              device_id: "", // 设备id
-              device_action_type: "", // 1-属性 2-事件 3-在线离线状态
-              
-              v1: "",
-              v2: "",
-              v3: "",
-              v4: "",
-              v5: "",
-                  
-              remark: "",
-              
-              group_number: action.group_number, // 条件分组编号（相邻两个条件 group_number 不同则用或连接，相同用且连接）
-              
-              // automation_id: this.formData.id, // 父id。todo：提交前重新设置
-              id: action.id, // 自身id
-              
-              warning_strategy: {},
-            }
-          ]
-        })
-      },
-      
-      // 删除动作
-      removeAction (currAction, index) {
-        this.actions.splice(index, 1)
-      },
-      // 新增动作
-      addAction (currAction, index) {
-        console.log(1234)
-        this.actions.splice(index+1, 0, {
-          $index: Math.random(),
-          action_type: '',
-          actions: [
-            {
-              $index: Math.random(),
-              warning_strategy: {},
-            },
-          ],
-        })
-      },
-      
-      getActionsData () {
-        let msg = ''
-        let actions = JSON.parse(JSON.stringify(this.actions))
-        actions = actions.map(actionsGroup => actionsGroup.actions).flat()
-        console.log(actions)
-        for (let i = 0; i< actions.length; i++) {
-          const action = actions[i]
-          console.log('action' + i, action)
-          const {
-            action_type, // 1-操作设备 2-触发告警 3-激活场景
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import CustomSelect from '@/components/custom-select.vue'
+import SelectScene from './select-scene.vue'
+import SelectNotice from './select-notice.vue'
+import SelectActionDevices from './select-action-devices.vue'
 
-            business_id, // 项目
-            asset_id, // 分组
-            device_id, // 设备
-            device_condition_type, // 状态/属性 1-属性 2-事件 3-在线离线状态
-            v1,
-            v3,
-            
-            scenario_strategy_id,
-          } = action
-          
-          if (!action_type) {
-            msg = this.$t('pages.sceneRuleDetail.selectActionType')
-            break;
-          } else if (action_type === '1') { // 1-操作设备
-            if (!business_id || !asset_id || !device_id || !device_condition_type || !v1 || (!v3 && v3 !== 0)) { // device_condition_type 为空表示未选择属性
-              msg = this.$t('pages.sceneRuleDetail.completeDeviceInfo')
-              break;
-            }
-          } else if (action_type === '2') { // 2-触发告警
-            const {
-              warning_level,
-              inform_way,
-              repeat_count,
-              warning_description,
-            } = action.warning_strategy || {}
-            
-            if (!warning_level) { //
-              msg = this.$t('pages.sceneRuleDetail.completeWarningInfo')
-              break;
-            }
-            
-            if (!inform_way) { //
-              msg = this.$t('pages.sceneRuleDetail.completeNotificationInfo')
-              break;
-            }
-          } else if (action_type === '3') { // 3-激活场景
-            if (!scenario_strategy_id) {
-              msg = this.$t('pages.sceneRuleDetail.completeSceneInfo')
-              break;
-            }
-          } else {
-            msg = this.$t('pages.sceneRuleDetail.unknownActionType')
-            break;
-          }
-        }
-        
-        if (msg) {
-          return {
-            result: msg,
-          }
-        }
-        
-        return {
-          result: true,
-          actions: this.submitData(actions),
-        }
-      },
-      submitData (actions) {
-        return actions.map(action => {
-          const {
-            action_type,
-            
-            device_id,
-            device_condition_type, // 状态/属性 1-属性 2-事件 3-在线离线状态
-            v1,
-            v3,
-            
-            warning_strategy,
-            
-            scenario_strategy_id,
-          } = action
-          
-          const result = {
-            action_type,
-          }
-          
-          if (action_type === '1') {
-            result.device_id = device_id
-            result.additional_info = JSON.stringify({
-              device_model: device_condition_type,
-              instruct: {
-                [v1]: v3,
-              },
-            })
-          } else if (action_type === '2') {
-            const {
-              id,
-              warning_level,
-              inform_way,
-              repeat_count,
-              warning_description,
-            } = warning_strategy || {}
-            console.log(warning_strategy)
-            result.warning_strategy = {
-              id,
-              warning_level,
-              inform_way: inform_way || undefined,
-              repeat_count: repeat_count || undefined,
-              warning_description: warning_description || undefined,
-            }
-          } else if (action_type === '3') {
-            result.scenario_strategy_id = scenario_strategy_id
-          }
-          return JSON.parse(JSON.stringify(result))
-        })
-      },
-    },
-  }
+type ActionType = '' | '1' | '2' | '3'
+
+type WarningStrategy = Record<string, unknown> & {
+	id?: string | number
+	warning_level?: string | number
+	inform_way?: string | number
+	repeat_count?: number
+	warning_description?: string
+}
+
+type RawAction = Record<string, any> & {
+	$index?: number
+	action_type?: ActionType
+	business_id?: string
+	asset_id?: string
+	device_id?: string
+	device_condition_type?: string
+	v1?: string
+	v3?: any
+	scenario_strategy_id?: string | number
+	warning_strategy?: WarningStrategy
+	group_number?: number
+	id?: string | number
+}
+
+type ActionGroup = {
+	$index: number
+	action_type: ActionType
+	actions: RawAction[]
+}
+
+type Props = {
+	list?: RawAction[]
+}
+
+const props = withDefaults(defineProps<Props>(), {
+	list: () => [],
+})
+
+const { t } = useI18n()
+
+const toast = ref<{ msg: string }>({ msg: '' })
+const toastRef = ref<any>(null)
+
+const actions = ref<ActionGroup[]>([])
+
+const actionTypeOptions = computed(() => [
+	{ value: '1', label: t('pages.sceneRuleDetail.actionType1') },
+	{ value: '2', label: t('pages.sceneRuleDetail.actionType2') },
+	{ value: '3', label: t('pages.sceneRuleDetail.actionType3') },
+])
+
+const getOptions = (action_type: ActionType) => {
+	console.log(action_type)
+	if (!actions.value.length) return actionTypeOptions.value
+	const options = actionTypeOptions.value.filter((opt) => !(opt.value !== action_type && actions.value.findIndex((it) => it.action_type === opt.value) >= 0))
+	console.log(options)
+	return options
+}
+
+const initActions = (list: RawAction[]) => {
+	const cloned = JSON.parse(JSON.stringify(list || [])) as RawAction[]
+	const out: ActionGroup[] = []
+	const actionTypeList = new Set(
+		cloned.map((action) => {
+			action.$index = Math.random()
+			return action.action_type
+		})
+	)
+	actionTypeList.forEach((actionType) => {
+		out.push({
+			$index: Math.random(),
+			action_type: (actionType as ActionType) || '',
+			actions: cloned.filter((a) => a.action_type === actionType),
+		})
+	})
+	actions.value = out
+	console.log('initActions', actions.value)
+}
+
+const actionTypeChange = (action_type: ActionType, index: number) => {
+	console.log(action_type, index)
+	const action = actions.value[index] || ({} as ActionGroup)
+	actions.value[index] = {
+		$index: Math.random(),
+		action_type,
+		actions: [
+			{
+				action_type,
+				$index: (action as any).$index,
+				business_id: '',
+				asset_id: '',
+				device_id: '',
+				device_action_type: '',
+				v1: '',
+				v2: '',
+				v3: '',
+				v4: '',
+				v5: '',
+				remark: '',
+				group_number: (action as any).group_number,
+				id: (action as any).id,
+				warning_strategy: {},
+			},
+		],
+	}
+}
+
+const removeAction = (currAction: ActionGroup, index: number) => {
+	actions.value.splice(index, 1)
+}
+
+const addAction = (currAction: ActionGroup, index: number) => {
+	console.log(1234)
+	actions.value.splice(index + 1, 0, {
+		$index: Math.random(),
+		action_type: '',
+		actions: [{ $index: Math.random(), warning_strategy: {} }],
+	})
+}
+
+const submitData = (list: RawAction[]) =>
+	list.map((action) => {
+		const { action_type, device_id, device_condition_type, v1, v3, warning_strategy, scenario_strategy_id } = action
+		const result: Record<string, unknown> = { action_type }
+		if (action_type === '1') {
+			result.device_id = device_id
+			result.additional_info = JSON.stringify({
+				device_model: device_condition_type,
+				instruct: { [String(v1 || '')]: v3 },
+			})
+		} else if (action_type === '2') {
+			const { id, warning_level, inform_way, repeat_count, warning_description } = warning_strategy || {}
+			console.log(warning_strategy)
+			result.warning_strategy = {
+				id,
+				warning_level,
+				inform_way: (inform_way as any) || undefined,
+				repeat_count: (repeat_count as any) || undefined,
+				warning_description: (warning_description as any) || undefined,
+			}
+		} else if (action_type === '3') {
+			result.scenario_strategy_id = scenario_strategy_id
+		}
+		return JSON.parse(JSON.stringify(result))
+	})
+
+const getActionsData = () => {
+	let msg = ''
+	let flat = JSON.parse(JSON.stringify(actions.value)) as ActionGroup[]
+	const list = flat.map((g) => g.actions).flat()
+	console.log(list)
+
+	for (let i = 0; i < list.length; i += 1) {
+		const action = list[i]
+		console.log('action' + i, action)
+		const { action_type, business_id, asset_id, device_id, device_condition_type, v1, v3, scenario_strategy_id } = action
+		if (!action_type) {
+			msg = t('pages.sceneRuleDetail.selectActionType')
+			break
+		} else if (action_type === '1') {
+			if (!business_id || !asset_id || !device_id || !device_condition_type || !v1 || (!v3 && v3 !== 0)) {
+				msg = t('pages.sceneRuleDetail.completeDeviceInfo')
+				break
+			}
+		} else if (action_type === '2') {
+			const { warning_level, inform_way } = action.warning_strategy || {}
+			if (!warning_level) {
+				msg = t('pages.sceneRuleDetail.completeWarningInfo')
+				break
+			}
+			if (!inform_way) {
+				msg = t('pages.sceneRuleDetail.completeNotificationInfo')
+				break
+			}
+		} else if (action_type === '3') {
+			if (!scenario_strategy_id) {
+				msg = t('pages.sceneRuleDetail.completeSceneInfo')
+				break
+			}
+		} else {
+			msg = t('pages.sceneRuleDetail.unknownActionType')
+			break
+		}
+	}
+
+	if (msg) return { result: msg }
+	return { result: true, actions: submitData(list) }
+}
+
+defineExpose({ getActionsData })
+
+watch(
+	() => props.list,
+	(n) => initActions(n || []),
+	{ immediate: true, deep: true }
+)
+
+onMounted(() => {
+	console.log(props.list, actions.value)
+})
 </script>
 
 <style scoped>
-  @import '@/common/alert-strategy.css';
+  @import '@/common/styles/alert-strategy.css';
   
   .action + .action {
     margin-top: 20rpx;

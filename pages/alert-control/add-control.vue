@@ -84,7 +84,7 @@
 					<view>{{ $t('pages.addControl.value') }}</view>
 					<input type="number" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.addControl.inputValue')" placeholder-class="tp-plc"
 						v-model="data.trigNum" v-if="data.filedType == 3" />
-					<input v-else type="text'" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.addControl.inputValue')"
+					<input v-else type="text" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.addControl.inputValue')"
 						placeholder-class="tp-plc" v-model="data.trigNum" />
 				</view>
 				<view class="tp-ipt-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-25"
@@ -164,7 +164,7 @@
 					<view>{{ $t('pages.addControl.value') }}</view>
 					<input type="number" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.addControl.inputValue')" placeholder-class="tp-plc"
 						v-model="data.conNum" v-if="data.filedType == 3" />
-					<input v-else type="text'" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.addControl.inputValue')"
+					<input v-else type="text" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.addControl.inputValue')"
 						placeholder-class="tp-plc" v-model="data.conNum" />
 				</view>
 				<view class="tp-ipt-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-25"
@@ -292,7 +292,7 @@
 				<view class="logInfo">
 						<view class="info_title">
 							{{ $t('pages.addControl.triggerCondition') }}
-							<image src="../../static/icon/close.png" alt="" @click="$refs.addtrigPopup.close()" />
+							<image src="../../static/icon/close.png" alt="" @click="addtrigPopup?.close?.()" />
 						</view>
 					<view class="info_header">
 						<view class="tp-circle tp-mg-l-r-20 tp-active" style="margin-left: 10rpx;">
@@ -347,7 +347,7 @@
 							</view>
 							<input type="number" class="tp-flex-1 tp-mg-l-20 add_input" :placeholder="$t('pages.addControl.inputValue')" placeholder-class="tp-plc"
 								v-model="addTrigForm.trigNum" v-if="addTrigForm.filedType == 3" />
-							<input v-else type="text'" class="tp-flex-1 tp-mg-l-20 add_input" :placeholder="$t('pages.addControl.inputValue')"
+							<input v-else type="text" class="tp-flex-1 tp-mg-l-20 add_input" :placeholder="$t('pages.addControl.inputValue')"
 								placeholder-class="tp-plc" v-model="addTrigForm.trigNum" />
 						</view>
 					</view>
@@ -385,7 +385,7 @@
 						</view>
 					</view>
 					<view class="info_btn">
-						<view class="btn_del" @click="$refs.addtrigPopup.close()">{{ $t('common.cancel') }}</view>
+						<view class="btn_del" @click="addtrigPopup?.close?.()">{{ $t('common.cancel') }}</view>
 						<view class="btn_save" @click="saveTrig()">
 							{{ $t('common.save') }}
 						</view>
@@ -397,7 +397,7 @@
 				<view class="logInfo">
 						<view class="info_title">
 							{{ $t('pages.addControl.executeCommand') }}
-							<image src="../../static/icon/close.png" alt="" @click="$refs.addConPopup.close()" />
+							<image src="../../static/icon/close.png" alt="" @click="addConPopup?.close?.()" />
 						</view>
 					<view class="info_list">
 						<view class="item" @click="toSelectEqpGroupAdd('con')">
@@ -433,12 +433,12 @@
 							</view>
 							<input type="number" class="tp-flex-1 tp-mg-l-20 add_input" :placeholder="$t('pages.addControl.inputValue')" placeholder-class="tp-plc"
 								v-model="addConForm.conNum" v-if="addConForm.filedType == 3" />
-							<input v-else type="text'" class="tp-flex-1 tp-mg-l-20 add_input" :placeholder="$t('pages.addControl.inputValue')"
+							<input v-else type="text" class="tp-flex-1 tp-mg-l-20 add_input" :placeholder="$t('pages.addControl.inputValue')"
 								placeholder-class="tp-plc" v-model="addConForm.conNum" />
 						</view>
 					</view>
 					<view class="info_btn">
-						<view class="btn_del" @click="$refs.addConPopup.close()">{{ $t('common.cancel') }}</view>
+						<view class="btn_del" @click="addConPopup?.close?.()">{{ $t('common.cancel') }}</view>
 						<view class="btn_save" @click="saveCon()">
 							{{ $t('common.save') }}
 						</view>
@@ -446,888 +446,931 @@
 				</view>
 			</uni-popup>
 			<!-- 消息提示框 -->
-			<cys-toast ref="toast" :msg="toast.msg" location="top"></cys-toast>
+			<cys-toast ref="toastRef" :msg="toast.msg" location="top"></cys-toast>
 		</view>
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				addType: '',
-				addTrigForm: {
-					eqpGroup: '',
-					eqpGroupName: '',
-					eqp: '',
-					eqpName: '',
-					condition: '',
-					conditionName: '',
-					filedType: '',
-					symbol: '',
-					symbolName: '',
-					trigNum: '',
-					relationship: '',
-					relationshipName: '',
-					cishu: 0,
-					cishuName: $t('pages.addControl.single'),
-					dateTime: ''
-				},
-				addConForm: {
-					eqpGroup: '',
-					eqpGroupName: '',
-					eqp: '',
-					eqpName: '',
-					condition: '',
-					conditionName: '',
-					filedType: '',
-					conNum: '',
-					relationship: '',
-					relationshipName: ''
-				},
-				trigList: [{
-					conditionType: 1,
-					conditionTypeName: $t('pages.addControl.deviceConditionType'),
-					eqpGroup: '',
-					eqpGroupName: '',
-					eqp: '',
-					eqpName: '',
-					condition: '',
-					conditionName: '',
-					filedType: '',
-					symbol: '',
-					symbolName: '',
-					trigNum: '',
-					relationship: '',
-					relationshipName: '',
-					cishu: 0,
-					cishuName: $t('pages.addControl.single'),
-					dateTime: ''
-				}], // 触发条件
-				controlList: [{
-					eqpGroup: '',
-					eqpGroupName: '',
-					eqp: '',
-					eqpName: '',
-					condition: '',
-					conditionName: '',
-					filedType: '',
-					conNum: ''
-				}],
-				relationshipList: [{
-						name: $t('pages.addControl.and'),
-						id: '&&'
-					},
-					{
-						name: $t('pages.addControl.or'),
-						id: '||'
-					}
-				], // 关系
-				conditionList: [], // 条件
-				eqpGroupsList: [], // 设备分组
-				conditionTypeList: [{
-						label: $t('pages.addControl.deviceConditionType'),
-						value: 1
-					},
-					{
-						label: $t('pages.addControl.timeConditionType'),
-						value: 2
-					}
-				], // 条件类型
-				symbolList: [{
-						name: $t('pages.addControl.greaterThan'),
-						id: '>'
-					},
-					{
-						name: $t('pages.addControl.lessThan'),
-						id: '<'
-					},
-					{
-						name: $t('pages.addControl.equal'),
-						id: '='
-					},
-					{
-						name: $t('pages.addControl.greaterThanOrEqual'),
-						id: '≥'
-					},
-					{
-						name: $t('pages.addControl.lessThanOrEqual'),
-						id: '≤'
-					},
-				], // 符号
-				switchOnTwo: 0,
-				switchCloseTwo: 1,
-				loading: false,
-				disabled: false,
-				eqpList: [], //设备列表
-				currentEqp: {}, //选择的设备
-				toast: {
-					msg: ''
-				},
-				formData: {
-					describe: '',
-					name: '',
-					sort: 100
-				},
-				currentTrigData: {}, // 当前触发条件
-				currentConData: {}, //当前执行命令
-				cishuList: [{
-						name: $t('pages.addControl.single'),
-						id: 0
-					},
-					{
-						name: $t('pages.addControl.everyDay'),
-						id: 1
-					}
-				]
-			}
-		},
-		onShow() {
-			uni.setNavigationBarTitle({
-				title: this.$t('pages.addControlStrategy')
-			});
-		},
-		onLoad() {
-			// this.getZcList()
-		},
-		methods: {
-			changeLog(e) {
-				console.log('change事件:', e);
-			},
-			bindTimeChangeAdd(e) {
-				console.log('change事件:', e);
-				this.addTrigForm.dateTime = e.target.value
-			},
-			bindTimeChange(data, e) {
-				if (this.addType) {
-					this.addTrigForm.dateTime = e.target.value
-				} else if (this.type) {
-					data.dateTime = e.target.value
-				}
-			},
-      validate() {
-        const control = this.controlList.filter((item, index) => {
-          return !item.eqpGroup || !item.eqp || !item.condition || !item.conNum
-        })
-        if (this.formData.name == '') {
-          this.toast.msg = this.$t('pages.addControl.validateError.nameRequired');
-          this.$refs.toast.show();
-          return false
-        }
-        if (this.formData.describe == '') {
-          this.toast.msg = this.$t('pages.addControl.validateError.descriptionRequired');
-          this.$refs.toast.show();
-          return false
-        }
-        if (this.trigList[0].conditionType == 1) {
-          const trig = this.trigList.filter((item, index) => {
-            if (index == 0) {
-              return !item.conditionType || !item.eqpGroup || !item.eqp || !item.condition || !item
-                .symbol || !item.trigNum
-            } else {
-              return !item.eqpGroup || !item.eqp || !item.condition || !item
-                .symbol || !item.trigNum || !item.relationship
-            }
-          })
-          if (trig.length > 0) {
-            this.toast.msg = this.$t('pages.addControl.validateError.triggerConditionInvalid');
-            this.$refs.toast.show();
-            return false
-          }
-        } else {
-          const trig = this.trigList.filter((item, index) => {
-            return !item.cishuName || !item.dateTime
-          })
-          if (trig.length > 0) {
-            this.toast.msg = this.$t('pages.addControl.validateError.triggerConditionInvalid');
-            this.$refs.toast.show();
-            return false
-          }
-        }
-        if (control.length > 0) {
-          this.toast.msg = this.$t('pages.addControl.validateError.executeCommandInvalid');
-          this.$refs.toast.show();
-          return false
-        }
-        return true
-      },
-			//保存策略
-			doUpdateSubmit() {
-				if (this.validate()) {
-					var switchOnOne, switchOnTwo;
-					if (this.switchOnOne == 0) {
-						switchOnOne = 1
-					} else {
-						switchOnOne = 0
-					}
-					if (this.switchOnTwo == 0) {
-						switchOnTwo = 1
-					} else {
-						switchOnTwo = 0
-					}
-					uni.showLoading({
-						title: this.$t('pages.addControl.loading')
-					});
-					var trigList = []
-					if (this.trigList[0].conditionType == 1) {
-						this.trigList.forEach(item => {
-							var obj = {
-								asset_id: item.eqpGroup,
-								device_id: item.eqp,
-								field: item.condition,
-								field_type: item.filedType,
-								duration: '0',
-								condition: item.symbol,
-								value: item.trigNum,
-								operator: item.relationship ? item.relationship : ''
-							}
-							trigList.push(obj)
-						})
-					} else {
-						this.trigList.forEach(item => {
-							var obj = {
-								interval: item.cishu,
-								time: item.dateTime,
-								operator: item.relationship ? item.relationship : ''
-							}
-							trigList.push(obj)
-						})
-					}
-					var controlList = []
-					this.controlList.forEach(item => {
-						var obj = {
-							asset_id: item.eqpGroup,
-							device_id: item.eqp,
-							field: item.condition,
-							field_type: item.filedType,
-							value: item.conNum,
-							field_symbol: item.field_symbol
-						}
-						controlList.push(obj)
-					})
-					var params = {
-						status: switchOnTwo,
-						name: this.formData.name,
-						sort: this.formData.sort,
-						type: this.trigList[0].conditionType,
-						description: this.formData.describe,
-						issued: '0',
-						config: {
-							rules: trigList,
-							apply: controlList
-						},
-					}
-					params.config = JSON.stringify(params.config)
-					this.API.apiRequest('/api/v1/scene_automations', params, 'post').then(res => {
-						if (res.code == 200) {
-							this.toast.msg = res.message
-							this.$refs.toast.show();
-							uni.navigateBack(-1)
-						} else {
-							this.toast.msg = res.message
-							this.$refs.toast.show();
-						}
-						uni.hideLoading()
-					}).finally(() => {
-						uni.hideLoading()
-					});
-				}
-			},
-			// 删除触发条件
-			toDeltrig(data, index) {
-				this.trigList.forEach((item, itemIndex) => {
-					if (itemIndex == index) {
-						this.trigList.splice(index, 1)
-					}
-				})
-			},
-			// 删除指令
-			toDelCon(data, index) {
-				this.controlList.forEach((item, itemIndex) => {
-					if (itemIndex == index) {
-						this.controlList.splice(index, 1)
-					}
-				})
-			},
-			// 确定次数选择
-			confirmrCishu(item) {
-				if (this.addType == 'trig') {
-					this.addTrigForm.cishu = item.id
-					this.addTrigForm.cishuName = item.name
-					this.$refs.addtrigPopup.open()
-				} else if (this.type == 'trig') {
-					this.currentTrigData.cishu = item.id
-					this.currentTrigData.cishuName = item.name
-				}
-				this.$refs.cishuPopup.close()
-			},
-			// 新增一行选择次数
-			toSelectCishuAdd() {
-				this.addType = 'trig'
-				this.type = ''
-				this.$refs.addtrigPopup.close()
-				this.$refs.cishuPopup.open()
-			},
-			// 选择次数
-			toSelectCishu(data) {
-				this.type = 'trig'
-				this.addType = ''
-				this.currentTrigData = data
-				this.$refs.cishuPopup.open()
-			},
-			// 确定选择关系
-			confirmrRelationship(item) {
-				if (this.addType == 'trig') {
-					this.addTrigForm.relationship = item.id
-					this.addTrigForm.relationshipName = item.name
-					this.$refs.addtrigPopup.open()
-				} else if (this.addType == 'con') {
-					this.addConForm.relationship = item.id
-					this.addConForm.relationshipName = item.name
-					this.$refs.addConPopup.open()
-				}
-				this.$refs.relationshipPopup.close()
-			},
-			// 选择关系
-			relationship(type) {
-				this.addType = type
-				this.type = ''
-				if (type == 'con') {
-					this.$refs.addConPopup.close()
-				} else if (type == 'trig') {
-					this.$refs.addtrigPopup.close()
-				}
-				this.$refs.relationshipPopup.open()
-			},
-			// 保存执行命令验证
-			saveConValidate() {
-				// if (!this.addConForm.relationship) {
-				// 	this.toast.msg = this.$t('pages.addControl.validateError.relationRequired');
-				// 	this.$refs.toast.show();
-				// 	return false
-				// }
-				if (!this.addConForm.eqpGroup) {
-					this.toast.msg = this.$t('pages.addControl.validateError.deviceGroupRequired');
-					this.$refs.toast.show();
-					return false
-				}
-				if (!this.addConForm.eqp) {
-					this.toast.msg = this.$t('pages.addControl.validateError.deviceRequired');
-					this.$refs.toast.show();
-					return false
-				}
-				if (!this.addConForm.condition) {
-					this.toast.msg = this.$t('pages.addControl.validateError.conditionRequired');
-					this.$refs.toast.show();
-					return false
-				}
-				if (!this.addConForm.conNum) {
-					this.toast.msg = this.$t('pages.addControl.validateError.valueRequired');
-					this.$refs.toast.show();
-					return false
-				}
-				return true
-			},
-			// 保存触发条件验证
-			saveTrigValidate() {
-				if (this.trigList[0].conditionType == 1) {
-					if (!this.addTrigForm.relationship) {
-						this.toast.msg = this.$t('pages.addControl.validateError.relationRequired');
-						this.$refs.toast.show();
-						return false
-					}
-					if (!this.addTrigForm.eqpGroup) {
-						this.toast.msg = this.$t('pages.addControl.validateError.deviceGroupRequired');
-						this.$refs.toast.show();
-						return false
-					}
-					if (!this.addTrigForm.eqp) {
-						this.toast.msg = this.$t('pages.addControl.validateError.deviceRequired');
-						this.$refs.toast.show();
-						return false
-					}
-					if (!this.addTrigForm.condition) {
-						this.toast.msg = this.$t('pages.addControl.validateError.conditionRequired');
-						this.$refs.toast.show();
-						return false
-					}
-					if (!this.addTrigForm.symbol) {
-						this.toast.msg = this.$t('pages.addControl.validateError.symbolRequired');
-						this.$refs.toast.show();
-						return false
-					}
-					if (!this.addTrigForm.trigNum) {
-						this.toast.msg = this.$t('pages.addControl.validateError.valueRequired');
-						this.$refs.toast.show();
-						return false
-					}
-				} else {
-					if (!this.addTrigForm.relationship) {
-						this.toast.msg = this.$t('pages.addControl.validateError.relationRequired');
-						this.$refs.toast.show();
-						return false
-					}
-					if (!this.addTrigForm.cishuName) {
-						this.toast.msg = this.$t('pages.addControl.validateError.timesRequired');
-						this.$refs.toast.show();
-						return false
-					}
-					if (!this.addTrigForm.dateTime) {
-						this.toast.msg = this.$t('pages.addControl.validateError.dateTimeRequired');
-						this.$refs.toast.show();
-						return false
-					}
-				}
-				return true
-			},
-			// 保存触发条件
-			saveTrig() {
-				if (this.saveTrigValidate()) {
-					if (this.trigList[0].conditionType == 1) {
-						this.trigList.push({
-							eqpGroup: this.addTrigForm.eqpGroup,
-							eqpGroupName: this.addTrigForm.eqpGroupName,
-							eqp: this.addTrigForm.eqp,
-							eqpName: this.addTrigForm.eqpName,
-							condition: this.addTrigForm.condition,
-							conditionName: this.addTrigForm.conditionName,
-							filedType: this.addTrigForm.filedType,
-							symbol: this.addTrigForm.symbol,
-							symbolName: this.addTrigForm.symbolName,
-							trigNum: this.addTrigForm.trigNum,
-							relationship: this.addTrigForm.relationship,
-							relationshipName: this.addTrigForm.relationshipName
-						})
-					} else {
-						this.trigList.push({
-							cishu: this.addTrigForm.cishu,
-							cishuName: this.addTrigForm.cishuName,
-							dateTime: this.addTrigForm.dateTime,
-							relationship: this.addTrigForm.relationship,
-							relationshipName: this.addTrigForm.relationshipName
-						})
-					}
-					this.$refs.addtrigPopup.close()
-				}
-				this.$forceUpdate()
-			},
-			saveCon() {
-				if (this.saveConValidate()) {
-					this.controlList.push({
-						eqpGroup: this.addConForm.eqpGroup,
-						eqpGroupName: this.addConForm.eqpGroupName,
-						eqp: this.addConForm.eqp,
-						eqpName: this.addConForm.eqpName,
-						condition: this.addConForm.condition,
-						conditionName: this.addConForm.conditionName,
-						filedType: this.addConForm.filedType,
-						conNum: this.addConForm.conNum
-					})
-					this.$refs.addConPopup.close()
-				}
-			},
-			// 确定选择符号
-			confirmSymbol(item) {
-				if (this.type) {
-					if (this.type == 'trig') {
-						this.currentTrigData.symbol = item.id
-						this.currentTrigData.symbolName = item.name
-					} else if (this.type == 'con') {
-						this.currentConData.symbol = item.key
-						this.currentConData.symbolName = item.name
-					}
-					this.$refs.symbolPopup.close()
-				} else if (this.addType) {
-					if (this.addType == 'trig') {
-						this.addTrigForm.symbol = item.id
-						this.addTrigForm.symbolName = item.name
-						this.$refs.addtrigPopup.open()
-					} else if (this.addType == 'con') {
-						this.addConForm.symbol = item.key
-						this.addConForm.symbolName = item.name
-						this.$refs.addConPopup.open()
-					}
-					this.$refs.symbolPopup.close()
-				}
-			},
-			// 选择符号新增一行
-			toSelectSymbolAdd(type) {
-				this.addType = type
-				this.type = ''
-				if (type == 'trig') {
-					this.$refs.addtrigPopup.close()
-				} else if (type == 'con') {
-					this.$refs.addConPopup.close()
-				}
-				console.log('==')
-				this.$refs.symbolPopup.open()
-			},
-			// 选择符号
-			toSelectSymbol(data, type) {
-				this.type = type
-				this.addType = ''
-				if (type == 'trig') {
-					this.currentTrigData = data
-				} else if (type == 'con') {
-					this.currentConData = data
-				}
-				this.$refs.symbolPopup.open()
-			},
-			// 确定选择条件
-			confirmCondition(item) {
-				if (this.type) {
-					if (this.type == 'trig') {
-						this.currentTrigData.condition = item.key
-						this.currentTrigData.conditionName = item.name
-						this.currentTrigData.filedType = item.type
-						this.currentTrigData.field_symbol = item.symbol
-					} else if (this.type == 'con') {
-						this.currentConData.condition = item.key
-						this.currentConData.conditionName = item.name
-						this.currentConData.filedType = item.type
-						this.currentConData.field_symbol = item.symbol
-					}
-				} else if (this.addType) {
-					if (this.addType == 'trig') {
-						this.addTrigForm.condition = item.key
-						this.addTrigForm.conditionName = item.name
-						this.addTrigForm.filedType = item.type
-						this.addTrigForm.field_symbol = item.symbol
-						this.$refs.addtrigPopup.open()
-					} else if (this.addType == 'con') {
-						this.addConForm.condition = item.key
-						this.addConForm.conditionName = item.name
-						this.addConForm.filedType = item.type
-						this.addConForm.field_symbol = item.symbol
-						this.$refs.addConPopup.open()
-					}
-				}
-				this.$refs.conditionPopup.close()
-			},
-			// 选择条件新增一行
-			toSelectConditionAdd(type) {
-				this.addType = type
-				this.type = ''
-				if (this.trigList[0].conditionType == 1) {
-					if (type == 'trig') {
-						if (!this.addTrigForm.eqp) {
-							this.toast.msg = this.$t('pages.addControl.selectDevice');
-							this.$refs.toast.show();
-							return
-						}
-					} else if (type == 'con') {
-						if (!this.addConForm.eqp) {
-							this.toast.msg = this.$t('pages.addControl.selectDevice');
-							this.$refs.toast.show();
-							return
-						}
-					}
-				}
-				uni.showLoading({
-					title: this.$t('pages.addControl.loading')
-				});
-				this.API.apiRequest('/api/automation/show', {
-					bid: type == 'trig' ? this.addTrigForm.eqp : this.addConForm.eqp
-				}, 'post').then(res => {
-					if (res.code === 200) {
-						if (res.data && res.data.length > 0) {
-							this.conditionList = res.data
-							if (type == 'trig') {
-								this.$refs.addtrigPopup.close()
-							} else if (type == 'con') {
-								this.$refs.addConPopup.close()
-							}
-							this.$refs.conditionPopup.open()
-						} else {
-							this.toast.msg = this.$t('pages.addControl.noData');
-							this.$refs.toast.show();
-						}
-					}
-					uni.hideLoading()
-				}).finally(() => {
-					uni.hideLoading()
-				});
-			},
-			// 选择条件
-			toSelectCondition(data, type) {
-				this.type = type
-				this.addType = ''
-				if (this.trigList[0].conditionType == 1) {
-					if (type == 'trig') {
-						this.currentTrigData = data
-						if (!this.currentTrigData.eqp) {
-							this.toast.msg = this.$t('pages.addControl.selectDevice');;
-							this.$refs.toast.show();
-							return
-						}
-					} else if (type == 'con') {
-						this.currentConData = data
-						if (!this.currentConData.eqp) {
-							this.toast.msg = this.$t('pages.addControl.selectDevice');
-							this.$refs.toast.show();
-							return
-						}
-					}
-				}
-				uni.showLoading({
-					title: this.$t('pages.addControl.loading')
-				});
-				this.API.apiRequest('/api/automation/show', {
-					bid: type == 'trig' ? this.currentTrigData.eqp : this.currentConData.eqp
-				}, 'post').then(res => {
-					if (res.code === 200) {
-						if (res.data && res.data.length > 0) {
-							this.$refs.conditionPopup.open()
-							this.conditionList = res.data
-						} else {
-							this.toast.msg = this.$t('pages.addControl.noData');;
-							this.$refs.toast.show();
-						}
-					}
-					uni.hideLoading()
-				}).finally(() => {
-					uni.hideLoading()
-				});
-			},
-			// 确定选择设备
-			comfirEqp(item) {
-				if (this.type) {
-					if (this.type == 'trig') {
-						this.currentTrigData.eqp = item.device_id
-						this.currentTrigData.condition = ''
-						this.currentTrigData.conditionName = ''
-						this.currentTrigData.eqpName = item.name
-					} else if (this.type == 'con') {
-						this.currentConData.condition = ''
-						this.currentConData.conditionName = ''
-						this.currentConData.eqp = item.device_id
-						this.currentConData.eqpName = item.name
-					}
-					this.$refs.eqpPopup.close()
-				} else if (this.addType) {
-					if (this.addType == 'trig') {
-						this.addTrigForm.eqp = item.device_id
-						this.addTrigForm.eqpName = item.name
-						this.addTrigForm.condition = ''
-						this.addTrigForm.conditionName = ''
-						this.$refs.addtrigPopup.open()
-					} else if (this.addType == 'con') {
-						this.addConForm.eqp = item.device_id
-						this.addConForm.eqpName = item.name
-						this.addConForm.condition = ''
-						this.addConForm.conditionName = ''
-						this.$refs.addConPopup.open()
-					}
-					this.$refs.eqpPopup.close()
-				}
-			},
-			// 新增一行选择设备
-			toSelectEqpAdd(type) {
-				this.addType = type
-				if (this.trigList[0].conditionType == 1) {
-					if (type == 'trig') {
-						if (!this.addTrigForm.eqpGroup) {
-							this.toast.msg = this.$t('pages.addControl.selectDeviceGroup');
-							this.$refs.toast.show();
-							return
-						}
-					} else if (type == 'con') {
-						if (!this.addConForm.eqpGroup) {
-							this.toast.msg = this.$t('pages.addControl.selectDeviceGroup');
-							this.$refs.toast.show();
-							return
-						}
-					}
-				}
-				uni.showLoading({
-					title: this.$t('pages.addControl.loading')
-				});
-				this.API.apiRequest('/api/kv/current/asset/a', {
-					asset_id: type == 'trig' ? this.addTrigForm.eqpGroup : this.addConForm.eqpGroup
-				}, 'post').then(res => {
-					if (res.code === 200) {
-						if (res.data && res.data.devices.length > 0) {
-							this.eqpList = res.data.devices
-							if (type == 'trig') {
-								this.$refs.addtrigPopup.close()
-							} else if (type == 'con') {
-								this.$refs.addConPopup.close()
-							}
-							this.$refs.eqpPopup.open()
-						} else {
-							this.toast.msg = this.$t('pages.addControl.noData');;
-							this.$refs.toast.show();
-						}
-					}
-					uni.hideLoading()
-				}).finally(() => {
-					uni.hideLoading()
-				});
-			},
-			// 选择设备
-			toSelectEqp(data, type) {
-				this.type = type
-				this.addType = ''
-				if (type == 'trig') {
-					this.currentTrigData = data
-				} else if (type == 'con') {
-					this.currentConData = data
-				}
-				uni.showLoading({
-					title: this.$t('pages.addControl.loading')
-				});
-				this.API.apiRequest('/api/kv/current/asset/a', {
-					asset_id: type == 'trig' ? this.currentTrigData.eqpGroup : this.currentConData.eqpGroup
-				}, 'post').then(res => {
-					if (res.code === 200) {
-						if (res.data && res.data.devices.length > 0) {
-							this.$refs.eqpPopup.open()
-							this.eqpList = res.data.devices
-						} else {
-							this.toast.msg = this.$t('pages.addControl.noData');;
-							this.$refs.toast.show();
-						}
-					}
-					uni.hideLoading()
-				}).finally(() => {
-					uni.hideLoading()
-				});
-			},
-			//确定选择设备分组
-			toConfirmeqpGroup(item) {
-				if (this.type) {
-					if (this.type == 'trig') {
-						this.currentTrigData.eqpGroup = item.id
-						this.currentTrigData.eqpGroupName = item.device_group
-						this.currentTrigData.eqp = ''
-						this.currentTrigData.eqpName = ''
-						this.currentTrigData.condition = ''
-						this.currentTrigData.conditionName = ''
-					} else if (this.type == 'con') {
-						this.currentConData.eqpGroup = item.id
-						this.currentConData.eqpGroupName = item.device_group
-						this.currentConData.eqp = ''
-						this.currentConData.eqpName = ''
-						this.currentConData.condition = ''
-						this.currentConData.conditionName = ''
-					}
-					this.$refs.eqpGroups.close()
-				} else if (this.addType) {
-					if (this.addType == 'trig') {
-						this.addTrigForm.eqp = ''
-						this.addTrigForm.eqpName = ''
-						this.addTrigForm.condition = ''
-						this.addTrigForm.conditionName = ''
-						this.addTrigForm.eqpGroup = item.id
-						this.addTrigForm.eqpGroupName = item.device_group
-						this.$refs.addtrigPopup.open()
-					} else if (this.addType == 'con') {
-						this.addConForm.eqp = ''
-						this.addConForm.eqpName = ''
-						this.addConForm.condition = ''
-						this.addConForm.conditionName = ''
-						this.addConForm.eqpGroup = item.id
-						this.addConForm.eqpGroupName = item.device_group
-						this.$refs.addConPopup.open()
-					}
-					this.$refs.eqpGroups.close()
-				}
-			},
-			// 设备分组
-			toSelectEqpGroup(data, type) {
-				this.type = type
-				this.addType = ''
-				if (type == 'trig') {
-					this.currentTrigData = data
-				} else if (type == 'con') {
-					this.currentConData = data
-				}
-				uni.showLoading({
-					title: this.$t('pages.addControl.loading')
-				});
-				this.API.apiRequest('/api/asset/list/d', {
-					business_id: uni.getStorageSync('ywId')
-				}, 'post').then(res => {
-					if (res.code === 200) {
-						if (res.data && res.data.length > 0) {
-							this.$refs.eqpGroups.open()
-							this.eqpGroupsList = res.data
-						} else {
-							this.toast.msg = this.$t('pages.addControl.noData');;
-							this.$refs.toast.show();
-						}
-					}
-					uni.hideLoading()
-				}).finally(() => {
-					uni.hideLoading()
-				});
-			},
-			// 新增一行选择设备分组
-			toSelectEqpGroupAdd(type) {
-				this.addType = type
-				this.type = ''
-				uni.showLoading({
-					title: this.$t('pages.addControl.loading')
-				});
-				this.API.apiRequest('/api/asset/list/d', {
-					business_id: uni.getStorageSync('ywId')
-				}, 'post').then(res => {
-					if (res.code === 200) {
-						if (res.data && res.data.length > 0) {
-							this.eqpGroupsList = res.data
-							if (type == 'trig') {
-								this.$refs.addtrigPopup.close()
-							} else if (type == 'con') {
-								this.$refs.addConPopup.close()
-							}
-							this.$refs.eqpGroups.open()
-						} else {
-							this.toast.msg = this.$t('pages.addControl.noData');;
-							this.$refs.toast.show();
-						}
-					}
-					uni.hideLoading()
-				}).finally(() => {
-					uni.hideLoading()
-				});
-			},
-			// 选择设备条件类型
-			toSelectConditionType(data, type) {
-				this.type = type
-				this.addType = ''
-				if (type == 'trig') {
-					this.currentTrigData = data
-				} else if (type == 'con') {
-					this.currentConData = data
-				}
-				this.currentTrigData = data
-				this.$refs.conditionType.open()
-			},
-			// 确定条件类型
-			comfirConditionType(item) {
-				if (this.type == 'trig') {
-					this.currentTrigData.conditionType = item.value
-					this.currentTrigData.conditionTypeName = item.label
-				} else if (this.type == 'con') {
-					this.currentConData.conditionType = item.value
-					this.currentConData.conditionTypeName = item.label
-				}
-				this.$refs.conditionType.close()
-			},
-			// 新增执行命令
-			toAddCon() {
-				this.$refs.addConPopup.open()
-			},
-			// 新增触发条件
-			toAddtrig() {
-				this.$refs.addtrigPopup.open()
-			}
-		},
+<script setup lang="ts">
+import { reactive, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+import { useInjected, type ApiResponse } from '@/common/composables/useInjected'
+
+type PopupLike = { open?: () => void; close?: () => void }
+
+interface ConditionTypeItem {
+	label: string
+	value: number
+}
+
+interface EqpGroupItem {
+	id: string
+	device_group: string
+}
+
+interface EqpItem {
+	device_id: string
+	name: string
+}
+
+interface ConditionItem {
+	key: string
+	name: string
+	type: string | number
+	symbol: string
+}
+
+interface SymbolItem {
+	name: string
+	id: string
+	key?: string
+}
+
+interface RelationshipItem {
+	name: string
+	id: string
+}
+
+interface TimesItem {
+	name: string
+	id: number
+}
+
+interface TrigForm {
+	eqpGroup: string
+	eqpGroupName: string
+	eqp: string
+	eqpName: string
+	condition: string
+	conditionName: string
+	filedType: string | number
+	field_symbol?: string
+	symbol: string
+	symbolName: string
+	trigNum: string
+	relationship: string
+	relationshipName: string
+	cishu: number
+	cishuName: string
+	dateTime: string
+}
+
+interface ConForm {
+	eqpGroup: string
+	eqpGroupName: string
+	eqp: string
+	eqpName: string
+	condition: string
+	conditionName: string
+	filedType: string | number
+	field_symbol?: string
+	conNum: string
+	relationship: string
+	relationshipName: string
+}
+
+type TrigItem = Partial<TrigForm> & { conditionType?: number; conditionTypeName?: string }
+type ConItem = Partial<ConForm>
+
+type AutomationShowRes = ApiResponse<ConditionItem[]>
+type AssetListRes = ApiResponse<EqpGroupItem[]>
+type AssetDevicesRes = ApiResponse<{ devices: EqpItem[] }>
+
+const { t } = useI18n()
+const { apiRequest } = useInjected()
+
+const toast = reactive<{ msg: string }>({ msg: '' })
+const toastRef = ref<any>(null)
+
+const showMsg = (msg: string) => {
+	toast.msg = msg
+	toastRef.value?.show?.()
+}
+
+const getPickerValue = (e: any) => e?.detail?.value ?? e?.target?.value ?? ''
+
+// template refs
+const conditionType = ref<PopupLike | null>(null)
+const eqpGroups = ref<PopupLike | null>(null)
+const eqpPopup = ref<PopupLike | null>(null)
+const conditionPopup = ref<PopupLike | null>(null)
+const symbolPopup = ref<PopupLike | null>(null)
+const relationshipPopup = ref<PopupLike | null>(null)
+const cishuPopup = ref<PopupLike | null>(null)
+const addtrigPopup = ref<PopupLike | null>(null)
+const addConPopup = ref<PopupLike | null>(null)
+
+const addType = ref<string>('') // 新增弹窗上下文
+const type = ref<string>('') // 列表编辑上下文
+
+const addTrigForm = reactive<TrigForm>({
+	eqpGroup: '',
+	eqpGroupName: '',
+	eqp: '',
+	eqpName: '',
+	condition: '',
+	conditionName: '',
+	filedType: '',
+	symbol: '',
+	symbolName: '',
+	trigNum: '',
+	relationship: '',
+	relationshipName: '',
+	cishu: 0,
+	cishuName: t('pages.addControl.single') as string,
+	dateTime: ''
+})
+
+const addConForm = reactive<ConForm>({
+	eqpGroup: '',
+	eqpGroupName: '',
+	eqp: '',
+	eqpName: '',
+	condition: '',
+	conditionName: '',
+	filedType: '',
+	conNum: '',
+	relationship: '',
+	relationshipName: ''
+})
+
+const trigList = ref<TrigItem[]>([
+	{
+		conditionType: 1,
+		conditionTypeName: t('pages.addControl.deviceConditionType') as string,
+		eqpGroup: '',
+		eqpGroupName: '',
+		eqp: '',
+		eqpName: '',
+		condition: '',
+		conditionName: '',
+		filedType: '',
+		symbol: '',
+		symbolName: '',
+		trigNum: '',
+		relationship: '',
+		relationshipName: '',
+		cishu: 0,
+		cishuName: t('pages.addControl.single') as string,
+		dateTime: ''
 	}
+])
+
+const controlList = ref<ConItem[]>([
+	{
+		eqpGroup: '',
+		eqpGroupName: '',
+		eqp: '',
+		eqpName: '',
+		condition: '',
+		conditionName: '',
+		filedType: '',
+		conNum: ''
+	}
+])
+
+const relationshipList = ref<RelationshipItem[]>([
+	{ name: t('pages.addControl.and') as string, id: '&&' },
+	{ name: t('pages.addControl.or') as string, id: '||' }
+])
+
+const conditionList = ref<ConditionItem[]>([])
+const eqpGroupsList = ref<EqpGroupItem[]>([])
+
+const conditionTypeList = ref<ConditionTypeItem[]>([
+	{ label: t('pages.addControl.deviceConditionType') as string, value: 1 },
+	{ label: t('pages.addControl.timeConditionType') as string, value: 2 }
+])
+
+const symbolList = ref<SymbolItem[]>([
+	{ name: t('pages.addControl.greaterThan') as string, id: '>' },
+	{ name: t('pages.addControl.lessThan') as string, id: '<' },
+	{ name: t('pages.addControl.equal') as string, id: '=' },
+	{ name: t('pages.addControl.greaterThanOrEqual') as string, id: '≥' },
+	{ name: t('pages.addControl.lessThanOrEqual') as string, id: '≤' }
+])
+
+const cishuList = ref<TimesItem[]>([
+	{ name: t('pages.addControl.single') as string, id: 0 },
+	{ name: t('pages.addControl.everyDay') as string, id: 1 }
+])
+
+const switchOnTwo = ref<number>(0)
+const switchCloseTwo = ref<number>(1)
+const switchOnOne = ref<number>(0) // NOTE: 原逻辑引用但页面未展示，保留默认值
+
+const loading = ref<boolean>(false)
+const disabled = ref<boolean>(false)
+
+const eqpList = ref<EqpItem[]>([])
+const currentEqp = ref<Record<string, unknown>>({})
+
+const formData = reactive({
+	describe: '',
+	name: '',
+	sort: 100
+})
+
+const currentTrigData = ref<any>({})
+const currentConData = ref<any>({})
+
+onShow(() => {
+	uni.setNavigationBarTitle({
+		title: t('pages.addControlStrategy') as string
+	})
+})
+
+const changeLog = (e: unknown) => {
+	// eslint-disable-next-line no-console
+	console.log('change事件:', e)
+}
+
+const bindTimeChangeAdd = (e: unknown) => {
+	// eslint-disable-next-line no-console
+	console.log('change事件:', e)
+	addTrigForm.dateTime = String(getPickerValue(e))
+}
+
+const bindTimeChange = (data: any, e: unknown) => {
+	const v = String(getPickerValue(e))
+	if (addType.value) {
+		addTrigForm.dateTime = v
+	} else if (type.value) {
+		data.dateTime = v
+	}
+}
+
+const validate = () => {
+	const control = controlList.value.filter((item) => {
+		return !item.eqpGroup || !item.eqp || !item.condition || !item.conNum
+	})
+
+	if (formData.name === '') {
+		showMsg(t('pages.addControl.validateError.nameRequired') as string)
+		return false
+	}
+	if (formData.describe === '') {
+		showMsg(t('pages.addControl.validateError.descriptionRequired') as string)
+		return false
+	}
+
+	if ((trigList.value[0] as any)?.conditionType === 1) {
+		const trig = trigList.value.filter((item, index) => {
+			if (index === 0) {
+				return !item.conditionType || !item.eqpGroup || !item.eqp || !item.condition || !item.symbol || !item.trigNum
+			}
+			return !item.eqpGroup || !item.eqp || !item.condition || !item.symbol || !item.trigNum || !item.relationship
+		})
+		if (trig.length > 0) {
+			showMsg(t('pages.addControl.validateError.triggerConditionInvalid') as string)
+			return false
+		}
+	} else {
+		const trig = trigList.value.filter((item) => {
+			return !item.cishuName || !item.dateTime
+		})
+		if (trig.length > 0) {
+			showMsg(t('pages.addControl.validateError.triggerConditionInvalid') as string)
+			return false
+		}
+	}
+
+	if (control.length > 0) {
+		showMsg(t('pages.addControl.validateError.executeCommandInvalid') as string)
+		return false
+	}
+	return true
+}
+
+//保存策略
+const doUpdateSubmit = async () => {
+	const req = apiRequest
+	if (!req) return
+
+	if (!validate()) return
+
+	let statusValue: number
+	if (switchOnTwo.value === 0) statusValue = 1
+	else statusValue = 0
+
+	// 保留原逻辑：switchOnOne 参与计算但未使用
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	const _switchOnOne = switchOnOne.value === 0 ? 1 : 0
+
+	uni.showLoading({
+		title: t('pages.addControl.loading') as string
+	})
+
+	try {
+		const trigPayload: Record<string, unknown>[] = []
+		if ((trigList.value[0] as any)?.conditionType === 1) {
+			trigList.value.forEach((item) => {
+				trigPayload.push({
+					asset_id: item.eqpGroup,
+					device_id: item.eqp,
+					field: item.condition,
+					field_type: item.filedType,
+					duration: '0',
+					condition: item.symbol,
+					value: item.trigNum,
+					operator: item.relationship ? item.relationship : ''
+				})
+			})
+		} else {
+			trigList.value.forEach((item) => {
+				trigPayload.push({
+					interval: item.cishu,
+					time: item.dateTime,
+					operator: item.relationship ? item.relationship : ''
+				})
+			})
+		}
+
+		const controlPayload: Record<string, unknown>[] = []
+		controlList.value.forEach((item) => {
+			controlPayload.push({
+				asset_id: item.eqpGroup,
+				device_id: item.eqp,
+				field: item.condition,
+				field_type: item.filedType,
+				value: item.conNum,
+				field_symbol: (item as any).field_symbol
+			})
+		})
+
+		const params: Record<string, unknown> = {
+			status: statusValue,
+			name: formData.name,
+			sort: formData.sort,
+			type: (trigList.value[0] as any)?.conditionType,
+			description: formData.describe,
+			issued: '0',
+			config: JSON.stringify({
+				rules: trigPayload,
+				apply: controlPayload
+			})
+		}
+
+		const res = await req<unknown>('/api/v1/scene_automations', params, 'post')
+		showMsg(res.message || '')
+		if (res.code === 200) {
+			uni.navigateBack(-1)
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const toDeltrig = (_data: unknown, index: number) => {
+	trigList.value.forEach((_item, itemIndex) => {
+		if (itemIndex === index) {
+			trigList.value.splice(index, 1)
+		}
+	})
+}
+
+const toDelCon = (_data: unknown, index: number) => {
+	controlList.value.forEach((_item, itemIndex) => {
+		if (itemIndex === index) {
+			controlList.value.splice(index, 1)
+		}
+	})
+}
+
+const confirmrCishu = (item: TimesItem) => {
+	if (addType.value === 'trig') {
+		addTrigForm.cishu = item.id
+		addTrigForm.cishuName = item.name
+		addtrigPopup.value?.open?.()
+	} else if (type.value === 'trig') {
+		currentTrigData.value.cishu = item.id
+		currentTrigData.value.cishuName = item.name
+	}
+	cishuPopup.value?.close?.()
+}
+
+const toSelectCishuAdd = () => {
+	addType.value = 'trig'
+	type.value = ''
+	addtrigPopup.value?.close?.()
+	cishuPopup.value?.open?.()
+}
+
+const toSelectCishu = (data: any) => {
+	type.value = 'trig'
+	addType.value = ''
+	currentTrigData.value = data
+	cishuPopup.value?.open?.()
+}
+
+const confirmrRelationship = (item: RelationshipItem) => {
+	if (addType.value === 'trig') {
+		addTrigForm.relationship = item.id
+		addTrigForm.relationshipName = item.name
+		addtrigPopup.value?.open?.()
+	} else if (addType.value === 'con') {
+		addConForm.relationship = item.id
+		addConForm.relationshipName = item.name
+		addConPopup.value?.open?.()
+	}
+	relationshipPopup.value?.close?.()
+}
+
+const relationship = (popupType: string) => {
+	addType.value = popupType
+	type.value = ''
+	if (popupType === 'con') {
+		addConPopup.value?.close?.()
+	} else if (popupType === 'trig') {
+		addtrigPopup.value?.close?.()
+	}
+	relationshipPopup.value?.open?.()
+}
+
+const saveConValidate = () => {
+	if (!addConForm.eqpGroup) {
+		showMsg(t('pages.addControl.validateError.deviceGroupRequired') as string)
+		return false
+	}
+	if (!addConForm.eqp) {
+		showMsg(t('pages.addControl.validateError.deviceRequired') as string)
+		return false
+	}
+	if (!addConForm.condition) {
+		showMsg(t('pages.addControl.validateError.conditionRequired') as string)
+		return false
+	}
+	if (!addConForm.conNum) {
+		showMsg(t('pages.addControl.validateError.valueRequired') as string)
+		return false
+	}
+	return true
+}
+
+const saveTrigValidate = () => {
+	if ((trigList.value[0] as any)?.conditionType === 1) {
+		if (!addTrigForm.relationship) {
+			showMsg(t('pages.addControl.validateError.relationRequired') as string)
+			return false
+		}
+		if (!addTrigForm.eqpGroup) {
+			showMsg(t('pages.addControl.validateError.deviceGroupRequired') as string)
+			return false
+		}
+		if (!addTrigForm.eqp) {
+			showMsg(t('pages.addControl.validateError.deviceRequired') as string)
+			return false
+		}
+		if (!addTrigForm.condition) {
+			showMsg(t('pages.addControl.validateError.conditionRequired') as string)
+			return false
+		}
+		if (!addTrigForm.symbol) {
+			showMsg(t('pages.addControl.validateError.symbolRequired') as string)
+			return false
+		}
+		if (!addTrigForm.trigNum) {
+			showMsg(t('pages.addControl.validateError.valueRequired') as string)
+			return false
+		}
+	} else {
+		if (!addTrigForm.relationship) {
+			showMsg(t('pages.addControl.validateError.relationRequired') as string)
+			return false
+		}
+		if (!addTrigForm.cishuName) {
+			showMsg(t('pages.addControl.validateError.timesRequired') as string)
+			return false
+		}
+		if (!addTrigForm.dateTime) {
+			showMsg(t('pages.addControl.validateError.dateTimeRequired') as string)
+			return false
+		}
+	}
+	return true
+}
+
+const saveTrig = () => {
+	if (!saveTrigValidate()) return
+
+	if ((trigList.value[0] as any)?.conditionType === 1) {
+		trigList.value.push({
+			eqpGroup: addTrigForm.eqpGroup,
+			eqpGroupName: addTrigForm.eqpGroupName,
+			eqp: addTrigForm.eqp,
+			eqpName: addTrigForm.eqpName,
+			condition: addTrigForm.condition,
+			conditionName: addTrigForm.conditionName,
+			filedType: addTrigForm.filedType,
+			symbol: addTrigForm.symbol,
+			symbolName: addTrigForm.symbolName,
+			trigNum: addTrigForm.trigNum,
+			relationship: addTrigForm.relationship,
+			relationshipName: addTrigForm.relationshipName,
+			field_symbol: addTrigForm.field_symbol
+		})
+	} else {
+		trigList.value.push({
+			cishu: addTrigForm.cishu,
+			cishuName: addTrigForm.cishuName,
+			dateTime: addTrigForm.dateTime,
+			relationship: addTrigForm.relationship,
+			relationshipName: addTrigForm.relationshipName
+		})
+	}
+	addtrigPopup.value?.close?.()
+}
+
+const saveCon = () => {
+	if (!saveConValidate()) return
+
+	controlList.value.push({
+		eqpGroup: addConForm.eqpGroup,
+		eqpGroupName: addConForm.eqpGroupName,
+		eqp: addConForm.eqp,
+		eqpName: addConForm.eqpName,
+		condition: addConForm.condition,
+		conditionName: addConForm.conditionName,
+		filedType: addConForm.filedType,
+		conNum: addConForm.conNum,
+		field_symbol: addConForm.field_symbol
+	})
+	addConPopup.value?.close?.()
+}
+
+const confirmSymbol = (item: SymbolItem) => {
+	if (type.value) {
+		if (type.value === 'trig') {
+			currentTrigData.value.symbol = item.id
+			currentTrigData.value.symbolName = item.name
+		} else if (type.value === 'con') {
+			currentConData.value.symbol = (item as any).key
+			currentConData.value.symbolName = item.name
+		}
+		symbolPopup.value?.close?.()
+	} else if (addType.value) {
+		if (addType.value === 'trig') {
+			addTrigForm.symbol = item.id
+			addTrigForm.symbolName = item.name
+			addtrigPopup.value?.open?.()
+		} else if (addType.value === 'con') {
+			addConForm.symbol = (item as any).key
+			addConForm.symbolName = item.name
+			addConPopup.value?.open?.()
+		}
+		symbolPopup.value?.close?.()
+	}
+}
+
+const toSelectSymbolAdd = (popupType: string) => {
+	addType.value = popupType
+	type.value = ''
+	if (popupType === 'trig') {
+		addtrigPopup.value?.close?.()
+	} else if (popupType === 'con') {
+		addConPopup.value?.close?.()
+	}
+	// eslint-disable-next-line no-console
+	console.log('==')
+	symbolPopup.value?.open?.()
+}
+
+const toSelectSymbol = (data: any, popupType: string) => {
+	type.value = popupType
+	addType.value = ''
+	if (popupType === 'trig') {
+		currentTrigData.value = data
+	} else if (popupType === 'con') {
+		currentConData.value = data
+	}
+	symbolPopup.value?.open?.()
+}
+
+const confirmCondition = (item: ConditionItem) => {
+	if (type.value) {
+		if (type.value === 'trig') {
+			currentTrigData.value.condition = item.key
+			currentTrigData.value.conditionName = item.name
+			currentTrigData.value.filedType = item.type
+			currentTrigData.value.field_symbol = item.symbol
+		} else if (type.value === 'con') {
+			currentConData.value.condition = item.key
+			currentConData.value.conditionName = item.name
+			currentConData.value.filedType = item.type
+			currentConData.value.field_symbol = item.symbol
+		}
+	} else if (addType.value) {
+		if (addType.value === 'trig') {
+			addTrigForm.condition = item.key
+			addTrigForm.conditionName = item.name
+			addTrigForm.filedType = item.type
+			addTrigForm.field_symbol = item.symbol
+			addtrigPopup.value?.open?.()
+		} else if (addType.value === 'con') {
+			addConForm.condition = item.key
+			addConForm.conditionName = item.name
+			addConForm.filedType = item.type
+			addConForm.field_symbol = item.symbol
+			addConPopup.value?.open?.()
+		}
+	}
+	conditionPopup.value?.close?.()
+}
+
+const toSelectConditionAdd = async (popupType: string) => {
+	const req = apiRequest
+	if (!req) return
+
+	addType.value = popupType
+	type.value = ''
+
+	if ((trigList.value[0] as any)?.conditionType === 1) {
+		if (popupType === 'trig') {
+			if (!addTrigForm.eqp) {
+				showMsg(t('pages.addControl.selectDevice') as string)
+				return
+			}
+		} else if (popupType === 'con') {
+			if (!addConForm.eqp) {
+				showMsg(t('pages.addControl.selectDevice') as string)
+				return
+			}
+		}
+	}
+
+	uni.showLoading({ title: t('pages.addControl.loading') as string })
+	try {
+		const bid = popupType === 'trig' ? addTrigForm.eqp : addConForm.eqp
+		const res = (await req<ConditionItem[]>('/api/automation/show', { bid }, 'post')) as AutomationShowRes
+		if (res.code === 200) {
+			if (res.data && res.data.length > 0) {
+				conditionList.value = res.data
+				if (popupType === 'trig') addtrigPopup.value?.close?.()
+				else if (popupType === 'con') addConPopup.value?.close?.()
+				conditionPopup.value?.open?.()
+			} else {
+				showMsg(t('pages.addControl.noData') as string)
+			}
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const toSelectCondition = async (data: any, popupType: string) => {
+	const req = apiRequest
+	if (!req) return
+
+	type.value = popupType
+	addType.value = ''
+
+	if ((trigList.value[0] as any)?.conditionType === 1) {
+		if (popupType === 'trig') {
+			currentTrigData.value = data
+			if (!currentTrigData.value.eqp) {
+				showMsg(t('pages.addControl.selectDevice') as string)
+				return
+			}
+		} else if (popupType === 'con') {
+			currentConData.value = data
+			if (!currentConData.value.eqp) {
+				showMsg(t('pages.addControl.selectDevice') as string)
+				return
+			}
+		}
+	}
+
+	uni.showLoading({ title: t('pages.addControl.loading') as string })
+	try {
+		const bid = popupType === 'trig' ? currentTrigData.value.eqp : currentConData.value.eqp
+		const res = (await req<ConditionItem[]>('/api/automation/show', { bid }, 'post')) as AutomationShowRes
+		if (res.code === 200) {
+			if (res.data && res.data.length > 0) {
+				conditionPopup.value?.open?.()
+				conditionList.value = res.data
+			} else {
+				showMsg(t('pages.addControl.noData') as string)
+			}
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const comfirEqp = (item: EqpItem) => {
+	if (type.value) {
+		if (type.value === 'trig') {
+			currentTrigData.value.eqp = item.device_id
+			currentTrigData.value.condition = ''
+			currentTrigData.value.conditionName = ''
+			currentTrigData.value.eqpName = item.name
+		} else if (type.value === 'con') {
+			currentConData.value.condition = ''
+			currentConData.value.conditionName = ''
+			currentConData.value.eqp = item.device_id
+			currentConData.value.eqpName = item.name
+		}
+		eqpPopup.value?.close?.()
+	} else if (addType.value) {
+		if (addType.value === 'trig') {
+			addTrigForm.eqp = item.device_id
+			addTrigForm.eqpName = item.name
+			addTrigForm.condition = ''
+			addTrigForm.conditionName = ''
+			addtrigPopup.value?.open?.()
+		} else if (addType.value === 'con') {
+			addConForm.eqp = item.device_id
+			addConForm.eqpName = item.name
+			addConForm.condition = ''
+			addConForm.conditionName = ''
+			addConPopup.value?.open?.()
+		}
+		eqpPopup.value?.close?.()
+	}
+}
+
+const toSelectEqpAdd = async (popupType: string) => {
+	const req = apiRequest
+	if (!req) return
+
+	addType.value = popupType
+	if ((trigList.value[0] as any)?.conditionType === 1) {
+		if (popupType === 'trig') {
+			if (!addTrigForm.eqpGroup) {
+				showMsg(t('pages.addControl.selectDeviceGroup') as string)
+				return
+			}
+		} else if (popupType === 'con') {
+			if (!addConForm.eqpGroup) {
+				showMsg(t('pages.addControl.selectDeviceGroup') as string)
+				return
+			}
+		}
+	}
+
+	uni.showLoading({ title: t('pages.addControl.loading') as string })
+	try {
+		const asset_id = popupType === 'trig' ? addTrigForm.eqpGroup : addConForm.eqpGroup
+		const res = (await req<{ devices: EqpItem[] }>('/api/kv/current/asset/a', { asset_id }, 'post')) as AssetDevicesRes
+		if (res.code === 200) {
+			if (res.data && res.data.devices.length > 0) {
+				eqpList.value = res.data.devices
+				if (popupType === 'trig') addtrigPopup.value?.close?.()
+				else if (popupType === 'con') addConPopup.value?.close?.()
+				eqpPopup.value?.open?.()
+			} else {
+				showMsg(t('pages.addControl.noData') as string)
+			}
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const toSelectEqp = async (data: any, popupType: string) => {
+	const req = apiRequest
+	if (!req) return
+
+	type.value = popupType
+	addType.value = ''
+	if (popupType === 'trig') currentTrigData.value = data
+	else if (popupType === 'con') currentConData.value = data
+
+	uni.showLoading({ title: t('pages.addControl.loading') as string })
+	try {
+		const asset_id = popupType === 'trig' ? currentTrigData.value.eqpGroup : currentConData.value.eqpGroup
+		const res = (await req<{ devices: EqpItem[] }>('/api/kv/current/asset/a', { asset_id }, 'post')) as AssetDevicesRes
+		if (res.code === 200) {
+			if (res.data && res.data.devices.length > 0) {
+				eqpPopup.value?.open?.()
+				eqpList.value = res.data.devices
+			} else {
+				showMsg(t('pages.addControl.noData') as string)
+			}
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const toConfirmeqpGroup = (item: EqpGroupItem) => {
+	if (type.value) {
+		if (type.value === 'trig') {
+			currentTrigData.value.eqpGroup = item.id
+			currentTrigData.value.eqpGroupName = item.device_group
+			currentTrigData.value.eqp = ''
+			currentTrigData.value.eqpName = ''
+			currentTrigData.value.condition = ''
+			currentTrigData.value.conditionName = ''
+		} else if (type.value === 'con') {
+			currentConData.value.eqpGroup = item.id
+			currentConData.value.eqpGroupName = item.device_group
+			currentConData.value.eqp = ''
+			currentConData.value.eqpName = ''
+			currentConData.value.condition = ''
+			currentConData.value.conditionName = ''
+		}
+		eqpGroups.value?.close?.()
+	} else if (addType.value) {
+		if (addType.value === 'trig') {
+			addTrigForm.eqp = ''
+			addTrigForm.eqpName = ''
+			addTrigForm.condition = ''
+			addTrigForm.conditionName = ''
+			addTrigForm.eqpGroup = item.id
+			addTrigForm.eqpGroupName = item.device_group
+			addtrigPopup.value?.open?.()
+		} else if (addType.value === 'con') {
+			addConForm.eqp = ''
+			addConForm.eqpName = ''
+			addConForm.condition = ''
+			addConForm.conditionName = ''
+			addConForm.eqpGroup = item.id
+			addConForm.eqpGroupName = item.device_group
+			addConPopup.value?.open?.()
+		}
+		eqpGroups.value?.close?.()
+	}
+}
+
+const toSelectEqpGroup = async (data: any, popupType: string) => {
+	const req = apiRequest
+	if (!req) return
+
+	type.value = popupType
+	addType.value = ''
+	if (popupType === 'trig') currentTrigData.value = data
+	else if (popupType === 'con') currentConData.value = data
+
+	uni.showLoading({ title: t('pages.addControl.loading') as string })
+	try {
+		const res = (await req<EqpGroupItem[]>('/api/asset/list/d', { business_id: uni.getStorageSync('ywId') }, 'post')) as AssetListRes
+		if (res.code === 200) {
+			if (res.data && res.data.length > 0) {
+				eqpGroups.value?.open?.()
+				eqpGroupsList.value = res.data
+			} else {
+				showMsg(t('pages.addControl.noData') as string)
+			}
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const toSelectEqpGroupAdd = async (popupType: string) => {
+	const req = apiRequest
+	if (!req) return
+
+	addType.value = popupType
+	type.value = ''
+
+	uni.showLoading({ title: t('pages.addControl.loading') as string })
+	try {
+		const res = (await req<EqpGroupItem[]>('/api/asset/list/d', { business_id: uni.getStorageSync('ywId') }, 'post')) as AssetListRes
+		if (res.code === 200) {
+			if (res.data && res.data.length > 0) {
+				eqpGroupsList.value = res.data
+				if (popupType === 'trig') addtrigPopup.value?.close?.()
+				else if (popupType === 'con') addConPopup.value?.close?.()
+				eqpGroups.value?.open?.()
+			} else {
+				showMsg(t('pages.addControl.noData') as string)
+			}
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const toSelectConditionType = (data: any, popupType: string) => {
+	type.value = popupType
+	addType.value = ''
+	if (popupType === 'trig') currentTrigData.value = data
+	else if (popupType === 'con') currentConData.value = data
+	currentTrigData.value = data
+	conditionType.value?.open?.()
+}
+
+const comfirConditionType = (item: ConditionTypeItem) => {
+	if (type.value === 'trig') {
+		currentTrigData.value.conditionType = item.value
+		currentTrigData.value.conditionTypeName = item.label
+	} else if (type.value === 'con') {
+		currentConData.value.conditionType = item.value
+		currentConData.value.conditionTypeName = item.label
+	}
+	conditionType.value?.close?.()
+}
+
+const toAddCon = () => addConPopup.value?.open?.()
+const toAddtrig = () => addtrigPopup.value?.open?.()
 </script>
 
 <style scoped lang="css">
-	@import '@/common/add-control.css';
+	@import '@/common/styles/add-control.css';
 
 	.uni-date__x-input {
 		text-align: right;

@@ -51,160 +51,99 @@
 	</view>
 </template>
 
-<script>
+<script setup lang="ts">
+	import { computed, ref } from 'vue'
+	import { useI18n } from 'vue-i18n'
 
-	export default {
-		name: 'customizePopup',
+	type PopupParams = Record<string, unknown>
+	type MaybePromise<T> = T | Promise<T>
 
-		props: {
-			// 显示/隐藏
-			value: {
-				type: Boolean,
-				default: false
-			},
-			// 蒙层透明度
-			opacity: {
-				type: Number | String,
-				default: 0.5
-			},
-			
-			// 权重
-			zIndex: {
-				type: Number | String,
-				default: 999
-			},
-			
-			// 内容位置
-			mainAlign: {
-				type: String,
-				default: 'center'
-			},
-			
-			isMask: {
-				type: Boolean,
-				default: true
-			},
-			
-			// 关闭弹框
-			closeCallBack: {
-				type: Function
-			},
-			
-			// 确定弹框回调
-			submitCallBack: {
-				type: Function
-			},
-			
-			// 标题
-			title: {
-				type: String,
-				default() {
-					return this.$t('components.popup.title')
-				}
-			},
-			
-			// 内容
-			content: {
-				type: String,
-				default() {
-					return this.$t('components.popup.content')
-				}
-			},
-			
-			// 取消按钮的文字，默认为"取消"
-			cancelText: {
-				type: String,
-				default() {
-					return this.$t('components.popup.cancel')
-				}
-			},
-	
-			// 确定按钮的文字，默认为"确定"
-			confirmText: {
-				type: String,
-				default() {
-					return this.$t('components.popup.confirm')
-				}
-			},
-			
-			// 其他参数
-			popupParams: {
-				type: Object,
-				default: () => {
-					return {}
-				}
-			}
-		},
-		
-		data() {
-			return {
-				isLoading: false
-			}
-		},
-		
-		computed: {
-			maskBackgroundColor() {
-				const {opacity} = this
-				
-				return `rgba(0, 0, 0, ${opacity})`
-			}
-		},
-		
-		methods: {
-			maskClosePopup() {
-				const {isMask, isLoading} = this
-				
-				if (!isMask || isLoading) {
-					return
-				}
-				
-				this.popupCloseCallBack()
-			},
-			
-			// 关闭弹框回调
-			popupCloseCallBack() {
-				const {popupParams, closeCallBack} = this
-				const backType = closeCallBack && Promise.resolve(closeCallBack(popupParams))
-				
-				backType.then(e => {
-					this.closePopup()
-				})
-			},
-			
-			// 提交弹框回调
-			popupSubmitCallBack() {
-				const {isLoading, popupParams, submitCallBack} = this
-				
-				if (isLoading) {
-					return
-				}
-				
-				const backType = submitCallBack && submitCallBack(popupParams)
-				
-				if (backType && backType instanceof Promise) {
-					this.isLoading = true
-					
-					backType.finally(e => {
-						this.isLoading = false
-						this.closePopup()
-					})
-				} else {
-					this.closePopup()
-				}
-			},
-			
-			// 关闭弹出框
-			closePopup() {
-				this.$emit('input', false)
-			},
-			
-			// 阻止遮罩滚动穿透
-			stopScrolling() {
-				return
-			}
-		}
+	type Props = {
+		// 兼容 Vue2 v-model（value/input）与 Vue3 v-model（modelValue/update:modelValue）
+		value?: boolean
+		modelValue?: boolean
+		opacity?: number | string
+		zIndex?: number | string
+		mainAlign?: string
+		isMask?: boolean
+		closeCallBack?: (params: PopupParams) => MaybePromise<unknown>
+		submitCallBack?: (params: PopupParams) => MaybePromise<unknown>
+		title?: string
+		content?: string
+		cancelText?: string
+		confirmText?: string
+		popupParams?: PopupParams
 	}
-	
+
+	const props = withDefaults(defineProps<Props>(), {
+		modelValue: false,
+		opacity: 0.5,
+		zIndex: 999,
+		mainAlign: 'center',
+		isMask: true,
+		popupParams: () => ({}),
+	})
+
+	const emit = defineEmits<{
+		(e: 'input', v: boolean): void
+		(e: 'update:value', v: boolean): void
+		(e: 'update:modelValue', v: boolean): void
+	}>()
+
+	const { t } = useI18n()
+
+	const isLoading = ref<boolean>(false)
+
+	const value = computed<boolean>(() => (props.value !== undefined ? props.value : props.modelValue) ?? false)
+	const zIndex = computed<number | string>(() => props.zIndex)
+	const mainAlign = computed<string>(() => props.mainAlign)
+	const title = computed<string>(() => props.title ?? t('components.popup.title'))
+	const content = computed<string>(() => props.content ?? t('components.popup.content'))
+	const cancelText = computed<string>(() => props.cancelText ?? t('components.popup.cancel'))
+	const confirmText = computed<string>(() => props.confirmText ?? t('components.popup.confirm'))
+
+	const maskBackgroundColor = computed<string>(() => `rgba(0, 0, 0, ${props.opacity})`)
+
+	const closePopup = () => {
+		emit('input', false)
+		emit('update:value', false)
+		emit('update:modelValue', false)
+	}
+
+	const maskClosePopup = () => {
+		if (!props.isMask || isLoading.value) return
+		popupCloseCallBack()
+	}
+
+	const popupCloseCallBack = async () => {
+		const fn = props.closeCallBack
+		if (!fn) {
+			closePopup()
+			return
+		}
+		await Promise.resolve(fn(props.popupParams))
+		closePopup()
+	}
+
+	const popupSubmitCallBack = async () => {
+		if (isLoading.value) return
+		const fn = props.submitCallBack
+		const backType = fn ? fn(props.popupParams) : undefined
+
+		if (backType && backType instanceof Promise) {
+			isLoading.value = true
+			try {
+				await backType
+			} finally {
+				isLoading.value = false
+				closePopup()
+			}
+			return
+		}
+		closePopup()
+	}
+
+	const stopScrolling = () => {}
 </script>
 
 <style lang="scss" scoped>

@@ -34,107 +34,133 @@
   
 </template>
 
-<script>
-  export default {
-    model:{ // 建议显示把这个写上
-      event:'update:value',
-      prop: 'value'
-    },
-    props: {
-      value: {
-        type: String,
-      },
-      options: {
-        type: Array,
-        default: [],
-      },
-    },
-    data () {
-      return {
-        type: undefined,
-      }
-    },
-    computed: {
-      showValue () {
-        const path = this.deepFind(this.value, this.options)
-        if (path.length) {
-          this.type = path[path.length-1].type
-          return path.map(item => item.device_name).join('/')
-        } else {
-          return ''
-        }
-      },
-    },
-    watch: {
-      value (n, o) {
-        console.log('deviceId = change', n, o)
-        this.$emit('change', n, o)
-      },
-      type (n, o) {
-        console.log(n, o)
-        this.$emit('propTypeChange', n, o)
-      },
-    },
-    created () {
-      
-    },
-    methods: {
-      showPop () {
-        this.$refs.pop._show()
-      },
-      hidePop() {
-        this.$refs.pop._hide()
-      },
-      onSelect ([option]) {
-        console.log(option)
-        if (option) {
-          this.type = option.value
-          this.$emit('update:value', option.id)
-        }
-      },
-      
-      treeCancel () {},
-      deepFind (device_id, treeData) {
-        const devicePath = []
-        if (!device_id) {
-          return devicePath
-        }
-        for (let i = 0; i < treeData.length; i++) {
-          const item = treeData[i]
-          if (item.device === device_id) {
-            devicePath.push({
-              device_id: item.device,
-              device_name: item.device_name,
-              device_token: item.device_token,
-              device_type: item.device_type,
-              type: item.type,
-            })
-            break;
-          } else if (item.children) {
-            devicePath.push({
-              device_id: item.device,
-              device_name: item.device_name,
-              device_token: item.device_token,
-              device_type: item.device_type,
-              type: item.type,
-            })
-            // 继续
-            const temp = this.deepFind(device_id, item.children)
-          
-            if (temp.length) {
-              devicePath.push(...temp)
-              break;
-            } else {
-              devicePath.length = 0
-            }
-          } else { // 单一路径查找结束未找到匹配，则清空暂存路径
-            devicePath.length = 0
-          }
-        }
-        return devicePath
-      },
-    },
-  }
+<script setup lang="ts">
+	import { computed, ref, toRefs, watch, watchEffect } from 'vue'
+
+	type PropType = string | number | undefined
+	type DeviceNode = {
+		device: string
+		device_name: string
+		device_token?: string
+		device_type?: string
+		type?: PropType
+		children?: DeviceNode[]
+	}
+	type DevicePathItem = {
+		device_id: string
+		device_name: string
+		device_token?: string
+		device_type?: string
+		type?: PropType
+	}
+
+	type Props = {
+		// 兼容 Vue2 v-model（value/update:value）与 Vue3 v-model（modelValue/update:modelValue）
+		value?: string
+		modelValue?: string
+		options?: DeviceNode[]
+	}
+
+	const props = withDefaults(defineProps<Props>(), {
+		options: () => [],
+	})
+
+	const emit = defineEmits<{
+		(e: 'update:value', v?: string): void
+		(e: 'update:modelValue', v?: string): void
+		(e: 'change', n?: string, o?: string): void
+		(e: 'propTypeChange', n?: PropType, o?: PropType): void
+	}>()
+
+	const { options } = toRefs(props)
+	const pop = ref<any>(null) // NOTE: uni_modules/gq-tree 的实例方法类型未在项目中显式声明
+	const type = ref<PropType>(undefined)
+
+	const value = computed<string | undefined>(() => (props.value !== undefined ? props.value : props.modelValue) || undefined)
+
+	const deepFind = (deviceId: string | undefined, treeData: DeviceNode[]): DevicePathItem[] => {
+		const devicePath: DevicePathItem[] = []
+		if (!deviceId) return devicePath
+
+		for (let i = 0; i < treeData.length; i += 1) {
+			const item = treeData[i]
+			if (item.device === deviceId) {
+				devicePath.push({
+					device_id: item.device,
+					device_name: item.device_name,
+					device_token: item.device_token,
+					device_type: item.device_type,
+					type: item.type,
+				})
+				break
+			} else if (item.children) {
+				devicePath.push({
+					device_id: item.device,
+					device_name: item.device_name,
+					device_token: item.device_token,
+					device_type: item.device_type,
+					type: item.type,
+				})
+
+				const temp = deepFind(deviceId, item.children)
+				if (temp.length) {
+					devicePath.push(...temp)
+					break
+				} else {
+					devicePath.length = 0
+				}
+			} else {
+				devicePath.length = 0
+			}
+		}
+		return devicePath
+	}
+
+	const showValue = computed<string>(() => {
+		const path = deepFind(value.value, options.value)
+		if (!path.length) return ''
+		return path.map((item) => item.device_name).join('/')
+	})
+
+	watchEffect(() => {
+		const path = deepFind(value.value, options.value)
+		type.value = path.length ? path[path.length - 1]?.type : undefined
+	})
+
+	watch(
+		() => value.value,
+		(n, o) => {
+			console.log('deviceId = change', n, o)
+			emit('change', n, o)
+		}
+	)
+
+	watch(
+		() => type.value,
+		(n, o) => {
+			console.log(n, o)
+			emit('propTypeChange', n, o)
+		}
+	)
+
+	const showPop = () => {
+		pop.value?._show?.()
+	}
+	const hidePop = () => {
+		pop.value?._hide?.()
+	}
+
+	const onSelect = ([option]: Array<Record<string, unknown>>) => {
+		console.log(option)
+		if (!option) return
+		type.value = (option.value as PropType) ?? type.value
+		// NOTE: gq-tree 返回结构由 uni_modules 决定，这里保持与原逻辑一致（优先使用 option.id）
+		const id = (option.id as string | undefined) ?? (option.device as string | undefined)
+		emit('update:value', id)
+		emit('update:modelValue', id)
+	}
+
+	const treeCancel = () => {}
 </script>
 
 <style scoped>

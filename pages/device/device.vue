@@ -24,203 +24,36 @@
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				deviceData:[
-					{
-						id:1000,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump1'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1001,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump2'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1002,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump3'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1003,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump4'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1000,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump1'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1001,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump2'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1002,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump3'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1003,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump4'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1000,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump1'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1001,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump2'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1002,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump3'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1003,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump4'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1000,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump1'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1001,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump2'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1002,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump3'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1003,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump4'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1000,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump1'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1001,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump2'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					},
-					{
-						id:1002,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump3'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:1
-					},
-					{
-						id:1003,
-						icon:'iconbengzhan',
-						title:this.$t('pages.deviceDetail.pump4'),
-						time:'2021-04-06 10:36:01',
-						value:'1',
-						type:'Device',
-						status:0
-					}
-				]
-			}
-		},
-		onShow() {
-			uni.setNavigationBarTitle({
-				title: this.$t('pages.myDevices')
-			})
-		},
-		methods: {
-			
-		}
-	}
+<script setup lang="ts">
+import { computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+type DeviceItem = {
+	id: number
+	icon: string
+	title: string
+	time: string
+	value: string
+	type: string
+	status: 0 | 1
+}
+
+const { t } = useI18n()
+
+const base = computed<DeviceItem[]>(() => [
+	{ id: 1000, icon: 'iconbengzhan', title: t('pages.deviceDetail.pump1'), time: '2021-04-06 10:36:01', value: '1', type: 'Device', status: 1 },
+	{ id: 1001, icon: 'iconbengzhan', title: t('pages.deviceDetail.pump2'), time: '2021-04-06 10:36:01', value: '1', type: 'Device', status: 0 },
+	{ id: 1002, icon: 'iconbengzhan', title: t('pages.deviceDetail.pump3'), time: '2021-04-06 10:36:01', value: '1', type: 'Device', status: 1 },
+	{ id: 1003, icon: 'iconbengzhan', title: t('pages.deviceDetail.pump4'), time: '2021-04-06 10:36:01', value: '1', type: 'Device', status: 0 },
+])
+
+// NOTE: 原页面为静态演示数据（4 条重复多次），这里保持渲染结果一致
+const deviceData = computed<DeviceItem[]>(() => Array.from({ length: 5 }).flatMap(() => base.value))
+
+onShow(() => {
+	uni.setNavigationBarTitle({ title: t('pages.myDevices') })
+})
 </script>
 
 <style>
@@ -284,3 +117,4 @@
 	color: #999999;
 }
 </style>
+

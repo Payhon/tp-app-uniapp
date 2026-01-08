@@ -45,323 +45,316 @@
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				value:[],
-				datas: {},
-				checkArr:[],//返回选中数据
-				showPicker: false,
-				yearStr:true,//年
-				monthStr:true,//月
-				dayStr:true,//日
-				hours:true,//时
-				minutes:true,//分
-				seconds:true//秒
-			}
-		},
-		props: {
-			themeColor: {
-				type: String,
-				default () {
-					return "#f00" //确定字体颜色
-				}
-			},
-			startYear: { //开始时间
-				type: String,
-				default () {
-					return "1970"
-				}
-			},
-			endYear: { //结束时间
-				type: [String,Number],
-				default () {
-					return new Date().getFullYear()+""
-				}
-			},
-			val: { //设置选中时间格式--默认为当前时间
-				type: String,
-				default () {
-					return " "  //年月日时分YYYY-MM-DD hh:mm:ss
-				}
-			}
-		},
-		watch:{
-			mode(val){
-				this.initData();
-			},
-			val(val){
-				this.initData();
-			}
-		},
-		created() {
-		   //this.initData();
-		},
-		methods: {
-		   //背景处理
-			maskTap() {
-				this.showPicker = false;
-			},
-			//显示
-			show() {
-				this.initData();//初始化时间
-				this.showPicker = true;
-			},
-			//隐藏
-			hide() {
-				this.showPicker = false;
-			},
-			//点击取消
-			pickerCancel() {
-				this.showPicker = false;
-			},
-			//点击确定
-			pickerConfirm(e) {
-				let date=this.returnData()
-				//console.log(date)
-				this.$emit("confirm",date);
-				this.showPicker = false;
-			},
-			//初始化时间
-			initData() {
-				this.datas = this.initPicker(this.startYear,this.endYear);
-				this.selectedTimeInit();//处理选择
-			},
-			//返回数据处理
-			returnData(){
-				let date=[],result;
-				if(this.yearStr){ //年
-				    date.push(this.checkArr[0])
-				}
-				if(this.monthStr){ //月
-				    date.push(this.checkArr[1])
-				}
-				if(this.dayStr){ //日
-				    date.push(this.checkArr[2])
-				}
-				if(this.hours){ //时
-				    date.push(this.checkArr[3])
-				}
-				if(this.minutes){//分
-				    date.push(this.checkArr[4])
-				}
-				if(this.seconds){ //秒
-				    date.push(this.checkArr[5])
-				}
-				//console.log(date.length)
-				switch(date.length-1){ //返回时间格式2020 2020-01 2020-01-09 2020-01-09 22  2020-01-09 22:32 2020-01-09 22:32:34
-					case 0: 
-					result=date[0];
-					break;
-					case 1: 
-					result=date[0]+'-'+date[1];
-					break;
-					case 2: 
-					result=date[0]+'-'+date[1]+'-'+date[2];
-					break;
-					case 3: 
-					result=date[0]+'-'+date[1]+'-'+date[2]+' '+date[3];
-					break;
-					case 4: 
-					result=date[0]+'-'+date[1]+'-'+date[2]+' '+date[3]+":"+date[4];
-					break;
-					case 5:
-					  result=date[0]+'-'+date[1]+'-'+date[2]+' '+date[3]+":"+date[4]+":"+date[5];
-					break;
-				}
-				//console.log(result)
-				return result;
-			},
-			//当前选中时间-默认处理
-			selectedTimeInit(){
-				let dateArray=this.checkValue(this.val);
-				let crtDate = new Date();
-				let yearStr=dateArray[0]?dateArray[0]:crtDate.getFullYear(); //年
-				let monthStr=dateArray[1]?dateArray[1]:this.forMatNum(crtDate.getMonth() + 1);//月
-				let dayStr=dateArray[2]?dateArray[2]:this.forMatNum(new Date(yearStr,monthStr,0).getDate());//日
-				let hours=dateArray[3]?dateArray[3]:this.forMatNum(crtDate.getHours());//时
-				let minutes=dateArray[4]?dateArray[4]:this.forMatNum(crtDate.getMinutes());//分
-				let seconds=dateArray[5]?dateArray[5]:this.forMatNum(crtDate.getSeconds());//秒
-				if(monthStr>12){
-					console.log("时间格不正确,月不能大预12")
-					monthStr=12;
-				}
-				if(dayStr>31){
-					console.log("时间格不正确,日不能大预31");
-					dayStr=31;
-				}
-				if(hours>24){
-					console.log("时间格不正确,日不能大预23");
-					hours="00";
-				}
-				if(minutes>59 || seconds>59 ){
-					console.log("时间格不正确,分、秒不能大预59");
-					dayStr=59;
-				}
-				let slctDate = [yearStr,monthStr,dayStr,hours,minutes,seconds]; //年月日分秒
-				
-				this.resetSelectDate(slctDate);
-			},
-			//刷新当前选中日期
-			resetSelectDate(newValue) {	
-				let pickVal=[0,0,0,0,0,0] //年月日时分秒
-				for (let i = 0; i < newValue.length; i++){
-					switch (i) {
-						case 0://年
-							pickVal[i]=this.queryItemForArray(this.datas.years,newValue[i]);
-							break;
-						case 1://月
-							pickVal[i]=this.queryItemForArray(this.datas.months,newValue[i]);
-							break;
-						case 2://日
-							pickVal[i]=this.queryItemForArray(this.datas.days,newValue[i]);
-							break;
-						case 3: //时
-						   	 pickVal[i]=this.queryItemForArray(this.datas.hours,newValue[i]); 
-							break;	
-						case 4: //分
-			                pickVal[i]=this.queryItemForArray(this.datas.minutes,newValue[i]); 
-							break;	
-						case 5://秒
-						   pickVal[i]=this.queryItemForArray(this.datas.seconds,newValue[i]);
-							break;						
-					  }
-				    this.checkArr[i] = newValue[i];//选中时间 
-				}
-				// console.log(pickVal)
-			    this.$nextTick(()=>{
-				  this.value=pickVal;
-				})			
-			},
-			// 查询值在数组中对应的索引
-			queryItemForArray(array,value) {
-				for (let index = 0; index < array.length; index++) {
-					if (array[index]==value) {
-						return index;
-					}
-				}
-			},
-			//滚动获取值
-			bindChange(val) {
-				let arr=val.detail.value;
-				let year,month,day,hour,minute,seconds;
-				let dataS=[];
-					year = this.datas.years[arr[0]];
-					month = this.datas.months[arr[1]]
-					day = this.datas.days[arr[2]];
-					hour = this.datas.hours[arr[3]]
-					minute = this.datas.minutes[arr[4]];
-					seconds = this.datas.seconds[arr[5]]
-				    dataS=[year,month,day,hour,minute,seconds];
-				this.checkArr=dataS
-			},
-			//年月 
-			initDays(year, month) { 
-				let totalDays = new Date(year, month, 0).getDate();
-				let dates = [];
-				for (let d = 1; d <= totalDays; d++) {
-					dates.push(this.forMatNum(d));
-				};
-				return dates;
-			},
-			//时间处理
-			initPicker(start, end,step = 1) {
-				let initstartDate = new Date(start);
-				let endDate = new Date(end);
-				let startYear = initstartDate.getFullYear();
-				let startMonth = initstartDate.getMonth();
-				let endYear = endDate.getFullYear();
-				let years=[],months=[],days=[],hours=[],minutes=[],seconds=[];
-				let totalDays = new Date(startYear, startMonth, 0).getDate();
-				for (let s = startYear; s <= endYear; s++) {
-					years.push(s + '');
-				};
-				for (let m = 1; m <= 12; m++) {
-					months.push(this.forMatNum(m));
-				};
-				for (let d = 1; d <= totalDays; d++) {
-					days.push(this.forMatNum(d));
-				}
-				for (let h = 0; h < 24; h++) {
-					hours.push(this.forMatNum(h));
-				}
-				for (let m = 0; m < 60; m += step) {
-					minutes.push(this.forMatNum(m));
-				}
-				for (let m = 0; m < 60; m += step) {
-					seconds.push(this.forMatNum(m));
-				}
-				return {years,months,days,hours,minutes,seconds};
-			},
-			//处理小10时在前面加0
-			forMatNum(num) { 
-				return num < 10 ? '0' + num : num;
-			},
-			//验证时间是否正确
-			checkValue(value){
-				let example,strReg=[];
-				let yearstrReg=/^\d{4}$/; //年2019
-				let monthstrReg=/^\d{4}-\d{2}$/;//月 
-				let daystrReg=/^\d{4}-\d{2}-\d{2}$/;//日
-				let hoursReg=/^\d{4}-\d{2}-\d{2} \d{2}(?!:)/;//时 
-				let minutesReg=/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2}){0,1}?$/;//分
-				let secondstrReg=/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;//秒
-				if(secondstrReg.test(value)){
-					 //console.log("秒")
-					 example="2019-02-01 18:06:01";
-					 let dVal=value.split(" ");
-					 let dVal0=dVal[0].split("-");
-					 let dVal1=dVal[1].split(":");
-					     strReg=dVal0.concat(dVal1);
-				}else if(minutesReg.test(value)){
-					 //console.log("分")
-					 example="2019-02-01 18:06:00或2019-02-01 18:06";
-					 let dVal=value.split(" ");
-					 let dVal0=dVal[0].split("-");
-					 let dVal1=dVal[1].split(":");
-					     strReg=dVal0.concat(dVal1);
-					     this.seconds=false//秒
-				}else if(hoursReg.test(value)){
-					 //console.log("时")
-					 example="2019-02-01 18:00:00或2019-02-01 18";
-					 let dVal=value.split(" ");
-					 let dVal0=dVal[0].split("-");
-					     dVal0.push(dVal[1]);
-					     strReg=dVal0;
-					     this.minutes=false//分
-					     this.seconds=false//秒
-				}else if(daystrReg.test(value)){
-					 //console.log("日")
-					 example="2019-02-01";
-					 strReg=value.split("-");
-					 this.hours=false//时
-					 this.minutes=false//分
-					 this.seconds=false//秒
-				}else if(monthstrReg.test(value)){
-					 //console.log("月")
-					 example="2019-02";
-					 strReg=value.split("-");
-					 this.dayStr=false//日
-					 this.hours=false//时
-					 this.minutes=false//分
-					 this.seconds=false//秒
-				}else if(yearstrReg.test(value)){
-					 //console.log("年")
-					 example="2019";
-					 strReg.push(value);
-					 this.monthStr=false//月
-					 this.dayStr=false//日
-					 this.hours=false//时
-					 this.minutes=false//分
-					 this.seconds=false//秒
-				}else{
-					//console.log("请传入正确的时间值，例value="+example+"");
-				}
-				return strReg;				
-			},
-		}
+<script setup lang="ts">
+import { nextTick, reactive, ref, watch } from 'vue'
+
+const props = withDefaults(
+	defineProps<{
+		themeColor?: string
+		startYear?: string
+		endYear?: string | number
+		// 设置选中时间格式（默认空格，保持历史行为）
+		val?: string
+	}>(),
+	{
+		themeColor: '#f00',
+		startYear: '1970',
+		endYear: () => new Date().getFullYear() + '',
+		val: ' '
 	}
+)
+
+const emit = defineEmits<{
+	(e: 'confirm', value: string): void
+}>()
+
+const value = ref<number[]>([])
+
+const datas = reactive<{
+	years: string[]
+	months: Array<string | number>
+	days: Array<string | number>
+	hours: Array<string | number>
+	minutes: Array<string | number>
+	seconds: Array<string | number>
+}>({
+	years: [],
+	months: [],
+	days: [],
+	hours: [],
+	minutes: [],
+	seconds: []
+})
+
+const checkArr = ref<Array<string | number>>([]) // 返回选中数据
+const showPicker = ref<boolean>(false)
+
+const yearStr = ref<boolean>(true) // 年
+const monthStr = ref<boolean>(true) // 月
+const dayStr = ref<boolean>(true) // 日
+const hours = ref<boolean>(true) // 时
+const minutes = ref<boolean>(true) // 分
+const seconds = ref<boolean>(true) // 秒
+
+watch(
+	() => props.val,
+	() => {
+		initData()
+	}
+)
+
+const maskTap = () => {
+	showPicker.value = false
+}
+
+const show = () => {
+	initData() // 初始化时间
+	showPicker.value = true
+}
+
+const hide = () => {
+	showPicker.value = false
+}
+
+const pickerCancel = () => {
+	showPicker.value = false
+}
+
+const pickerConfirm = () => {
+	const date = returnData()
+	emit('confirm', date)
+	showPicker.value = false
+}
+
+const initData = () => {
+	const next = initPicker(props.startYear, props.endYear)
+	Object.assign(datas, next)
+	selectedTimeInit() // 处理选择
+}
+
+const returnData = () => {
+	const date: Array<string | number> = []
+	let result = ''
+
+	if (yearStr.value) date.push(checkArr.value[0])
+	if (monthStr.value) date.push(checkArr.value[1])
+	if (dayStr.value) date.push(checkArr.value[2])
+	if (hours.value) date.push(checkArr.value[3])
+	if (minutes.value) date.push(checkArr.value[4])
+	if (seconds.value) date.push(checkArr.value[5])
+
+	switch (date.length - 1) {
+		// 返回时间格式 2020 / 2020-01 / 2020-01-09 / 2020-01-09 22 / 2020-01-09 22:32 / 2020-01-09 22:32:34
+		case 0:
+			result = String(date[0] ?? '')
+			break
+		case 1:
+			result = `${date[0]}-${date[1]}`
+			break
+		case 2:
+			result = `${date[0]}-${date[1]}-${date[2]}`
+			break
+		case 3:
+			result = `${date[0]}-${date[1]}-${date[2]} ${date[3]}`
+			break
+		case 4:
+			result = `${date[0]}-${date[1]}-${date[2]} ${date[3]}:${date[4]}`
+			break
+		case 5:
+			result = `${date[0]}-${date[1]}-${date[2]} ${date[3]}:${date[4]}:${date[5]}`
+			break
+	}
+
+	return result
+}
+
+const selectedTimeInit = () => {
+	const dateArray = checkValue(props.val)
+	const crtDate = new Date()
+
+	let yearS: string | number = dateArray[0] ? dateArray[0] : crtDate.getFullYear() // 年
+	let monthS: string | number = dateArray[1] ? dateArray[1] : forMatNum(crtDate.getMonth() + 1) // 月
+	let dayS: string | number = dateArray[2] ? dateArray[2] : forMatNum(new Date(Number(yearS), Number(monthS), 0).getDate()) // 日
+	let hoursS: string | number = dateArray[3] ? dateArray[3] : forMatNum(crtDate.getHours()) // 时
+	let minutesS: string | number = dateArray[4] ? dateArray[4] : forMatNum(crtDate.getMinutes()) // 分
+	let secondsS: string | number = dateArray[5] ? dateArray[5] : forMatNum(crtDate.getSeconds()) // 秒
+
+	if (Number(monthS) > 12) {
+		// eslint-disable-next-line no-console
+		console.log('时间格不正确,月不能大预12')
+		monthS = 12
+	}
+	if (Number(dayS) > 31) {
+		// eslint-disable-next-line no-console
+		console.log('时间格不正确,日不能大预31')
+		dayS = 31
+	}
+	if (Number(hoursS) > 24) {
+		// eslint-disable-next-line no-console
+		console.log('时间格不正确,日不能大预23')
+		hoursS = '00'
+	}
+	if (Number(minutesS) > 59 || Number(secondsS) > 59) {
+		// eslint-disable-next-line no-console
+		console.log('时间格不正确,分、秒不能大预59')
+		dayS = 59
+	}
+
+	const slctDate = [yearS, monthS, dayS, hoursS, minutesS, secondsS] // 年月日时分秒
+	resetSelectDate(slctDate)
+}
+
+const resetSelectDate = (newValue: Array<string | number>) => {
+	const pickVal: number[] = [0, 0, 0, 0, 0, 0] // 年月日时分秒
+	for (let i = 0; i < newValue.length; i++) {
+		switch (i) {
+			case 0: // 年
+				pickVal[i] = queryItemForArray(datas.years, newValue[i]) as any
+				break
+			case 1: // 月
+				pickVal[i] = queryItemForArray(datas.months, newValue[i]) as any
+				break
+			case 2: // 日
+				pickVal[i] = queryItemForArray(datas.days, newValue[i]) as any
+				break
+			case 3: // 时
+				pickVal[i] = queryItemForArray(datas.hours, newValue[i]) as any
+				break
+			case 4: // 分
+				pickVal[i] = queryItemForArray(datas.minutes, newValue[i]) as any
+				break
+			case 5: // 秒
+				pickVal[i] = queryItemForArray(datas.seconds, newValue[i]) as any
+				break
+		}
+		checkArr.value[i] = newValue[i] // 选中时间
+	}
+
+	nextTick(() => {
+		value.value = pickVal
+	})
+}
+
+const queryItemForArray = (array: Array<string | number>, v: string | number) => {
+	for (let index = 0; index < array.length; index++) {
+		if (array[index] == v) return index
+	}
+	return 0
+}
+
+const bindChange = (val: any) => {
+	const arr: number[] = val?.detail?.value || []
+	const year = datas.years[arr[0]]
+	const month = datas.months[arr[1]]
+	const day = datas.days[arr[2]]
+	const hour = datas.hours[arr[3]]
+	const minute = datas.minutes[arr[4]]
+	const second = datas.seconds[arr[5]]
+	checkArr.value = [year, month, day, hour, minute, second]
+}
+
+const initDays = (year: string | number, month: string | number) => {
+	const totalDays = new Date(Number(year), Number(month), 0).getDate()
+	const dates: string[] = []
+	for (let d = 1; d <= totalDays; d++) {
+		dates.push(forMatNum(d))
+	}
+	return dates
+}
+
+const initPicker = (start: string, end: string | number, step = 1) => {
+	const initstartDate = new Date(start)
+	const endDate = new Date(String(end))
+	const startYear = initstartDate.getFullYear()
+	const startMonth = initstartDate.getMonth()
+	const endYear = endDate.getFullYear()
+
+	const years: string[] = []
+	const months: string[] = []
+	const days: string[] = []
+	const hoursArr: string[] = []
+	const minutesArr: string[] = []
+	const secondsArr: string[] = []
+
+	const totalDays = new Date(startYear, startMonth, 0).getDate()
+	for (let s = startYear; s <= endYear; s++) years.push(s + '')
+	for (let m = 1; m <= 12; m++) months.push(forMatNum(m))
+	for (let d = 1; d <= totalDays; d++) days.push(forMatNum(d))
+	for (let h = 0; h < 24; h++) hoursArr.push(forMatNum(h))
+	for (let m = 0; m < 60; m += step) minutesArr.push(forMatNum(m))
+	for (let m = 0; m < 60; m += step) secondsArr.push(forMatNum(m))
+
+	return { years, months, days, hours: hoursArr, minutes: minutesArr, seconds: secondsArr }
+}
+
+const forMatNum = (num: number) => {
+	return num < 10 ? '0' + num : String(num)
+}
+
+const checkValue = (v: string) => {
+	let example: string | undefined
+	let strReg: string[] = []
+	const yearstrReg = /^\\d{4}$/ // 年2019
+	const monthstrReg = /^\\d{4}-\\d{2}$/ // 月
+	const daystrReg = /^\\d{4}-\\d{2}-\\d{2}$/ // 日
+	const hoursReg = /^\\d{4}-\\d{2}-\\d{2} \\d{2}(?!:)/ // 时
+	const minutesReg = /^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}(:\\d{2}){0,1}?$/ // 分
+	const secondstrReg = /^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/ // 秒
+
+	if (secondstrReg.test(v)) {
+		example = '2019-02-01 18:06:01'
+		const dVal = v.split(' ')
+		const dVal0 = dVal[0].split('-')
+		const dVal1 = dVal[1].split(':')
+		strReg = dVal0.concat(dVal1)
+	} else if (minutesReg.test(v)) {
+		example = '2019-02-01 18:06:00或2019-02-01 18:06'
+		const dVal = v.split(' ')
+		const dVal0 = dVal[0].split('-')
+		const dVal1 = dVal[1].split(':')
+		strReg = dVal0.concat(dVal1)
+		seconds.value = false // 秒
+	} else if (hoursReg.test(v)) {
+		example = '2019-02-01 18:00:00或2019-02-01 18'
+		const dVal = v.split(' ')
+		const dVal0 = dVal[0].split('-')
+		dVal0.push(dVal[1])
+		strReg = dVal0
+		minutes.value = false // 分
+		seconds.value = false // 秒
+	} else if (daystrReg.test(v)) {
+		example = '2019-02-01'
+		strReg = v.split('-')
+		hours.value = false // 时
+		minutes.value = false // 分
+		seconds.value = false // 秒
+	} else if (monthstrReg.test(v)) {
+		example = '2019-02'
+		strReg = v.split('-')
+		dayStr.value = false // 日
+		hours.value = false // 时
+		minutes.value = false // 分
+		seconds.value = false // 秒
+	} else if (yearstrReg.test(v)) {
+		example = '2019'
+		strReg.push(v)
+		monthStr.value = false // 月
+		dayStr.value = false // 日
+		hours.value = false // 时
+		minutes.value = false // 分
+		seconds.value = false // 秒
+	} else {
+		// console.log("请传入正确的时间值，例value="+example+"");
+		void example
+	}
+
+	return strReg
+}
+
+defineExpose({
+	show,
+	hide
+})
 </script>
 
 <style lang="scss" scoped>

@@ -29,7 +29,7 @@
 
       <!-- 条件列表 -->
 	      <view class="section-content">
-	        <conditions-edit v-if="formData.trigger_condition_groups" ref="conditions"
+	        <conditions-edit v-if="formData.trigger_condition_groups" ref="conditionsRef"
 	          v-model:condition-data="formData.trigger_condition_groups" />
 	      </view>
 
@@ -55,387 +55,463 @@
 </template>
 
 <script>
-	import ActionsEdit from '../scene-detail/actions-edit.vue';
-	import ConditionsEdit from './conditions-edit.vue';
-	import CustomSelect from '@/components/custom-select.vue'
-	import moment from 'moment';
-	import Modal from '@/components/x-modal/x-modal'
+</script>
+<script setup lang="ts">
+import { onMounted, reactive, ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+import moment from 'moment'
 
-export default {
-  components: {
-    ActionsEdit,
-    CustomSelect,
-    ConditionsEdit,
-    Modal
-  },
-  data() {
-    return {
-      visible: false,
+import ActionsEdit from '../scene-detail/actions-edit.vue'
+import ConditionsEdit from './conditions-edit.vue'
+import Modal from '@/components/x-modal/x-modal'
+import { useInjected, type ApiResponse } from '@/common/composables/useInjected'
 
-      formData: {},
+type ActionParamType =
+	| 'telemetry'
+	| 'attributes'
+	| 'command'
+	| 'c_telemetry'
+	| 'c_attribute'
+	| 'c_command'
+	| string
+	| null
 
-      editId: ''
-    }
-  },
-  onShow() {
-    uni.setNavigationBarTitle({
-      title: this.$t('pages.addSceneLinkage')
-    })
-  },
-  onLoad(options) {
-    this.editId = options.id
-    uni.setNavigationBarTitle({
-      title: this.editId ? this.$t('pages.sceneRuleDetail.editSceneLinkage') : this.$t('pages.sceneRuleDetail.addSceneLinkage'),
-    })
-  },
-  mounted() {
-    if (this.editId) {
-      this.getInfo();
-    } else {
-      this.formData = {
-        name: '',
-        description: '',
-        trigger_condition_groups: [ // 条件
-        ],
-        actions: [ // 动作
-          {
-            $index: Math.random()
-          }
-        ],
-      }
-    }
-  },
-  methods: {
-    // 获取修改信息
-    getInfo() {
-      uni.showLoading({
-        title: this.$t('pages.sceneRuleDetail.loading')
-      });
-      const params = {
-        id: this.editId
-      }
-      this.API.apiRequest('/api/v1/scene_automations/detail/' + this.editId, params, 'get').then(res => {
-        if (res.code == 200) {
-          this.formData = {
-            ...res.data,
-            trigger_condition_groups: this.convertConditionsData(res.data.trigger_condition_groups),
-            actions: this.convertActionsData(res.data.actions)
-          };
-          console.log(this.formData)
-          if (!this.formData.trigger_condition_groups?.length) {
-            this.formData.trigger_condition_groups = [
-              {
-                $index: Math.random(),
-              }
-            ]
-          }
-        } else {
-          uni.showToast({
-            title: res.message,
-            icon: 'none',
-            duration: 2000
-          });
-        }
-      }).finally(() => {
-        uni.hideLoading()
-      });
-    },
-    convertConditionsData(ifData) {
-      // 遍历数据，处理每一项的逻辑
-      ifData.forEach((item) => {
-        item.forEach((ifItem) => {
-          // 条件类型为 '10' 或 '11'
-          if (ifItem.trigger_conditions_type === '10' || ifItem.trigger_conditions_type === '11') {
-            ifItem.ifType = '1';
-            if (ifItem.trigger_operator === 'between') {
-              const [min, max] = ifItem.trigger_value.split('-');
-              ifItem.minValue = min;
-              ifItem.maxValue = max;
-            }
-            ifItem.trigger_param_key = `${ifItem.trigger_param_type}/${ifItem.trigger_param}`;
-          }
+interface ConditionItem extends Record<string, unknown> {
+	trigger_conditions_type?: string
+	trigger_operator?: string
+	trigger_value?: string
+	trigger_param_type?: string
+	trigger_param?: string
+	trigger_param_key?: string
 
-          // 条件类型为 '22'
-          if (ifItem.trigger_conditions_type === '22') {
-            ifItem.ifType = '2';
-            const [weekChose, startTime, endTime] = ifItem.trigger_value.split('|');
-            ifItem.weekChoseValue = weekChose.split('');
+	ifType?: string
+	minValue?: string
+	maxValue?: string
 
-            const formattedDate = moment().format('YYYY-MM-DD');
-            ifItem.startTimeValue = moment(`${formattedDate} ${startTime}`).valueOf();
-            ifItem.endTimeValue = moment(`${formattedDate} ${endTime}`).valueOf();
-          }
+	execution_time?: string
+	onceTimeValue?: number
 
-          // 条件类型为 '20'
-          if (ifItem.trigger_conditions_type === '20') {
-            ifItem.ifType = '2';
-            ifItem.onceTimeValue = moment(ifItem.execution_time).valueOf();
-          }
+	task_type?: 'HOUR' | 'DAY' | 'WEEK' | 'MONTH' | string
+	params?: string
+	weekChoseValue?: string[]
+	startTimeValue?: number
+	endTimeValue?: number
 
-          // 条件类型为 '21'
-          if (ifItem.trigger_conditions_type === '21') {
-            ifItem.ifType = '2';
+	hourTimeValue?: number
+	dayTimeValue?: number
+	weekTimeValue?: number
+	monthChoseValue?: string
+	monthTimeValue?: number
+}
 
-            const formattedDate = moment().format('YYYY-MM-DD');
-            const hour = moment().format('YYYY-MM-DD HH');
+type ConditionGroups = ConditionItem[][]
 
-            switch (ifItem.task_type) {
-              case 'HOUR':
-                ifItem.hourTimeValue = moment(`${hour}:${ifItem.params}`).valueOf();
-                break;
-              case 'DAY':
-                ifItem.dayTimeValue = moment(`${formattedDate} ${ifItem.params}`).valueOf();
-                break;
-              case 'WEEK':
-                const [weekStr, weekTime] = ifItem.params.split('|');
-                ifItem.weekChoseValue = weekStr.split('');
-                ifItem.weekTimeValue = moment(`${formattedDate} ${weekTime}`).valueOf();
-                break;
-              case 'MONTH':
-                const [monthChose, monthTime] = ifItem.params.split('T');
-                ifItem.monthChoseValue = monthChose;
-                ifItem.monthTimeValue = moment(`${formattedDate} ${monthTime}`).valueOf();
-                break;
-            }
-          }
-        });
-      });
-      return ifData;
-    },
-    // 提交时处理条件数据
-    handleConditionsData(conditionsData) {
-      const ifGroupsData = JSON.parse(JSON.stringify(conditionsData));
-      // eslint-disable-next-line array-callback-return
-      ifGroupsData.map((ifGroupItem) => {
-        // eslint-disable-next-line array-callback-return
-        ifGroupItem.map((ifItem) => {
-          if (ifItem.trigger_conditions_type === '10' || ifItem.trigger_conditions_type === '11') {
-            if (ifItem.trigger_operator === 'between') {
-              ifItem.trigger_value = `${ifItem.minValue}-${ifItem.maxValue}`;
-            }
-          }
-          if (ifItem.trigger_conditions_type === '22') {
-            let trigger_value = '';
-            // eslint-disable-next-line array-callback-return
-            ifItem.weekChoseValue.map((item) => {
-              trigger_value += item;
-            });
-            trigger_value += `|${moment(ifItem.startTimeValue).format('HH:mm:ssZ')}`;
-            trigger_value += `|${moment(ifItem.endTimeValue).format('HH:mm:ssZ')}`;
-            ifItem.trigger_value = trigger_value;
-          }
-          if (ifItem.trigger_conditions_type === '20') {
-            ifItem.execution_time = moment(ifItem.onceTimeValue).format();
-          }
-          if (ifItem.trigger_conditions_type === '21') {
-            if (ifItem.task_type === 'HOUR') {
-              ifItem.params = moment(ifItem.hourTimeValue).format('mm:00Z');
-            }
-            if (ifItem.task_type === 'DAY') {
-              ifItem.params = moment(ifItem.dayTimeValue).format('HH:mm:00Z');
-            }
-            if (ifItem.task_type === 'WEEK') {
-              let params = '';
-              // eslint-disable-next-line array-callback-return
-              ifItem.weekChoseValue.map((item) => {
-                params += item;
-              });
-              ifItem.params = `${params}|${moment(ifItem.weekTimeValue).format('HH:mm:00Z')}`;
-            }
-            if (ifItem.task_type === 'MONTH') {
-              ifItem.params = `${ifItem.monthChoseValue}T${moment(ifItem.monthTimeValue).format(`HH:mm:00Z`)}`;
-            }
-          }
-        });
-      });
-      return ifGroupsData;
-    },
-    convertActionsData(actionsData) {
-      const actionGroupsData = [];
-      const actionInstructList = [];
-      actionsData.map((item) => {
-        if (item.action_type === '10' || item.action_type === '11') {
-          item.actionParamOptions = [];
-          const actionValueObj = JSON.parse(item.action_value);
-          if (
-            item.action_param_type === 'c_telemetry' ||
-            item.action_param_type === 'c_attribute' ||
-            item.action_param_type === 'c_command'
-          ) {
-            item.actionValue = item.action_value;
-          }
-          if (item.action_param_type === 'telemetry' || item.action_param_type === 'attributes') {
-            item.actionValue = actionValueObj[item.action_param];
-          }
-          if (item.action_param_type === 'command') {
-            item.actionValue = actionValueObj.params;
-          }
-          item.actionParamOptions = [];
-          actionInstructList.push(item);
-        } else {
-          item.actionType = item.action_type;
-          actionGroupsData.push(item);
-        }
-      });
-      if (actionInstructList.length > 0) {
-        const type1Data = {
-          actionType: '1',
-          actionInstructList
-        };
-        actionGroupsData.push(type1Data);
-      }
-      return actionGroupsData;
-    },
-    // 提交时处理动作数据
-    handleActionData(inputActions) {
-      // 处理动作的数据
-      const actionGroupsData = inputActions;
-      const actionsData = [];
-      // eslint-disable-next-line array-callback-return
-      actionGroupsData.map((item) => {
-        if (item.actionType === '1') {
-          // eslint-disable-next-line array-callback-return
-          item.actionInstructList.map((instructItem) => {
-            // 如果是c_telemetry/c_attribute,那么action_value示例格式：{"c_telemetry":2}
-            // 如果是c_command,那么action_value示例格式：{"method":"switch1","params":{"false":0}}
-            if (
-              instructItem.action_param_type === 'c_telemetry' ||
-              instructItem.action_param_type === 'c_attribute' ||
-              instructItem.action_param_type === 'c_command'
-            ) {
-              instructItem.action_value = instructItem.actionValue;
-            }
-            // 如果是telemetry/attribute，那么 action_value示例格式：{"humidity":2}
-            if (instructItem.action_param_type === 'telemetry' || instructItem.action_param_type === 'attributes') {
-              const action_value = {};
-              action_value[instructItem.action_param] = instructItem.actionValue;
-              instructItem.action_value = JSON.stringify(action_value);
-            }
-            // 如果是command/c_command，那么 action_value示例格式:	{"method":"ReSet","params":{"switch":1,"light":"close"}}
-            if (instructItem.action_param_type === 'command') {
-              const action_value = {
-                method: instructItem.action_param,
-                params: instructItem.actionValue
-              };
-              instructItem.action_value = JSON.stringify(action_value);
-            }
-            actionsData.push(instructItem);
-          });
-        } else {
-          item.action_type = item.actionType;
-          actionsData.push(item);
-        }
-      });
-      return actionsData;
-    },
+interface ActionInstructItem extends Record<string, unknown> {
+	action_type?: string | null
+	action_target?: string | null
+	action_param_type?: ActionParamType
+	action_param?: string | null
+	action_value?: string
+	actionValue?: unknown
+	actionParamOptions?: unknown[]
+}
 
+interface ActionGroupItem extends Record<string, unknown> {
+	actionType?: string | null
+	action_type?: string | null
+	action_target?: string | null
+	actionInstructList?: ActionInstructItem[]
+}
 
-    // 校验
-    validateBaseInfo() {
-      // 场景基本信息校验
-      const {
-        name
-      } = this.formData
+interface SceneRuleFormData extends Record<string, unknown> {
+	id?: string
+	tenant_id?: string
+	name: string
+	description: string
+	enabled?: boolean
+	trigger_condition_groups: ConditionGroups
+	actions: ActionGroupItem[]
+}
 
-      if (!name) {
-        return {
-          result: this.$t('pages.sceneRuleDetail.enterRuleName')
-        }
-      }
+interface ConditionsEditExpose {
+	ifGroupsData?: () => ConditionGroups
+}
 
-      return {
-        result: true,
-      }
-    },
+const { t } = useI18n()
+const { apiRequest } = useInjected()
 
-    // 保存
-    handlerSubmit() {
-      const submitData = {}
+const visible = ref<boolean>(false)
+const editId = ref<string>('')
+const submitData = ref<Record<string, unknown> | null>(null)
 
-      const baseInfo = this.validateBaseInfo()
-      if (baseInfo.result !== true) {
-        uni.showToast({
-          title: baseInfo.result,
-          icon: 'none',
-          duration: 2000
-        });
-        return;
-      } else {
-        submitData.tenant_id = this.formData.tenant_id
-        submitData.id = this.formData.id
-        submitData.name = this.formData.name
-        submitData.description = this.formData.description
-        submitData.enabled = this.formData.enabled
-      }
-      const conditionsInfo = this.handleConditionsData(this.$refs.conditions.ifGroupsData());
-      if (!conditionsInfo || conditionsInfo.length === 0) {
-        uni.showToast({
-          title: this.$t('pages.sceneRuleDetail.enterRuleConditions'),
-          icon: 'none',
-          duration: 2000
-        });
-        return;
-      } else {
-        submitData.trigger_condition_groups = conditionsInfo
-      }
-      /*const conditionsInfo = this.$refs.conditions.getConditionsData()
-      if (conditionsInfo.result != true) {
-        this.toast.msg = conditionsInfo.result
-        this.$refs.toast.show()
-        return;
-      } else {
-        submitData.automation_conditions = conditionsInfo.conditions
-      }*/
-      const actionsInfo = this.handleActionData(this.formData.actions);
-      if (!actionsInfo || actionsInfo.length === 0) {
-        uni.showToast({
-          title: this.$t('pages.sceneRuleDetail.enterRuleActions'),
-          icon: 'none',
-          duration: 2000
-        });
-        return;
-      } else {
-        submitData.actions = actionsInfo
-      }
+const conditionsRef = ref<ConditionsEditExpose | null>(null)
 
-      console.log(submitData)
+const formData = reactive<SceneRuleFormData>({
+	name: '',
+	description: '',
+	trigger_condition_groups: [],
+	actions: [{ $index: Math.random() }]
+})
 
-      this.submitData = submitData
-      this.visible = true
-    },
-    cancel() {
-      console.log("取消")
-      this.visible = false
-    },
-    confirm() {
-      this.doSubmit(this.submitData)
-    },
-    doSubmit(submitData) {
-      uni.showLoading({
-        title: this.$t('pages.sceneRuleDetail.loading')
-      });
+onShow(() => {
+	uni.setNavigationBarTitle({
+		title: t('pages.addSceneLinkage') as string
+	})
+})
 
-      let url = '/api/v1/scene_automations';
-      let method = 'put';
-      if (!submitData.id) {
-        method = 'post';
-      }
+onLoad((options) => {
+	const opt = options as Record<string, string | undefined>
+	editId.value = opt.id || ''
+	uni.setNavigationBarTitle({
+		title: editId.value
+			? (t('pages.sceneRuleDetail.editSceneLinkage') as string)
+			: (t('pages.sceneRuleDetail.addSceneLinkage') as string)
+	})
+})
 
-      this.API.apiRequest(url, submitData, method).then(res => {
-        if (res.code == 200) {
-          uni.navigateBack(-1)
-        } else {
-          uni.showToast({
-            title: res.message,
-            icon: 'none',
-            duration: 2000
-          });
-        }
-      }).finally(() => {
-        uni.hideLoading()
-      });
-    },
-  }
+const initEmptyForm = () => {
+	Object.assign(formData, {
+		name: '',
+		description: '',
+		trigger_condition_groups: [],
+		actions: [{ $index: Math.random() }]
+	} satisfies SceneRuleFormData)
+}
+
+onMounted(() => {
+	if (editId.value) void getInfo()
+	else initEmptyForm()
+})
+
+// 获取修改信息
+const getInfo = async () => {
+	const req = apiRequest
+	if (!req) return
+
+	uni.showLoading({
+		title: t('pages.sceneRuleDetail.loading') as string
+	})
+
+	try {
+		const params = { id: editId.value }
+		const res = (await req<Record<string, unknown>>(`/api/v1/scene_automations/detail/${editId.value}`, params, 'get')) as ApiResponse<{
+			trigger_condition_groups: ConditionGroups
+			actions: ActionInstructItem[]
+			[key: string]: unknown
+		}>
+
+		if (res.code === 200) {
+			Object.assign(formData, {
+				...res.data,
+				trigger_condition_groups: convertConditionsData(res.data.trigger_condition_groups),
+				actions: convertActionsData(res.data.actions)
+			})
+
+			// 保留原日志
+			// eslint-disable-next-line no-console
+			console.log(formData)
+
+			if (!formData.trigger_condition_groups?.length) {
+				formData.trigger_condition_groups = [[{ $index: Math.random() } as unknown as ConditionItem]]
+			}
+		} else {
+			uni.showToast({
+				title: (res.message || '') as string,
+				icon: 'none',
+				duration: 2000
+			})
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const convertConditionsData = (ifData: ConditionGroups) => {
+	// 遍历数据，处理每一项的逻辑
+	ifData.forEach((group) => {
+		group.forEach((ifItem) => {
+			// 条件类型为 '10' 或 '11'
+			if (ifItem.trigger_conditions_type === '10' || ifItem.trigger_conditions_type === '11') {
+				ifItem.ifType = '1'
+				if (ifItem.trigger_operator === 'between' && ifItem.trigger_value) {
+					const [min, max] = ifItem.trigger_value.split('-')
+					ifItem.minValue = min
+					ifItem.maxValue = max
+				}
+				ifItem.trigger_param_key = `${ifItem.trigger_param_type}/${ifItem.trigger_param}`
+			}
+
+			// 条件类型为 '22'
+			if (ifItem.trigger_conditions_type === '22' && ifItem.trigger_value) {
+				ifItem.ifType = '2'
+				const [weekChose, startTime, endTime] = ifItem.trigger_value.split('|')
+				ifItem.weekChoseValue = weekChose.split('')
+
+				const formattedDate = moment().format('YYYY-MM-DD')
+				ifItem.startTimeValue = moment(`${formattedDate} ${startTime}`).valueOf()
+				ifItem.endTimeValue = moment(`${formattedDate} ${endTime}`).valueOf()
+			}
+
+			// 条件类型为 '20'
+			if (ifItem.trigger_conditions_type === '20' && ifItem.execution_time) {
+				ifItem.ifType = '2'
+				ifItem.onceTimeValue = moment(ifItem.execution_time).valueOf()
+			}
+
+			// 条件类型为 '21'
+			if (ifItem.trigger_conditions_type === '21') {
+				ifItem.ifType = '2'
+
+				const formattedDate = moment().format('YYYY-MM-DD')
+				const hour = moment().format('YYYY-MM-DD HH')
+
+				switch (ifItem.task_type) {
+					case 'HOUR':
+						ifItem.hourTimeValue = moment(`${hour}:${ifItem.params}`).valueOf()
+						break
+					case 'DAY':
+						ifItem.dayTimeValue = moment(`${formattedDate} ${ifItem.params}`).valueOf()
+						break
+					case 'WEEK': {
+						const [weekStr, weekTime] = String(ifItem.params || '').split('|')
+						ifItem.weekChoseValue = weekStr.split('')
+						ifItem.weekTimeValue = moment(`${formattedDate} ${weekTime}`).valueOf()
+						break
+					}
+					case 'MONTH': {
+						const [monthChose, monthTime] = String(ifItem.params || '').split('T')
+						ifItem.monthChoseValue = monthChose
+						ifItem.monthTimeValue = moment(`${formattedDate} ${monthTime}`).valueOf()
+						break
+					}
+				}
+			}
+		})
+	})
+	return ifData
+}
+
+// 提交时处理条件数据
+const handleConditionsData = (conditionsData: ConditionGroups) => {
+	const ifGroupsData = JSON.parse(JSON.stringify(conditionsData)) as ConditionGroups
+	// eslint-disable-next-line array-callback-return
+	ifGroupsData.map((ifGroupItem) => {
+		// eslint-disable-next-line array-callback-return
+		ifGroupItem.map((ifItem) => {
+			if (ifItem.trigger_conditions_type === '10' || ifItem.trigger_conditions_type === '11') {
+				if (ifItem.trigger_operator === 'between') {
+					ifItem.trigger_value = `${ifItem.minValue}-${ifItem.maxValue}`
+				}
+			}
+			if (ifItem.trigger_conditions_type === '22') {
+				let trigger_value = ''
+				// eslint-disable-next-line array-callback-return
+				;(ifItem.weekChoseValue || []).map((item) => {
+					trigger_value += item
+				})
+				trigger_value += `|${moment(ifItem.startTimeValue).format('HH:mm:ssZ')}`
+				trigger_value += `|${moment(ifItem.endTimeValue).format('HH:mm:ssZ')}`
+				ifItem.trigger_value = trigger_value
+			}
+			if (ifItem.trigger_conditions_type === '20') {
+				ifItem.execution_time = moment(ifItem.onceTimeValue).format()
+			}
+			if (ifItem.trigger_conditions_type === '21') {
+				if (ifItem.task_type === 'HOUR') {
+					ifItem.params = moment(ifItem.hourTimeValue).format('mm:00Z')
+				}
+				if (ifItem.task_type === 'DAY') {
+					ifItem.params = moment(ifItem.dayTimeValue).format('HH:mm:00Z')
+				}
+				if (ifItem.task_type === 'WEEK') {
+					let params = ''
+					// eslint-disable-next-line array-callback-return
+					;(ifItem.weekChoseValue || []).map((item) => {
+						params += item
+					})
+					ifItem.params = `${params}|${moment(ifItem.weekTimeValue).format('HH:mm:00Z')}`
+				}
+				if (ifItem.task_type === 'MONTH') {
+					ifItem.params = `${ifItem.monthChoseValue}T${moment(ifItem.monthTimeValue).format('HH:mm:00Z')}`
+				}
+			}
+		})
+	})
+	return ifGroupsData
+}
+
+const convertActionsData = (actionsData: ActionInstructItem[]) => {
+	const actionGroupsData: ActionGroupItem[] = []
+	const actionInstructList: ActionInstructItem[] = []
+	actionsData.map((item) => {
+		if (item.action_type === '10' || item.action_type === '11') {
+			item.actionParamOptions = []
+			const actionValueObj = JSON.parse(String(item.action_value || '{}')) as { params?: unknown } & Record<string, unknown>
+			if (item.action_param_type === 'c_telemetry' || item.action_param_type === 'c_attribute' || item.action_param_type === 'c_command') {
+				item.actionValue = item.action_value
+			}
+			if (item.action_param_type === 'telemetry' || item.action_param_type === 'attributes') {
+				item.actionValue = actionValueObj[String(item.action_param)]
+			}
+			if (item.action_param_type === 'command') {
+				item.actionValue = actionValueObj.params
+			}
+			item.actionParamOptions = []
+			actionInstructList.push(item)
+		} else {
+			item.actionType = item.action_type as any
+			actionGroupsData.push(item as unknown as ActionGroupItem)
+		}
+	})
+	if (actionInstructList.length > 0) {
+		const type1Data: ActionGroupItem = {
+			actionType: '1',
+			actionInstructList
+		}
+		actionGroupsData.push(type1Data)
+	}
+	return actionGroupsData
+}
+
+// 提交时处理动作数据（保持原逻辑：会直接修改传入 actions）
+const handleActionData = (inputActions: ActionGroupItem[]) => {
+	const actionGroupsData = inputActions
+	const actionsData: ActionInstructItem[] = []
+	// eslint-disable-next-line array-callback-return
+	actionGroupsData.map((item) => {
+		if (item.actionType === '1' && Array.isArray(item.actionInstructList)) {
+			// eslint-disable-next-line array-callback-return
+			item.actionInstructList.map((instructItem) => {
+				// 如果是c_telemetry/c_attribute,那么action_value示例格式：{"c_telemetry":2}
+				// 如果是c_command,那么action_value示例格式：{"method":"switch1","params":{"false":0}}
+				if (
+					instructItem.action_param_type === 'c_telemetry' ||
+					instructItem.action_param_type === 'c_attribute' ||
+					instructItem.action_param_type === 'c_command'
+				) {
+					instructItem.action_value = instructItem.actionValue as any
+				}
+				// 如果是telemetry/attribute，那么 action_value示例格式：{"humidity":2}
+				if (instructItem.action_param_type === 'telemetry' || instructItem.action_param_type === 'attributes') {
+					const action_value: Record<string, unknown> = {}
+					action_value[String(instructItem.action_param)] = instructItem.actionValue
+					instructItem.action_value = JSON.stringify(action_value)
+				}
+				// 如果是command/c_command，那么 action_value示例格式:	{"method":"ReSet","params":{"switch":1,"light":"close"}}
+				if (instructItem.action_param_type === 'command') {
+					const action_value = {
+						method: instructItem.action_param,
+						params: instructItem.actionValue
+					}
+					instructItem.action_value = JSON.stringify(action_value)
+				}
+				actionsData.push(instructItem)
+			})
+		} else {
+			item.action_type = item.actionType as any
+			actionsData.push(item as unknown as ActionInstructItem)
+		}
+	})
+	return actionsData
+}
+
+// 校验
+const validateBaseInfo = () => {
+	const { name } = formData
+
+	if (!name) {
+		return { result: t('pages.sceneRuleDetail.enterRuleName') }
+	}
+
+	return { result: true as const }
+}
+
+// 保存
+const handlerSubmit = () => {
+	const submit: Record<string, unknown> = {}
+
+	const baseInfo = validateBaseInfo()
+	if (baseInfo.result !== true) {
+		uni.showToast({
+			title: baseInfo.result as string,
+			icon: 'none',
+			duration: 2000
+		})
+		return
+	}
+
+	submit.tenant_id = formData.tenant_id
+	submit.id = formData.id
+	submit.name = formData.name
+	submit.description = formData.description
+	submit.enabled = formData.enabled
+
+	const rawConditions = conditionsRef.value?.ifGroupsData?.()
+	const conditionsInfo = rawConditions ? handleConditionsData(rawConditions) : []
+	if (!conditionsInfo || conditionsInfo.length === 0) {
+		uni.showToast({
+			title: t('pages.sceneRuleDetail.enterRuleConditions') as string,
+			icon: 'none',
+			duration: 2000
+		})
+		return
+	}
+	submit.trigger_condition_groups = conditionsInfo
+
+	const actionsInfo = handleActionData(formData.actions)
+	if (!actionsInfo || actionsInfo.length === 0) {
+		uni.showToast({
+			title: t('pages.sceneRuleDetail.enterRuleActions') as string,
+			icon: 'none',
+			duration: 2000
+		})
+		return
+	}
+	submit.actions = actionsInfo
+
+	// eslint-disable-next-line no-console
+	console.log(submit)
+
+	submitData.value = submit
+	visible.value = true
+}
+
+const cancel = () => {
+	// eslint-disable-next-line no-console
+	console.log('取消')
+	visible.value = false
+}
+
+const confirm = () => {
+	if (!submitData.value) return
+	void doSubmit(submitData.value)
+}
+
+const doSubmit = async (data: Record<string, unknown>) => {
+	const req = apiRequest
+	if (!req) return
+
+	uni.showLoading({
+		title: t('pages.sceneRuleDetail.loading') as string
+	})
+
+	try {
+		const url = '/api/v1/scene_automations'
+		const method = data.id ? 'put' : 'post'
+		const res = await req<unknown>(url, data, method)
+		if (res.code === 200) {
+			uni.navigateBack(-1)
+		} else {
+			uni.showToast({
+				title: res.message || '',
+				icon: 'none',
+				duration: 2000
+			})
+		}
+	} finally {
+		uni.hideLoading()
+	}
 }
 </script>
 

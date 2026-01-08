@@ -46,330 +46,283 @@
     </view>
     
     <!-- 消息提示框 -->
-    <cys-toast ref="toast" :msg="toast.msg" location="top"></cys-toast>
+    <cys-toast ref="toastRef" :msg="toast.msg" location="top"></cys-toast>
   </view>
   
 </template>
 
-<script>
+<script setup lang="ts">
+  import { computed, onMounted, ref, watch } from 'vue'
+  import { useI18n } from 'vue-i18n'
   import CustomSelect from '@/components/custom-select.vue'
   import SelectDevice from '@/components/select-device'
   import SelectTime from '@/components/select-time'
-  
-  export default {
-    components: {
-      CustomSelect,
-      SelectDevice,
-      SelectTime,
-      
-    },
-    props: {
-      list: {
-        type: Array,
-        default: () => ([]),
-      },
-    },
-    watch: {
-      list: {
-        handler  (n, o) {
-          this.initConditions (n)
-        },
-        immediate: true,
-      },
-    },
-    data () {
-      return {
-        toast: {
-        	msg: ''
-        },
-        relations: [
-          { text: this.$t('pages.sceneRuleDetail.and'), value: 'and' }, 
-          { text: this.$t('pages.sceneRuleDetail.or'), value: 'or' },
-        ],
-        conditionTypeOptions: [
-          { value: '1', label: this.$t('pages.sceneRuleDetail.deviceCondition') },
-          { value: '2', label: this.$t('pages.sceneRuleDetail.timeCondition') },
-        ],
-        conditions: [],
-      }
-    },
-    created () {
-      console.log(this.conditions)
-    },
-    methods: {
-      initConditions (list) {
-        list = JSON.parse(JSON.stringify(list))
-        this.transRelation(list)
 
-        this.conditions = list
-      },
-      conditionTypeChange (condition_type, index) {
-        console.log(condition_type, index)
-        
-        const condition = this.conditions[index] || {}
-      
-        this.$set(this.conditions, index, {
-          condition_type, // 1-设备条件 2-时间条件
-          
-          business_id: "", // 项目id
-          asset_id: "", // 分组id
-          device_id: "", // 设备id
-          device_condition_type: "", // 1-属性 2-事件 3-在线离线状态
-      
-          time_condition_type: "", // 0-时间范围 1-单次 2-重复 3-自定义
-          
-          v1: "",
-          v2: "",
-          v3: "",
-          v4: "",
-          v5: "",
-      
-          remark: "",
-          
-          group_number: condition.group_number, // 条件分组编号（相邻两个条件 group_number 不同则用或连接，相同用且连接）
-          _relation: condition._relation,
-          
-          // automation_id: this.formData.id, // 父id。todo：提交前重新设置
-          id: condition.id, // 自身id
-          
-          $index: condition.$index,
-        })
-        
-        console.log(this.conditions)
-      },
-      // 删除条件
-      removeCondition (currCondition, index) {
-        this.conditions.splice(index, 1)
-      },
-      // 新增条件
-      addCondition (currCondition, index) {
-        this.conditions.splice(index+1, 0, {
-          // condition_type: '1', // todo：赋默认值有bug
-          $index: Math.random(),
-        })
-        console.log(this.conditions)
-      },
-      
-      // 初始化数据时：
-      // 设置且或连接符（第一个条件不需要）
-      // 设置条件的唯一标识符（$index）
-      transRelation (automation_conditions) {
-        if (automation_conditions?.length) {
-          automation_conditions[0].$index = Math.random()
-          
-          if (automation_conditions.length > 1) {
-            for (let i = 1; i < automation_conditions.length; i++) {
-              const preCondition = automation_conditions[i - 1]
-              const currCondition = automation_conditions[i]
-              
-              currCondition._relation = currCondition.group_number === preCondition.group_number ? 'and' : 'or'
-              
-              currCondition.$index = Math.random()
-            }
-          }
-        }
-      },
-      
-      // 点击保存时：
-      // 设置 group_number 分组编号（第一个条件默认为1）。从第二个条件开始，如果用或连接，则分组编号+1；
-      //    如果用且连接时需要判断相邻条件是否都为时间条件的重复与单次二者之一，
-      //    如果否（不满足有两种情况，一是均为时间条件不满足，二是均为重复与单次二者之一不满足），则分组编号与前一个条件相同；
-      //    如果是，则清除当前条件的连接符和分组编号，然后计数（清除了几个连接符）
-      // 最后判断清除连接符的次数，如果次数为 0，方法返回 true，表示设置 分组编号 成功；
-      //    如果次数不为0，方法返回 false，表示设置分组编号失败，此时需要提示用户检查条件详情
-      transGroupNumber (automation_conditions) {
-        let invalidRelationNum = 0
-        
-        if (automation_conditions?.length) {
-          automation_conditions[0].group_number = 1
-          
-          if (automation_conditions.length > 1) { // 至少两条数据
-            for (let i = 1; i < automation_conditions.length; i++) {
-              const preCondition = automation_conditions[i - 1]
-              const currCondition = automation_conditions[i]
-      
-              if (!currCondition._relation) {
-                invalidRelationNum = -1
-                break;
-              } else if (currCondition._relation === 'and') {
-                // 此处校验相邻两个条件为单次、重复时是否使用了 and 连接。
-                if (currCondition.condition_type === '2' && preCondition.condition_type === '2') { // 时间条件
-                  const arr = ['1', '2']
-                  if (arr.includes(currCondition.time_condition_type) && arr.includes(preCondition.time_condition_type)) {
-                    invalidRelationNum++
-                    currCondition._relation = ''
-                    currCondition.group_number = ''
-                  } else {
-                    currCondition.group_number = preCondition.group_number
-                  }
-                } else {
-                  currCondition.group_number = preCondition.group_number
-                }
-              } else if (currCondition._relation === 'or') {
-                currCondition.group_number = preCondition.group_number + 1
-              }
-            }
-          }
-        }
-        
-        if (invalidRelationNum < 0) {
-          return this.$t('pages.sceneRuleDetail.selectRelation')
-        }
-        
-        if (invalidRelationNum > 0) {
-          return this.$t('pages.sceneRuleDetail.timeConditionValidation')
-        }
+  type Relation = '' | 'and' | 'or'
+  type ConditionType = '' | '1' | '2'
 
-        return ''
-      },
-      
-      getConditionsData () {
-        // 校验数据并转换数据
-        console.log('conditons', JSON.parse(JSON.stringify(this.conditions)))
-        
-        let msg = ''
-        for (let i = 0; i < this.conditions.length; i++) {
-          const condition = this.conditions[i]
-          console.log('conditon' + i, JSON.parse(JSON.stringify(condition)))
-          
-          const {
-            condition_type, // 条件类型 1-设备条件 2-时间条件
-            
-            business_id, // 项目
-            asset_id, // 分组
-            device_id, // 设备
-            
-            device_condition_type, // 状态/属性 1-属性 2-事件 3-在线离线状态
-            
-            time_condition_type, // 0-范围 1-单次 2-重复
-            
-            v1,
-            v2, // 操作符
-            v3,
-            v4,
-          } = condition
-          
-          if (!condition_type) {
-            msg = this.$t('pages.sceneRuleDetail.selectConditionType')
-            break;
-          } else if (condition_type === '1') { // 校验设备条件
-            if (!business_id || !asset_id || !device_id || !device_condition_type) {
-              msg = this.$t('pages.sceneRuleDetail.completeDeviceCondition')
-              break;
-            }
-            
-            if (device_condition_type === '1' && (!v2 || !v3)) { // 选择了属性
-              msg = this.$t('pages.sceneRuleDetail.completeDeviceCondition')
-              break;
-            }
-          } else if (condition_type === '2') { // 时间条件
-            if (!time_condition_type) {
-              msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-              break;
-            } else if (time_condition_type === '0') { // 时间条件-范围
-              if (!v1 || !v2) {
-                msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-                break;
-              }
-            } else if (time_condition_type === '1') { // 时间条件-单次
-              if (!v1) {
-                msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-                break;
-              }
-            } else if (time_condition_type === '2') { // 时间条件-重复
-              console.log(v1)
-              if (!v1) {
-                msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-                break;
-              } else if (v1 === '1') {
-                if (!v3) {
-                  msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-                  break;
-                }
-              } else if (v1 === '2') {
-                if (!v3) {
-                  msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-                  break;
-                }
-              } else if (v1 === '3') {
-                if (!v3 || !v4) {
-                  msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-                  break;
-                }
-              } else if (v1 === '4') {
-                console.log(v3)
-                const [dd, hh] = v3.split(':')
-                if (!dd || !hh) {
-                  msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-                  break;
-                }
-              } else if (v1 === '5') {
-                console.log(1234)
-                if (!v3) {
-                  msg = this.$t('pages.sceneRuleDetail.completeTimeCondition')
-                  break;
-                }
-              }
-            }
-          } else {
-            msg = this.$t('pages.sceneRuleDetail.unknownConditionType')// 异常
-            break;
-          }
-        }
-        
-        if (msg) {
-          return {
-            result: msg,
-          }
-        }
-        
-        const msg2 = this.transGroupNumber(this.conditions)
-        if (msg2) {
-          return {
-            result: msg2,
-          }
-        } else {
-          // 转换数据
-          return {
-            result: true,
-            conditions: this.submitData(this.conditions)
-          }
-        }
-      },
-      submitData (conditions) {
-        conditions = JSON.parse(JSON.stringify(conditions))
-        return conditions.map(condition => {
-          const {
-            condition_type,
-            device_condition_type,
-            device_id,
-            group_number,
-            v1,
-            v2,
-            v3,
-            v4,
-            time_condition_type,
-          } = condition
-          
-          return JSON.parse(JSON.stringify({
-            condition_type: condition_type,
-            
-            device_condition_type: device_condition_type || undefined,
-            device_id: device_id || undefined,
-            group_number: group_number,
-            v1: v1 || undefined,
-            v2: v2 || undefined,
-            v3: v3 || undefined,
-            v4: v4 || undefined,
-            
-            time_condition_type: time_condition_type || undefined,
-          })) 
-        })
-      }
-    },
+  export type Condition = {
+    $index?: number
+    _relation?: Relation
+    group_number?: number | ''
+    condition_type?: ConditionType
+
+    business_id?: string
+    asset_id?: string
+    device_id?: string
+    device_condition_type?: string
+
+    time_condition_type?: string
+    v1?: string
+    v2?: string
+    v3?: string
+    v4?: string
+    v5?: string
+    remark?: string
+    id?: string | number
   }
+
+  type Props = {
+    list?: Condition[]
+  }
+
+  const props = withDefaults(defineProps<Props>(), {
+    list: () => ([]),
+  })
+
+  const { t } = useI18n()
+
+  const toast = ref<{ msg: string }>({ msg: '' })
+  const toastRef = ref<any>(null)
+
+  const relations = computed(() => [
+    { text: t('pages.sceneRuleDetail.and'), value: 'and' },
+    { text: t('pages.sceneRuleDetail.or'), value: 'or' },
+  ])
+
+  const conditionTypeOptions = computed(() => [
+    { value: '1', label: t('pages.sceneRuleDetail.deviceCondition') },
+    { value: '2', label: t('pages.sceneRuleDetail.timeCondition') },
+  ])
+
+  const conditions = ref<Condition[]>([])
+
+  const transRelation = (automation_conditions: Condition[]) => {
+    if (!automation_conditions?.length) return
+    automation_conditions[0].$index = Math.random()
+
+    if (automation_conditions.length > 1) {
+      for (let i = 1; i < automation_conditions.length; i += 1) {
+        const preCondition = automation_conditions[i - 1]
+        const currCondition = automation_conditions[i]
+
+        currCondition._relation = currCondition.group_number === preCondition.group_number ? 'and' : 'or'
+        currCondition.$index = Math.random()
+      }
+    }
+  }
+
+  const initConditions = (list: Condition[]) => {
+    const cloned = JSON.parse(JSON.stringify(list || [])) as Condition[]
+    transRelation(cloned)
+    conditions.value = cloned
+  }
+
+  const conditionTypeChange = (condition_type: ConditionType, index: number) => {
+    console.log(condition_type, index)
+    const condition = conditions.value[index] || {}
+    conditions.value[index] = {
+      condition_type,
+
+      business_id: '',
+      asset_id: '',
+      device_id: '',
+      device_condition_type: '',
+
+      time_condition_type: '',
+      v1: '',
+      v2: '',
+      v3: '',
+      v4: '',
+      v5: '',
+
+      remark: '',
+      group_number: condition.group_number,
+      _relation: condition._relation,
+      id: condition.id,
+      $index: condition.$index,
+    }
+  }
+
+  const removeCondition = (currCondition: Condition, index: number) => {
+    console.log(currCondition, index)
+    conditions.value.splice(index, 1)
+  }
+
+  const addCondition = (currCondition: Condition, index: number) => {
+    conditions.value.splice(index + 1, 0, {
+      $index: Math.random(),
+    })
+    console.log(conditions.value)
+  }
+
+  const transGroupNumber = (automation_conditions: Condition[]) => {
+    let invalidRelationNum = 0
+
+    if (automation_conditions?.length) {
+      automation_conditions[0].group_number = 1
+
+      if (automation_conditions.length > 1) {
+        for (let i = 1; i < automation_conditions.length; i += 1) {
+          const preCondition = automation_conditions[i - 1]
+          const currCondition = automation_conditions[i]
+
+          if (!currCondition._relation) {
+            invalidRelationNum = -1
+            break
+          } else if (currCondition._relation === 'and') {
+            if (currCondition.condition_type === '2' && preCondition.condition_type === '2') {
+              const arr = ['1', '2']
+              if (arr.includes(currCondition.time_condition_type || '') && arr.includes(preCondition.time_condition_type || '')) {
+                invalidRelationNum += 1
+                currCondition._relation = ''
+                currCondition.group_number = ''
+              } else {
+                currCondition.group_number = (preCondition.group_number as number) || 1
+              }
+            } else {
+              currCondition.group_number = (preCondition.group_number as number) || 1
+            }
+          } else if (currCondition._relation === 'or') {
+            currCondition.group_number = (((preCondition.group_number as number) || 1) + 1) as any
+          }
+        }
+      }
+    }
+
+    if (invalidRelationNum < 0) return t('pages.sceneRuleDetail.selectRelation')
+    if (invalidRelationNum > 0) return t('pages.sceneRuleDetail.timeConditionValidation')
+    return ''
+  }
+
+  const submitData = (list: Condition[]) => {
+    const cloned = JSON.parse(JSON.stringify(list || [])) as Condition[]
+    return cloned.map((condition) => {
+      const { condition_type, device_condition_type, device_id, group_number, v1, v2, v3, v4, time_condition_type } = condition
+      return JSON.parse(
+        JSON.stringify({
+          condition_type,
+          device_condition_type: device_condition_type || undefined,
+          device_id: device_id || undefined,
+          group_number,
+          v1: v1 || undefined,
+          v2: v2 || undefined,
+          v3: v3 || undefined,
+          v4: v4 || undefined,
+          time_condition_type: time_condition_type || undefined,
+        })
+      )
+    })
+  }
+
+  const getConditionsData = () => {
+    console.log('conditons', JSON.parse(JSON.stringify(conditions.value)))
+
+    let msg = ''
+    for (let i = 0; i < conditions.value.length; i += 1) {
+      const condition = conditions.value[i]
+      console.log('conditon' + i, JSON.parse(JSON.stringify(condition)))
+      const { condition_type, business_id, asset_id, device_id, device_condition_type, time_condition_type, v1, v2, v3, v4 } = condition
+
+      if (!condition_type) {
+        msg = t('pages.sceneRuleDetail.selectConditionType')
+        break
+      } else if (condition_type === '1') {
+        if (!business_id || !asset_id || !device_id || !device_condition_type) {
+          msg = t('pages.sceneRuleDetail.completeDeviceCondition')
+          break
+        }
+
+        if (device_condition_type === '1' && (!v2 || !v3)) {
+          msg = t('pages.sceneRuleDetail.completeDeviceCondition')
+          break
+        }
+      } else if (condition_type === '2') {
+        if (!time_condition_type) {
+          msg = t('pages.sceneRuleDetail.completeTimeCondition')
+          break
+        } else if (time_condition_type === '0') {
+          if (!v1 || !v2) {
+            msg = t('pages.sceneRuleDetail.completeTimeCondition')
+            break
+          }
+        } else if (time_condition_type === '1') {
+          if (!v1) {
+            msg = t('pages.sceneRuleDetail.completeTimeCondition')
+            break
+          }
+        } else if (time_condition_type === '2') {
+          console.log(v1)
+          if (!v1) {
+            msg = t('pages.sceneRuleDetail.completeTimeCondition')
+            break
+          } else if (v1 === '1') {
+            if (!v3) {
+              msg = t('pages.sceneRuleDetail.completeTimeCondition')
+              break
+            }
+          } else if (v1 === '2') {
+            if (!v3) {
+              msg = t('pages.sceneRuleDetail.completeTimeCondition')
+              break
+            }
+          } else if (v1 === '3') {
+            if (!v3 || !v4) {
+              msg = t('pages.sceneRuleDetail.completeTimeCondition')
+              break
+            }
+          } else if (v1 === '4') {
+            console.log(v3)
+            const [dd, hh] = (v3 || '').split(':')
+            if (!dd || !hh) {
+              msg = t('pages.sceneRuleDetail.completeTimeCondition')
+              break
+            }
+          } else if (v1 === '5') {
+            console.log(1234)
+            if (!v3) {
+              msg = t('pages.sceneRuleDetail.completeTimeCondition')
+              break
+            }
+          }
+        }
+      } else {
+        msg = t('pages.sceneRuleDetail.unknownConditionType')
+        break
+      }
+    }
+
+    if (msg) return { result: msg }
+
+    const msg2 = transGroupNumber(conditions.value)
+    if (msg2) return { result: msg2 }
+    return { result: true, conditions: submitData(conditions.value) }
+  }
+
+  defineExpose({ getConditionsData })
+
+  watch(
+    () => props.list,
+    (n) => initConditions(n || []),
+    { immediate: true, deep: true }
+  )
+
+  onMounted(() => {
+    console.log(conditions.value)
+  })
 </script>
 
 <style scoped>
-  @import '@/common/alert-strategy.css';
+  @import '@/common/styles/alert-strategy.css';
 </style>
+

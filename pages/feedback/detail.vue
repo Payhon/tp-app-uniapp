@@ -35,63 +35,69 @@
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				id: '',
-				loading: false,
-				detail: null,
-				baseUrl: ''
-			}
-		},
-		onLoad(options) {
-			if (!this.$login.isLoginType().isLogin) {
-				uni.showToast({
-					title: this.$t('pages.pleaseLogin'),
-					icon: 'none'
-				})
-				uni.navigateTo({
-					url: '/pages/login/login'
-				})
-				return
-			}
-			this.id = options.id || ''
-			this.baseUrl = uni.getStorageSync('serverAddress') || 'http://demo.thingspanel.cn'
-			uni.setNavigationBarTitle({
-				title: this.$t('pages.feedbackDetail')
-			})
-			this.load()
-		},
-		methods: {
-			toPublicUrl(path) {
-				if (!path) return ''
-				// path like "./files/xxx" => "/files/xxx"
-				return this.baseUrl + path.slice(1)
-			},
-			statusLabel(status) {
-				return this.$t(`pages.feedbackStatus.${status}`) || status
-			},
-			preview(idx) {
-				const urls = (this.detail.images || []).map(p => this.toPublicUrl(p))
-				uni.previewImage({
-					current: idx,
-					urls: urls
-				})
-			},
-			load() {
-				if (!this.id) return
-				this.loading = true
-				this.API.apiRequest('/api/v1/app/content/feedback/' + this.id, {}, 'get').then(res => {
-					if (res && res.code == 200) {
-						this.detail = res.data
-					}
-				}).catch(() => {}).finally(() => {
-					this.loading = false
-				})
-			}
-		}
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+import { useInjected } from '@/common/composables/useInjected'
+import { useAppRuntime } from '@/common/composables/useAppRuntime'
+
+type FeedbackDetail = {
+	status?: string
+	created_at?: string
+	content?: string
+	images?: string[]
+	reply?: string
+	replied_at?: string
+}
+
+const { t } = useI18n()
+const { apiRequest, login } = useInjected()
+const { getBaseUrl } = useAppRuntime()
+
+const id = ref<string>('')
+const loading = ref<boolean>(false)
+const detail = ref<FeedbackDetail | null>(null)
+const baseUrl = ref<string>('')
+
+const toPublicUrl = (path: string) => {
+	if (!path) return ''
+	return baseUrl.value + path.slice(1)
+}
+
+const statusLabel = (status?: string) => t(`pages.feedbackStatus.${status}`) || status || ''
+
+const preview = (idx: number) => {
+	const urls = (detail.value?.images || []).map((p) => toPublicUrl(p))
+	uni.previewImage({ current: idx, urls })
+}
+
+const load = async () => {
+	if (!id.value) return
+	const req = apiRequest
+	if (!req) return
+
+	loading.value = true
+	try {
+		const res = await req<FeedbackDetail>(`/api/v1/app/content/feedback/${id.value}`, {}, 'get')
+		if (res && res.code == 200) detail.value = res.data
+	} finally {
+		loading.value = false
 	}
+}
+
+onLoad((options) => {
+	if (!login?.isLoginType?.().isLogin) {
+		uni.showToast({ title: t('pages.pleaseLogin'), icon: 'none' })
+		uni.navigateTo({ url: '/pages/login/login' })
+		return
+	}
+	const opt = options as Record<string, string | undefined>
+	id.value = opt.id || ''
+	baseUrl.value = getBaseUrl()
+	uni.setNavigationBarTitle({ title: t('pages.feedbackDetail') })
+	load()
+})
 </script>
 
 <style>
@@ -155,4 +161,3 @@
 		font-size: 12px;
 	}
 </style>
-

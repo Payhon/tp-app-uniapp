@@ -14,58 +14,45 @@
 			</view>
 		</view>
 	</template>
-<script>
-	export default {
-		name: "aui-toast",
-		props: {
-			msg: { //描述内容
-				type: String,
-				default: ''
-			},
-			icon: { //图标
-				type: String,
-				default: ''
-			},
-			direction: { //（icon参数配置后有效）横向("row")或纵向("col")控制，默认纵向
-				type: String,
-				default: 'col'
-			},
-			location: { //（icon参数未配置时可配置）位置	<1、bottom:位于底部，从底部弹出显示>、<2、middle:位于页面中心位置>
-				type: String,
-				default: 'bottom'
-			},
-			duration: { //显示时长
-				String: Number,
-				default: 3000
-			}
-		},
-		data(){
-			return {
-				SHOW: false, //是否显示
-				toastTop:0
-			}
-		},
-		created(){
-			
-		},
-		mounted(){
-			this.toastTop=uni.getStorageSync('contentPaddingTop')
-		},
-		methods:{
-			//显示
-			show(){
-				var _this = this;
-				return new Promise(function(resolve, reject){
-					_this.SHOW = true;
-					var _timer_ = setTimeout(function(){
-						_this.SHOW = false;
-						clearTimeout(_timer_);
-						resolve();
-					}, _this.duration);
-				});
-			},
-		}
+<script setup lang="ts">
+	import { onMounted, ref, toRefs } from 'vue'
+
+	type Props = {
+		msg?: string
+		icon?: string
+		direction?: 'row' | 'col'
+		location?: 'bottom' | 'middle' | 'top'
+		duration?: number
 	}
+
+	const props = withDefaults(defineProps<Props>(), {
+		msg: '',
+		icon: '',
+		direction: 'col',
+		location: 'bottom',
+		duration: 3000,
+	})
+
+	const { msg, icon, direction, location, duration } = toRefs(props)
+
+	const SHOW = ref<boolean>(false)
+	const toastTop = ref<string | number>(0)
+
+	onMounted(() => {
+		toastTop.value = uni.getStorageSync('contentPaddingTop') || 0
+	})
+
+	const show = () =>
+		new Promise<void>((resolve) => {
+			SHOW.value = true
+			const timer = setTimeout(() => {
+				SHOW.value = false
+				clearTimeout(timer)
+				resolve()
+			}, duration.value)
+		})
+
+	defineExpose({ show })
 </script>
 
 <style>

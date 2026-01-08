@@ -4,155 +4,156 @@
 	</canvas>
 </template>
 
-<script>
-	import uCharts from '@/js_sdk/u-charts/u-charts.js';
-	var canvases = {};
-	
-	export default {
-		props: {
-			chartType: {
-				required: true,
-				type: String,
-				default: 'column'
-			},
-			opts: {
-				required: true,
-				type: Object,
-				default () {
-					return null;
-				},
-			},
-			canvasId: {
-				type: String,
-				default: 'u-canvas',
-			},
-			cWidth: {
-				default: 375,
-			},
-			cHeight: {
-				default: 250,
-			},
-			pixelRatio: {
-				type: Number,
-				default: 1,
-			},
+<script setup lang="ts">
+import { getCurrentInstance, onMounted } from 'vue'
+
+// NOTE: 旧版封装（uCharts 依赖 $this 取 canvas 上下文），保留行为但用 Vue3 setup 写法
+import uCharts from '@/js_sdk/u-charts/u-charts.js'
+
+type AnyRecord = Record<string, any>
+
+const props = withDefaults(
+	defineProps<{
+		chartType: string
+		opts: AnyRecord
+		canvasId?: string
+		cWidth?: number
+		cHeight?: number
+		pixelRatio?: number
+	}>(),
+	{
+		chartType: 'column',
+		canvasId: 'u-canvas',
+		cWidth: 375,
+		cHeight: 250,
+		pixelRatio: 1
+	}
+)
+
+const canvases: Record<string, any> = {}
+const proxy = (getCurrentInstance()?.proxy as any) || null
+
+const initColumnChart = () => {
+	canvases[props.canvasId] = new (uCharts as any)({
+		$this: proxy,
+		canvasId: props.canvasId,
+		type: 'column',
+		legend: true,
+		fontSize: 11,
+		background: '#FFFFFF',
+		pixelRatio: props.pixelRatio,
+		animation: true,
+		categories: props.opts?.categories,
+		series: props.opts?.series,
+		enableScroll: true,
+		xAxis: {
+			disableGrid: true,
+			itemCount: 4,
+			scrollShow: true
 		},
-		mounted() {
-			this.init();
+		yAxis: {},
+		dataLabel: true,
+		width: (props.cWidth || 0) * (props.pixelRatio || 1),
+		height: (props.cHeight || 0) * (props.pixelRatio || 1),
+		extra: {
+			column: { type: 'group' }
+		}
+	})
+}
+
+const initLineChart = () => {
+	canvases[props.canvasId] = new (uCharts as any)({
+		$this: proxy,
+		canvasId: props.canvasId,
+		type: 'line',
+		fontSize: 11,
+		legend: true,
+		dataLabel: false,
+		dataPointShape: true,
+		background: '#FFFFFF',
+		pixelRatio: props.pixelRatio,
+		categories: props.opts?.categories,
+		series: props.opts?.series,
+		animation: true,
+		enableScroll: true,
+		xAxis: {
+			type: 'grid',
+			gridColor: '#CCCCCC',
+			gridType: 'dash',
+			dashLength: 8,
+			itemCount: 4,
+			scrollShow: true
 		},
-		methods: {
-			init() {
-				switch (this.chartType) {
-					case 'column':
-						this.initColumnChart();
-						break;
-					case 'line':
-						this.initLineChart();
-						break;
-					default:
-						break;
-				}
-			},
-			initColumnChart() {
-				canvases[this.canvasId] = new uCharts({
-					$this: this,
-					canvasId: this.canvasId,
-					type: 'column',
-					legend: true,
-					fontSize: 11,
-					background: '#FFFFFF',
-					pixelRatio: this.pixelRatio,
-					animation: true,
-					categories: this.opts.categories,
-					series: this.opts.series,
-					enableScroll: true,
-					xAxis: {
-						disableGrid: true,
-						itemCount: 4,
-						scrollShow: true
-					},
-					yAxis: {
-						//disabled:true
-					},
-					dataLabel: true,
-					width: this.cWidth * this.pixelRatio,
-					height: this.cHeight * this.pixelRatio,
-					extra: {
-						column: {
-							type: 'group',
-						}
-					}
-				});
-			},
-			initLineChart() {
-				canvases[this.canvasId] = new uCharts({
-					$this: this,
-					canvasId: this.canvasId,
-					type: 'line',
-					fontSize: 11,
-					legend: true,
-					dataLabel: false,
-					dataPointShape: true,
-					background: '#FFFFFF',
-					pixelRatio: this.pixelRatio,
-					categories: this.opts.categories,
-					series: this.opts.series,
-					animation: true,
-					enableScroll: true,
-					xAxis: {
-						type: 'grid',
-						gridColor: '#CCCCCC',
-						gridType: 'dash',
-						dashLength: 8,
-						itemCount: 4,
-						scrollShow: true
-					},
-					yAxis: {
-						gridType: 'dash',
-						gridColor: '#CCCCCC',
-						dashLength: 8,
-						splitNumber: 5,
-						min: 10,
-						max: 180,
-						format: (val) => {
-							return val.toFixed(0) + '元'
-						}
-					},
-					width: this.cWidth * this.pixelRatio,
-					height: this.cHeight * this.pixelRatio,
-					extra: {
-						line: {
-							type: 'straight'
-						}
-					}
-				});
-			},
-			// 这里仅作为示例传入两个参数，cid为canvas-id,newdata为更新的数据，需要更多参数请自行修改
-			changeData(cid,newdata) {
-				canvases[cid].updateData({
-					series: newdata.series,
-					categories: newdata.categories
-				});
-			},
-			touchStart(e) {
-				canvases[this.canvasId].showToolTip(e, {
-					format: function(item, category) {
-						return category + ' ' + item.name + ':' + item.data
-					}
-				});
-				canvases[this.canvasId].scrollStart(e);
-			},
-			touchMove(e) {
-				canvases[this.canvasId].scroll(e);
-			},
-			touchEnd(e) {
-				canvases[this.canvasId].scrollEnd(e);
-			},
-			error(e) {
-				console.log(e)
+		yAxis: {
+			gridType: 'dash',
+			gridColor: '#CCCCCC',
+			dashLength: 8,
+			splitNumber: 5,
+			min: 10,
+			max: 180,
+			format: (val: number) => {
+				return val.toFixed(0) + '元'
 			}
 		},
-	};
+		width: (props.cWidth || 0) * (props.pixelRatio || 1),
+		height: (props.cHeight || 0) * (props.pixelRatio || 1),
+		extra: {
+			line: { type: 'straight' }
+		}
+	})
+}
+
+const init = () => {
+	switch (props.chartType) {
+		case 'column':
+			initColumnChart()
+			break
+		case 'line':
+			initLineChart()
+			break
+		default:
+			break
+	}
+}
+
+onMounted(() => {
+	init()
+})
+
+// 这里仅作为示例传入两个参数，cid为canvas-id,newdata为更新的数据，需要更多参数请自行修改
+const changeData = (cid: string, newdata: AnyRecord) => {
+	canvases[cid]?.updateData?.({
+		series: newdata.series,
+		categories: newdata.categories
+	})
+}
+
+const touchStart = (e: unknown) => {
+	const chart = canvases[props.canvasId]
+	chart?.showToolTip?.(e, {
+		format: function (item: any, category: any) {
+			return category + ' ' + item.name + ':' + item.data
+		}
+	})
+	chart?.scrollStart?.(e)
+}
+
+const touchMove = (e: unknown) => {
+	canvases[props.canvasId]?.scroll?.(e)
+}
+
+const touchEnd = (e: unknown) => {
+	canvases[props.canvasId]?.scrollEnd?.(e)
+}
+
+const error = (e: unknown) => {
+	// eslint-disable-next-line no-console
+	console.log(e)
+}
+
+defineExpose({
+	changeData
+})
 </script>
 
 <style scoped>

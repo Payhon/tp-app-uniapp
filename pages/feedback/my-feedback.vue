@@ -30,99 +30,85 @@
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				list: [],
-				page: 1,
-				pageSize: 10,
-				total: 0,
-				loading: false
-			}
-		},
-		computed: {
-			hasMore() {
-				return this.list.length < this.total
-			}
-		},
-		onLoad() {
-			if (!this.$login.isLoginType().isLogin) {
-				uni.showToast({
-					title: this.$t('pages.pleaseLogin'),
-					icon: 'none'
-				})
-				uni.navigateTo({
-					url: '/pages/login/login'
-				})
-				return
-			}
-			uni.setNavigationBarTitle({
-				title: this.$t('pages.myFeedback')
-			})
-			this.load(true)
-		},
-		onShow() {
-			// 处理完后返回刷新
-			if (this.$login.isLoginType().isLogin) {
-				this.load(true)
-			}
-		},
-		onReachBottom() {
-			if (this.hasMore && !this.loading) {
-				this.loadMore()
-			}
-		},
-		methods: {
-			getAppId() {
-				// #ifdef APP-PLUS
-				return plus.runtime.appid
-				// #endif
-				return uni.getStorageSync('app_appid') || ''
-			},
-			statusLabel(status) {
-				return this.$t(`pages.feedbackStatus.${status}`) || status
-			},
-			load(reset) {
-				const appid = this.getAppId()
-				if (reset) {
-					this.page = 1
-					this.list = []
-					this.total = 0
-				}
-				this.loading = true
-				this.API.apiRequest('/api/v1/app/content/feedback/mine', {
-					appid: appid,
-					page: this.page,
-					page_size: this.pageSize
-				}, 'get').then(res => {
-					if (res && res.code == 200) {
-						const data = res.data || {}
-						this.total = data.total || 0
-						const next = data.list || []
-						this.list = reset ? next : this.list.concat(next)
-					}
-				}).catch(() => {}).finally(() => {
-					this.loading = false
-				})
-			},
-			loadMore() {
-				if (!this.hasMore) return
-				this.page += 1
-				this.load(false)
-			},
-			openDetail(id) {
-				uni.navigateTo({
-					url: '/pages/feedback/detail?id=' + id
-				})
-			},
-			goSubmit() {
-				uni.navigateTo({
-					url: '/pages/feedback/submit'
-				})
-			}
-		}
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onReachBottom, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+import { useInjected } from '@/common/composables/useInjected'
+import { useAppRuntime } from '@/common/composables/useAppRuntime'
+
+type FeedbackItem = { id: number; status?: string; created_at?: string; content?: string; reply?: string }
+type FeedbackMineRes = { total?: number; list?: FeedbackItem[] }
+
+const { t } = useI18n()
+const { apiRequest, login } = useInjected()
+const { getAppId } = useAppRuntime()
+
+const list = ref<FeedbackItem[]>([])
+const page = ref<number>(1)
+const pageSize = ref<number>(10)
+const total = ref<number>(0)
+const loading = ref<boolean>(false)
+
+const hasMore = computed(() => list.value.length < total.value)
+
+const statusLabel = (status?: string) => t(`pages.feedbackStatus.${status}`) || status || ''
+
+const load = async (reset: boolean) => {
+	const req = apiRequest
+	if (!req) return
+
+	const appid = getAppId()
+	if (reset) {
+		page.value = 1
+		list.value = []
+		total.value = 0
 	}
+
+	loading.value = true
+	try {
+		const res = await req<FeedbackMineRes>('/api/v1/app/content/feedback/mine', { appid, page: page.value, page_size: pageSize.value }, 'get')
+		if (res && res.code == 200) {
+			total.value = res.data.total || 0
+			const next = res.data.list || []
+			list.value = reset ? next : list.value.concat(next)
+		}
+	} finally {
+		loading.value = false
+	}
+}
+
+const loadMore = () => {
+	if (!hasMore.value) return
+	page.value += 1
+	load(false)
+}
+
+const openDetail = (id: number) => {
+	uni.navigateTo({ url: `/pages/feedback/detail?id=${id}` })
+}
+
+const goSubmit = () => {
+	uni.navigateTo({ url: '/pages/feedback/submit' })
+}
+
+onLoad(() => {
+	if (!login?.isLoginType?.().isLogin) {
+		uni.showToast({ title: t('pages.pleaseLogin'), icon: 'none' })
+		uni.navigateTo({ url: '/pages/login/login' })
+		return
+	}
+	uni.setNavigationBarTitle({ title: t('pages.myFeedback') })
+	load(true)
+})
+
+onShow(() => {
+	if (login?.isLoginType?.().isLogin) load(true)
+})
+
+onReachBottom(() => {
+	if (hasMore.value && !loading.value) loadMore()
+})
 </script>
 
 <style>
@@ -185,4 +171,3 @@
 		font-size: 13px;
 	}
 </style>
-

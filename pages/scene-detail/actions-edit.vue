@@ -282,445 +282,556 @@
 </view>
 </template>
   
-<script>
-  import { warningMessageList } from '@/service/alarm';
-  import { deviceMetricsMenu,
-    deviceConfigMetricsMenu,
-    deviceConfigAll,
-    deviceListAll,
-    sceneGet
-  } from '@/service/automation';
-  
-  export default {
-    name: 'ActionsEdit',
-    components: {
-    },
-    props: {
-      actions: {
-        type: Array,
-        required: true
-      },
-      isInSceneEdit: false
-    },
-    data() {
-      return {
-        instructListItem: {
-          action_target: '',
-          action_type: null,
-          action_param_type: null,
-          action_param: null,
-          actionValue: null,
-          deviceGroupId: null,
-          actionParamOptions: [],
-          actionParamOptionsData: [],
-          actionParamTypeOptions: [],
-          showSubSelect: true,
-          actionParamData: null,
-          placeholder: '',
-          inputFeedback: '',
-          inputValidationStatus: ''
-        },
-        actionItem: {
-          actionType: null,
-          action_type: null,
-          action_target: '',
-          actionInstructList: []
-        },
-        popUpVisible: false,
-        actionOptions: [
-            {
-            label: this.$t('pages.sceneRuleDetail.actionType1'),
-            value: '1',
-            disabled: false
-            },
-            {
-            label: this.$t('pages.sceneRuleDetail.actionType3'),
-            value: '20',
-            disabled: false
-            },
-            {
-            label: this.$t('pages.sceneRuleDetail.actionType2'),
-            value: '30',
-            disabled: false
-            }
-        ],
-        actionTypeOptions: [
-            {
-            label: this.$t('pages.sceneRuleDetail.singleDevice'),
-            value: '10'
-            },
-            {
-            label: this.$t('pages.sceneRuleDetail.singleDeviceType'),
-            value: '11'
-            }
-        ],
-        deviceOptions: [],
-        sceneList: [],
-        alarmList: [],
-        queryDevice: {
-            group_id: null,
-            device_name: null,
-            bind_config: 0
-        },
-        deviceConfigOption: [],
-        queryDeviceConfig: {
-            device_config_name: ''
-        },
-        placeholderMap: {
-            telemetry: '20',
-            attributes: 'on-line',
-            command: '{"param1":1}',
-            c_telemetry: '{"switch":1,"switch1":0}',
-            c_attribute: '{"addr":1,"port":0}',
-            c_command: '{"method":"switch1","params":{"false":0}}'
-        }
-      };
-    },
-    watch: {
-        actions: {
-            handler(newActions, _oldVal) {
-                if (!newActions || !Array.isArray(newActions)) {
-                    return;
-                }
-                newActions.forEach((item, index) => {
-                    if (item && item.actionType === '1' && item.actionInstructList && Array.isArray(item.actionInstructList)) {
-                        item.actionInstructList.map((instructItem, instructIndex) => {
-                            this.actionParamShow(index, instructIndex, true);
-                        });
-                    }
-                });
-            },
-            deep: false, // 深度监听
-            immediate: false // 是否在初始时立即执行一次
-        }
-    },
-    created() {
-        if (this.actions && Array.isArray(this.actions)) {
-            this.actions.map((item, index) => {
-                if (item && item.actionType === '1' && item.actionInstructList && Array.isArray(item.actionInstructList)) {
-                  item.actionInstructList.map((instructItem, instructIndex) => {
-                    this.actionParamShow(index, instructIndex, true);
-                  });
-                }
-            });
-        }
-        if( this.deviceOptions.length === 0 ) {
-            this.getDevice(null, null);
-        }
-        if( this.deviceConfigOption.length === 0 ) {
-            this.getDeviceConfig('');
-        }
-        this.getSceneList('');
-        this.getAlarmList('');
-    },
-    methods: {
-      async getDevice(groupId, name) {
-          this.queryDevice.group_id = groupId || null;
-          this.queryDevice.device_name = name || null;
-          const res = await deviceListAll(this.queryDevice);
-          this.deviceOptions = res.data;
-      },
-      async getDeviceConfig(name) {
-          this.queryDeviceConfig.device_config_name = name || '';
-          const res = await deviceConfigAll(this.queryDeviceConfig);
-          this.deviceConfigOption = res.data || [];
-      },
-      async getSceneList(name) {
-        const params = {
-          page: 1,
-          page_size: 10,
-          name: name || ''
-        };
-        const res = await sceneGet(params);
-        this.sceneList = res.data.list;
-      },
-      async getAlarmList(name) {
-        const params = {
-          page: 1,
-          page_size: 10,
-          name: name || ''
-        };
-        const res = await warningMessageList(params);
-        this.alarmList = res.data.list;
-      },
-      actionChange(actionGroupItem, actionGroupIndex, data) {
-        this.actionOptions.map((item) => {
-          item.disabled = false;
-        });
-        actionGroupItem.actionType = data;
-        actionGroupItem.actionInstructList = [];
-        actionGroupItem.action_type = null;
-        actionGroupItem.action_target = '';
-        if (data === '1') {
-          this.addIfGroupsSubItem(actionGroupIndex);
-        }
-        this.$forceUpdate();
-      },
-      actionTypeChange(actionGroupIndex, instructIndex, data) {
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        instructItem.action_type = data;
-        instructItem.action_target = null;
-        instructItem.action_param_type = null;
-        instructItem.action_param = null;
-        instructItem.actionValue = null;
-  
-        if (data === '10') {
-          if( this.deviceOptions.length === 0 ) {
-            this.getDevice(null, null);
-          }
-        } else if (data === '11') {
-          if( this.deviceConfigOption.length === 0 ) {
-            this.getDeviceConfig('');
-          }
-        }
-        this.$forceUpdate();
-      },
-      actionTargetChange(actionGroupIndex, instructIndex) {
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        instructItem.action_param_type = null;
-        instructItem.action_param = null;
-        instructItem.actionValue = null;
-        instructItem.actionParamOptionsData = [];
-        instructItem.actionParamTypeOptions = [];
-        instructItem.actionParamOptions = [];
-        this.actionParamShow(actionGroupIndex, instructIndex);
-      },
-      async actionParamShow(actionGroupIndex, instructIndex, updateOptions = false) {
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        if (instructItem.action_target) {
-          let res = null;
-          if (instructItem.action_type === '10') {
-            res = await deviceMetricsMenu({ device_id: instructItem.action_target });
-          } else if (instructItem.action_type === '11') {
-            res = await deviceConfigMetricsMenu({
-              device_config_id: instructItem.action_target
-            });
-          }
-          if (res.data) {
-            res.data.map((item) => {
-              item.value = item.data_source_type;
-              item.label = `${item.data_source_type}${item.label ? `(${item.label})` : ''}`;
-  
-              item.options.map((subItem) => {
-                subItem.value = subItem.key;
-                subItem.label = `${subItem.key}${subItem.label ? `(${subItem.label})` : ''}`;
-              });
-            });
-            instructItem.actionParamOptionsData = res.data;
-            instructItem.actionParamTypeOptions = res.data.map((item) => {
-              return {
-                label: item.label,
-                value: item.value
-              };
-            });
-            instructItem.showSubSelect = true;
-            if (updateOptions && instructItem.action_param_type) {
-              this.actionParamTypeChange(actionGroupIndex, instructIndex, instructItem.action_param_type, updateOptions);
-            }
-            if (updateOptions && instructItem.action_param) {
-              this.actionParamChange(actionGroupIndex, instructIndex, instructItem.action_param, updateOptions);
-            }
-            this.$forceUpdate();
-          }
-        }
-      },
-      actionParamTypeChange(actionGroupIndex, instructIndex, data, updateOptions) {
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        instructItem.action_param_type = data;
-        if (!updateOptions) {
-          instructItem.action_param = null;
-          instructItem.actionParamData = null;
-        }
-        const foundItem = instructItem.actionParamOptionsData.find((item) => item.data_source_type === data);
-        instructItem.actionParamOptions = foundItem ? foundItem.options : [];
-        instructItem.placeholder = this.placeholderMap[data];
-        if (!updateOptions) instructItem.actionValue = null;
-        if (
-          instructItem.action_param_type === 'c_attribute' ||
-          instructItem.action_param_type === 'c_telemetry' ||
-          instructItem.action_param_type === 'c_command'
-        ) {
-          instructItem.showSubSelect = false;
-        } else {
-          instructItem.showSubSelect = true;
-        }
-        if (!updateOptions) this.$forceUpdate();
-      },
-      actionParamChange(actionGroupIndex, instructIndex, data, updateOptions) {
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        instructItem.action_param = data;
-        if (!updateOptions) instructItem.actionValue = null;
-        instructItem.actionParamData = instructItem.actionParamOptions.find((item) => item.key === data) || null;
-        if (instructItem.actionParamData && instructItem.actionParamData.data_type) {
-          instructItem.actionParamData.data_type = instructItem.actionParamData.data_type.toLowerCase();
-        }
-        if (!updateOptions) this.$forceUpdate();
-      },
-      actionValueChange(actionGroupIndex, instructIndex) {
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        if (
-          instructItem.action_param_type === 'command' ||
-          instructItem.action_param_type === 'c_attribute' ||
-          instructItem.action_param_type === 'c_telemetry' ||
-          instructItem.action_param_type === 'c_command'
-        ) {
-          try {
-            JSON.parse(instructItem.actionValue);
-            if (typeof JSON.parse(instructItem.actionValue) === 'object') {
-              instructItem.inputFeedback = '';
-              instructItem.inputValidationStatus = undefined;
-            } else {
-              uni.showToast({
-                title: this.$t('pages.sceneRuleDetail.jsonFormat'),
-                icon: 'none'
-              });
-              instructItem.inputValidationStatus = 'error';
-            }
-          } catch (e) {
-            uni.showToast({
-              title: this.$t('pages.sceneRuleDetail.jsonFormat'),
-              icon: 'none'
-            });
-            instructItem.inputValidationStatus = 'error';
-          }
-        }
-      },
-      addIfGroupsSubItem(actionGroupIndex) {
-        const data = JSON.parse(JSON.stringify(this.instructListItem));
-        this.actions[actionGroupIndex].actionInstructList.push(data);
-      },
-      deleteIfGroupsSubItem(actionGroupIndex, instructIndex) {
-        this.actions[actionGroupIndex].actionInstructList.splice(instructIndex, 1);
-      },
-      deleteActionGroupItem(actionGroupIndex) {
-        this.actions.splice(actionGroupIndex, 1);
-      },
-      addActionGroupItem() {
-        const actionItemData = JSON.parse(JSON.stringify(this.actionItem));
-        this.actions.push(actionItemData);
-      },
-      // Picker change 事件处理方法
-      onActionTypePickerChange(e, actionGroupItem, actionGroupIndex) {
-        const index = e.detail.value;
-        const selectedValue = this.actionOptions[index] ? this.actionOptions[index].value : null;
-        this.actionChange(actionGroupItem, actionGroupIndex, selectedValue);
-      },
-      onDeviceTypePickerChange(e, actionGroupIndex, instructIndex) {
-        const index = e.detail.value;
-        const selectedValue = this.actionTypeOptions[index] ? this.actionTypeOptions[index].value : null;
-        this.actionTypeChange(actionGroupIndex, instructIndex, selectedValue);
-      },
-      onDevicePickerChange(e, actionGroupIndex, instructIndex) {
-        const index = e.detail.value;
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        instructItem.action_target = this.deviceOptions[index] ? this.deviceOptions[index].id : null;
-        this.actionTargetChange(actionGroupIndex, instructIndex);
-      },
-      onDeviceConfigPickerChange(e, actionGroupIndex, instructIndex) {
-        const index = e.detail.value;
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        instructItem.action_target = this.deviceConfigOption[index] ? this.deviceConfigOption[index].id : null;
-        this.actionTargetChange(actionGroupIndex, instructIndex);
-      },
-      onActionParamTypePickerChange(e, actionGroupIndex, instructIndex) {
-        const index = e.detail.value;
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        const selectedValue = instructItem.actionParamTypeOptions[index] ? instructItem.actionParamTypeOptions[index].value : null;
-        this.actionParamTypeChange(actionGroupIndex, instructIndex, selectedValue);
-      },
-      onActionParamPickerChange(e, actionGroupIndex, instructIndex) {
-        const index = e.detail.value;
-        const instructItem = this.actions[actionGroupIndex].actionInstructList[instructIndex];
-        const selectedValue = instructItem.actionParamOptions[index] ? instructItem.actionParamOptions[index].key : null;
-        this.actionParamChange(actionGroupIndex, instructIndex, selectedValue);
-      },
-      onScenePickerChange(e, actionGroupIndex) {
-        const index = e.detail.value;
-        const actionGroupItem = this.actions[actionGroupIndex];
-        const selectedScene = this.sceneList[index];
-        // 使用 Vue.set 确保响应式更新
-        this.$set(actionGroupItem, 'action_target', selectedScene ? selectedScene.id : null);
-        // 触发视图更新和数据同步
-        this.$nextTick(() => {
-          this.$forceUpdate();
-          this.$emit('update:actions', this.actions);
-        });
-      },
-      onAlarmPickerChange(e, actionGroupIndex) {
-        const index = e.detail.value;
-        const actionGroupItem = this.actions[actionGroupIndex];
-        const selectedAlarm = this.alarmList[index];
-        // 使用 Vue.set 确保响应式更新
-        this.$set(actionGroupItem, 'action_target', selectedAlarm ? selectedAlarm.id : null);
-        // 触发视图更新和数据同步
-        this.$nextTick(() => {
-          this.$forceUpdate();
-          this.$emit('update:actions', this.actions);
-        });
-      },
-      // 获取 picker 的索引值
-      getPickerIndex(options, value, valueKey = 'value') {
-        if (!options || !Array.isArray(options) || options.length === 0) {
-          return 0;
-        }
-        if (value === null || value === undefined || value === '') {
-          return 0;
-        }
-        const index = options.findIndex(item => {
-          if (!item) return false;
-          const itemValue = item[valueKey];
-          // 严格相等比较
-          if (itemValue === value) {
-            return true;
-          }
-          // 字符串转换比较
-          if (String(itemValue) === String(value)) {
-            return true;
-          }
-          // 数字类型比较
-          const numItem = Number(itemValue);
-          const numValue = Number(value);
-          if (!isNaN(numItem) && !isNaN(numValue) && numItem === numValue) {
-            return true;
-          }
-          return false;
-        });
-        return index >= 0 ? index : 0;
-      },
-      // 获取 picker 的显示文本
-      getPickerDisplayText(options, value, valueKey = 'value', labelKey = 'label') {
-        if (!options || !Array.isArray(options) || options.length === 0) {
-          return '';
-        }
-        if (value === null || value === undefined || value === '') {
-          return '';
-        }
-        const option = options.find(item => {
-          if (!item) return false;
-          const itemValue = item[valueKey];
-          // 严格相等比较
-          if (itemValue === value) {
-            return true;
-          }
-          // 字符串转换比较
-          if (String(itemValue) === String(value)) {
-            return true;
-          }
-          // 数字类型比较
-          const numItem = Number(itemValue);
-          const numValue = Number(value);
-          if (!isNaN(numItem) && !isNaN(numValue) && numItem === numValue) {
-            return true;
-          }
-          return false;
-        });
-        return option && option[labelKey] !== undefined && option[labelKey] !== null ? String(option[labelKey]) : '';
-      }
-    }
-  };
-  </script>
+<script setup lang="ts">
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+import { warningMessageList } from '@/service/alarm'
+import {
+	deviceMetricsMenu,
+	deviceConfigMetricsMenu,
+	deviceConfigAll,
+	deviceListAll,
+	sceneGet
+} from '@/service/automation'
+
+type PickerChangeEvent = { detail: { value: string | number } }
+
+type ActionParamType =
+	| 'telemetry'
+	| 'attributes'
+	| 'command'
+	| 'c_telemetry'
+	| 'c_attribute'
+	| 'c_command'
+	| string
+	| null
+
+interface LabeledOption {
+	label: string
+	value: string
+	disabled?: boolean
+}
+
+interface MetricOption {
+	key: string
+	label: string
+	data_type?: string
+	// 动态补充字段：picker 里会用到 value
+	value?: string
+	[key: string]: unknown
+}
+
+interface MetricGroup {
+	data_source_type: string
+	label: string
+	options: MetricOption[]
+	// 动态补充字段：picker 里会用到 value
+	value?: string
+	[key: string]: unknown
+}
+
+interface ActionInstructItem {
+	action_target: string | null
+	action_type: string | null
+	action_param_type: ActionParamType
+	action_param: string | null
+	actionValue: unknown
+
+	deviceGroupId: string | null
+	actionParamOptions: MetricOption[]
+	actionParamOptionsData: MetricGroup[]
+	actionParamTypeOptions: LabeledOption[]
+	showSubSelect: boolean
+	actionParamData: MetricOption | null
+	placeholder: string
+	inputFeedback: string
+	inputValidationStatus: string | undefined
+
+	[key: string]: unknown
+}
+
+interface ActionGroupItem {
+	actionType: string | null
+	action_type?: string | null
+	action_target?: string | null
+	actionInstructList: ActionInstructItem[]
+	[key: string]: unknown
+}
+
+interface DeviceOption {
+	id: string
+	name: string
+	[key: string]: unknown
+}
+
+interface QueryDevice {
+	group_id: string | null
+	device_name: string | null
+	bind_config: number
+}
+
+interface QueryDeviceConfig {
+	device_config_name: string
+}
+
+interface ListResponse<T> {
+	data: T
+	[key: string]: unknown
+}
+
+interface PagedList<T> {
+	list: T[]
+	[key: string]: unknown
+}
+
+const props = defineProps<{
+	actions: ActionGroupItem[]
+	isInSceneEdit?: boolean
+}>()
+
+const emit = defineEmits<{
+	(e: 'update:actions', value: ActionGroupItem[]): void
+}>()
+
+const { t } = useI18n()
+
+const isInSceneEdit = computed(() => !!props.isInSceneEdit)
+const actions = computed(() => props.actions)
+
+const emitUpdate = () => {
+	emit('update:actions', props.actions)
+}
+
+const createInstructItem = (): ActionInstructItem => ({
+	action_target: '',
+	action_type: null,
+	action_param_type: null,
+	action_param: null,
+	actionValue: null,
+	deviceGroupId: null,
+	actionParamOptions: [],
+	actionParamOptionsData: [],
+	actionParamTypeOptions: [],
+	showSubSelect: true,
+	actionParamData: null,
+	placeholder: '',
+	inputFeedback: '',
+	inputValidationStatus: ''
+})
+
+const createActionItem = (): ActionGroupItem => ({
+	actionType: null,
+	action_type: null,
+	action_target: '',
+	actionInstructList: []
+})
+
+const popUpVisible = ref<boolean>(false)
+
+const actionOptions = ref<LabeledOption[]>([
+	{
+		label: t('pages.sceneRuleDetail.actionType1') as string,
+		value: '1',
+		disabled: false
+	},
+	{
+		label: t('pages.sceneRuleDetail.actionType3') as string,
+		value: '20',
+		disabled: false
+	},
+	{
+		label: t('pages.sceneRuleDetail.actionType2') as string,
+		value: '30',
+		disabled: false
+	}
+])
+
+const actionTypeOptions = ref<LabeledOption[]>([
+	{
+		label: t('pages.sceneRuleDetail.singleDevice') as string,
+		value: '10'
+	},
+	{
+		label: t('pages.sceneRuleDetail.singleDeviceType') as string,
+		value: '11'
+	}
+])
+
+const deviceOptions = ref<DeviceOption[]>([])
+const sceneList = ref<Array<{ id: string; name: string }>>([])
+const alarmList = ref<Array<{ id: string; name: string }>>([])
+const deviceConfigOption = ref<DeviceOption[]>([])
+
+const queryDevice = reactive<QueryDevice>({
+	group_id: null,
+	device_name: null,
+	bind_config: 0
+})
+
+const queryDeviceConfig = reactive<QueryDeviceConfig>({
+	device_config_name: ''
+})
+
+const placeholderMap: Record<string, string> = {
+	telemetry: '20',
+	attributes: 'on-line',
+	command: '{"param1":1}',
+	c_telemetry: '{"switch":1,"switch1":0}',
+	c_attribute: '{"addr":1,"port":0}',
+	c_command: '{"method":"switch1","params":{"false":0}}'
+}
+
+watch(
+	() => props.actions,
+	(newActions) => {
+		if (!newActions || !Array.isArray(newActions)) return
+		newActions.forEach((item, index) => {
+			if (item && item.actionType === '1' && Array.isArray(item.actionInstructList)) {
+				item.actionInstructList.forEach((_instructItem, instructIndex) => {
+					void actionParamShow(index, instructIndex, true)
+				})
+			}
+		})
+	},
+	{ deep: false }
+)
+
+onMounted(() => {
+	if (props.actions && Array.isArray(props.actions)) {
+		props.actions.forEach((item, index) => {
+			if (item && item.actionType === '1' && Array.isArray(item.actionInstructList)) {
+				item.actionInstructList.forEach((_instructItem, instructIndex) => {
+					void actionParamShow(index, instructIndex, true)
+				})
+			}
+		})
+	}
+
+	if (deviceOptions.value.length === 0) void getDevice(null, null)
+	if (deviceConfigOption.value.length === 0) void getDeviceConfig('')
+	void getSceneList('')
+	void getAlarmList('')
+})
+
+const getDevice = async (groupId: string | null, name: string | null) => {
+	queryDevice.group_id = groupId || null
+	queryDevice.device_name = name || null
+	const res = (await deviceListAll(queryDevice as unknown as Record<string, unknown>)) as ListResponse<DeviceOption[]>
+	deviceOptions.value = res.data || []
+}
+
+const getDeviceConfig = async (name: string) => {
+	queryDeviceConfig.device_config_name = name || ''
+	const res = (await deviceConfigAll(queryDeviceConfig as unknown as Record<string, unknown>)) as ListResponse<DeviceOption[]>
+	deviceConfigOption.value = res.data || []
+}
+
+const getSceneList = async (name: string) => {
+	const params = {
+		page: 1,
+		page_size: 10,
+		name: name || ''
+	}
+	const res = (await sceneGet(params)) as ListResponse<PagedList<{ id: string; name: string }>>
+	sceneList.value = res.data?.list || []
+}
+
+const getAlarmList = async (name: string) => {
+	const params = {
+		page: 1,
+		page_size: 10,
+		name: name || ''
+	}
+	const res = (await warningMessageList(params)) as ListResponse<PagedList<{ id: string; name: string }>>
+	alarmList.value = res.data?.list || []
+}
+
+const actionChange = (actionGroupItem: ActionGroupItem, actionGroupIndex: number, data: string | null) => {
+	actionOptions.value.forEach((item) => {
+		item.disabled = false
+	})
+
+	actionGroupItem.actionType = data
+	actionGroupItem.actionInstructList = []
+	actionGroupItem.action_type = null
+	actionGroupItem.action_target = ''
+
+	if (data === '1') {
+		addIfGroupsSubItem(actionGroupIndex)
+	}
+
+	emitUpdate()
+}
+
+const actionTypeChange = (actionGroupIndex: number, instructIndex: number, data: string | null) => {
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	instructItem.action_type = data
+	instructItem.action_target = null
+	instructItem.action_param_type = null
+	instructItem.action_param = null
+	instructItem.actionValue = null
+
+	if (data === '10') {
+		if (deviceOptions.value.length === 0) void getDevice(null, null)
+	} else if (data === '11') {
+		if (deviceConfigOption.value.length === 0) void getDeviceConfig('')
+	}
+
+	emitUpdate()
+}
+
+const actionTargetChange = (actionGroupIndex: number, instructIndex: number) => {
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	instructItem.action_param_type = null
+	instructItem.action_param = null
+	instructItem.actionValue = null
+	instructItem.actionParamOptionsData = []
+	instructItem.actionParamTypeOptions = []
+	instructItem.actionParamOptions = []
+	void actionParamShow(actionGroupIndex, instructIndex)
+	emitUpdate()
+}
+
+const actionParamShow = async (actionGroupIndex: number, instructIndex: number, updateOptions = false) => {
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	if (!instructItem.action_target) return
+
+	let res: ListResponse<MetricGroup[]> | null = null
+	if (instructItem.action_type === '10') {
+		res = (await deviceMetricsMenu({ device_id: instructItem.action_target })) as ListResponse<MetricGroup[]>
+	} else if (instructItem.action_type === '11') {
+		res = (await deviceConfigMetricsMenu({ device_config_id: instructItem.action_target })) as ListResponse<MetricGroup[]>
+	}
+
+	if (!res?.data) return
+
+	res.data.forEach((item) => {
+		item.value = item.data_source_type
+		item.label = `${item.data_source_type}${item.label ? `(${item.label})` : ''}`
+
+		item.options.forEach((subItem) => {
+			subItem.value = subItem.key
+			subItem.label = `${subItem.key}${subItem.label ? `(${subItem.label})` : ''}`
+		})
+	})
+
+	instructItem.actionParamOptionsData = res.data
+	instructItem.actionParamTypeOptions = res.data.map((item) => {
+		return {
+			label: item.label,
+			value: item.value || item.data_source_type
+		}
+	})
+	instructItem.showSubSelect = true
+
+	if (updateOptions && instructItem.action_param_type) {
+		actionParamTypeChange(actionGroupIndex, instructIndex, instructItem.action_param_type, updateOptions)
+	}
+	if (updateOptions && instructItem.action_param) {
+		actionParamChange(actionGroupIndex, instructIndex, instructItem.action_param, updateOptions)
+	}
+}
+
+const actionParamTypeChange = (
+	actionGroupIndex: number,
+	instructIndex: number,
+	data: ActionParamType,
+	updateOptions?: boolean
+) => {
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	instructItem.action_param_type = data
+
+	if (!updateOptions) {
+		instructItem.action_param = null
+		instructItem.actionParamData = null
+	}
+
+	const foundItem = instructItem.actionParamOptionsData.find((item) => item.data_source_type === data)
+	instructItem.actionParamOptions = foundItem ? foundItem.options : []
+	instructItem.placeholder = placeholderMap[String(data)] || ''
+	if (!updateOptions) instructItem.actionValue = null
+
+	if (instructItem.action_param_type === 'c_attribute' || instructItem.action_param_type === 'c_telemetry' || instructItem.action_param_type === 'c_command') {
+		instructItem.showSubSelect = false
+	} else {
+		instructItem.showSubSelect = true
+	}
+
+	if (!updateOptions) emitUpdate()
+}
+
+const actionParamChange = (actionGroupIndex: number, instructIndex: number, data: string | null, updateOptions?: boolean) => {
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	instructItem.action_param = data
+	if (!updateOptions) instructItem.actionValue = null
+
+	instructItem.actionParamData = instructItem.actionParamOptions.find((item) => item.key === data) || null
+	if (instructItem.actionParamData?.data_type) {
+		instructItem.actionParamData.data_type = String(instructItem.actionParamData.data_type).toLowerCase()
+	}
+
+	if (!updateOptions) emitUpdate()
+}
+
+const actionValueChange = (actionGroupIndex: number, instructIndex: number) => {
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	if (
+		instructItem.action_param_type === 'command' ||
+		instructItem.action_param_type === 'c_attribute' ||
+		instructItem.action_param_type === 'c_telemetry' ||
+		instructItem.action_param_type === 'c_command'
+	) {
+		try {
+			const parsed = JSON.parse(String(instructItem.actionValue))
+			if (typeof parsed === 'object') {
+				instructItem.inputFeedback = ''
+				instructItem.inputValidationStatus = undefined
+			} else {
+				uni.showToast({
+					title: t('pages.sceneRuleDetail.jsonFormat') as string,
+					icon: 'none'
+				})
+				instructItem.inputValidationStatus = 'error'
+			}
+		} catch (_e) {
+			uni.showToast({
+				title: t('pages.sceneRuleDetail.jsonFormat') as string,
+				icon: 'none'
+			})
+			instructItem.inputValidationStatus = 'error'
+		}
+	}
+
+	emitUpdate()
+}
+
+const addIfGroupsSubItem = (actionGroupIndex: number) => {
+	props.actions[actionGroupIndex].actionInstructList.push(createInstructItem())
+	emitUpdate()
+}
+
+const deleteIfGroupsSubItem = (actionGroupIndex: number, instructIndex: number) => {
+	props.actions[actionGroupIndex].actionInstructList.splice(instructIndex, 1)
+	emitUpdate()
+}
+
+const deleteActionGroupItem = (actionGroupIndex: number) => {
+	props.actions.splice(actionGroupIndex, 1)
+	emitUpdate()
+}
+
+const addActionGroupItem = () => {
+	props.actions.push(createActionItem())
+	emitUpdate()
+}
+
+const onActionTypePickerChange = (e: PickerChangeEvent, actionGroupItem: ActionGroupItem, actionGroupIndex: number) => {
+	const index = Number(e.detail.value)
+	const selectedValue = actionOptions.value[index] ? actionOptions.value[index].value : null
+	actionChange(actionGroupItem, actionGroupIndex, selectedValue)
+}
+
+const onDeviceTypePickerChange = (e: PickerChangeEvent, actionGroupIndex: number, instructIndex: number) => {
+	const index = Number(e.detail.value)
+	const selectedValue = actionTypeOptions.value[index] ? actionTypeOptions.value[index].value : null
+	actionTypeChange(actionGroupIndex, instructIndex, selectedValue)
+}
+
+const onDevicePickerChange = (e: PickerChangeEvent, actionGroupIndex: number, instructIndex: number) => {
+	const index = Number(e.detail.value)
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	instructItem.action_target = deviceOptions.value[index] ? deviceOptions.value[index].id : null
+	actionTargetChange(actionGroupIndex, instructIndex)
+}
+
+const onDeviceConfigPickerChange = (e: PickerChangeEvent, actionGroupIndex: number, instructIndex: number) => {
+	const index = Number(e.detail.value)
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	instructItem.action_target = deviceConfigOption.value[index] ? deviceConfigOption.value[index].id : null
+	actionTargetChange(actionGroupIndex, instructIndex)
+}
+
+const onActionParamTypePickerChange = (e: PickerChangeEvent, actionGroupIndex: number, instructIndex: number) => {
+	const index = Number(e.detail.value)
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	const selectedValue = instructItem.actionParamTypeOptions[index] ? instructItem.actionParamTypeOptions[index].value : null
+	actionParamTypeChange(actionGroupIndex, instructIndex, selectedValue)
+}
+
+const onActionParamPickerChange = (e: PickerChangeEvent, actionGroupIndex: number, instructIndex: number) => {
+	const index = Number(e.detail.value)
+	const instructItem = props.actions[actionGroupIndex].actionInstructList[instructIndex]
+	const selectedValue = instructItem.actionParamOptions[index] ? instructItem.actionParamOptions[index].key : null
+	actionParamChange(actionGroupIndex, instructIndex, selectedValue)
+}
+
+const onScenePickerChange = async (e: PickerChangeEvent, actionGroupIndex: number) => {
+	const index = Number(e.detail.value)
+	const actionGroupItem = props.actions[actionGroupIndex]
+	const selectedScene = sceneList.value[index]
+
+	actionGroupItem.action_target = selectedScene ? selectedScene.id : null
+
+	await nextTick()
+	emitUpdate()
+}
+
+const onAlarmPickerChange = async (e: PickerChangeEvent, actionGroupIndex: number) => {
+	const index = Number(e.detail.value)
+	const actionGroupItem = props.actions[actionGroupIndex]
+	const selectedAlarm = alarmList.value[index]
+
+	actionGroupItem.action_target = selectedAlarm ? selectedAlarm.id : null
+
+	await nextTick()
+	emitUpdate()
+}
+
+const getRecordValue = (target: unknown, key: string): unknown => {
+	if (!target || typeof target !== 'object') return undefined
+	return (target as Record<string, unknown>)[key]
+}
+
+const getPickerIndex = (options: unknown[], value: unknown, valueKey = 'value') => {
+	if (!options || !Array.isArray(options) || options.length === 0) return 0
+	if (value === null || value === undefined || value === '') return 0
+
+	const index = options.findIndex((item) => {
+		if (!item) return false
+		const itemValue = getRecordValue(item, valueKey)
+		if (itemValue === value) return true
+		if (String(itemValue) === String(value)) return true
+		const numItem = Number(itemValue)
+		const numValue = Number(value as string | number)
+		if (!Number.isNaN(numItem) && !Number.isNaN(numValue) && numItem === numValue) return true
+		return false
+	})
+
+	return index >= 0 ? index : 0
+}
+
+const getPickerDisplayText = (options: unknown[], value: unknown, valueKey = 'value', labelKey = 'label') => {
+	if (!options || !Array.isArray(options) || options.length === 0) return ''
+	if (value === null || value === undefined || value === '') return ''
+
+	const option = options.find((item) => {
+		if (!item) return false
+		const itemValue = getRecordValue(item, valueKey)
+		if (itemValue === value) return true
+		if (String(itemValue) === String(value)) return true
+		const numItem = Number(itemValue)
+		const numValue = Number(value as string | number)
+		if (!Number.isNaN(numItem) && !Number.isNaN(numValue) && numItem === numValue) return true
+		return false
+	})
+
+	const label = getRecordValue(option, labelKey)
+	return label !== undefined && label !== null ? String(label) : ''
+}
+</script>
   <style>
-	@import '@/common/alert-strategy.css';
+	@import '@/common/styles/alert-strategy.css';
 	
 	.action-item-card {
 		background: #f5f5f5;

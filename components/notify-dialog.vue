@@ -15,56 +15,67 @@
     </view>
   </view>
 </template>
-<script>
-export default {
-  props: {
-    visible: {
-      type: Boolean,
-      default: false,
-    },
-    alarmId:{
-      type: [String,Number],
-      default: ''
-    },
-    status:{
-      type: [String,Number],
-      default: ''
-    }
-  },
-  data(){
-    return {
-      content: ''
-    }
-  },
-  methods:{
-    confirm(){
-      this.API.apiRequest('/api/v1/alarm/info', {
-        id: this.alarmId, 
-        processing_result: this.status, 
-        processing_instructions: this.content
-      }, 'put').then(res => {
-        if (res.code === 200) {
-          uni.showToast({
-            title: this.$t('components.notifyDialog.operationSuccess')
-          })
-          this.cancle(true)
-          // this.list = this.list.filter(l => l.id !== id)
-        }
-      })
-    },
-    cancle(refresh){
-      this.$emit('close', refresh)
-    }
-  },
-  watch:{
-    visible(val){
-      if(val){
-        this.content = ''
-      }
-    }
-  }
-  
+<script setup lang="ts">
+import { getCurrentInstance, ref, toRefs, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+type Props = {
+	visible?: boolean
+	alarmId?: string | number
+	status?: string | number
 }
+
+type ApiResponse = { code: number }
+
+const props = withDefaults(defineProps<Props>(), {
+	visible: false,
+	alarmId: '',
+	status: '',
+})
+
+const emit = defineEmits<{
+	(e: 'close', refresh?: boolean): void
+}>()
+
+const { t } = useI18n()
+const content = ref<string>('')
+const { visible, alarmId, status } = toRefs(props)
+
+const confirm = async () => {
+	// NOTE: API 是项目全局注入（类型取决于注入实现），这里保持渐进式类型，不影响运行逻辑
+	const { proxy } = getCurrentInstance() || {}
+	const apiRequest = (proxy as any)?.API?.apiRequest as
+		| ((url: string, data: Record<string, unknown>, method: string) => Promise<ApiResponse>)
+		| undefined
+
+	if (!apiRequest) return
+
+	const res = await apiRequest(
+		'/api/v1/alarm/info',
+		{
+			id: props.alarmId,
+			processing_result: props.status,
+			processing_instructions: content.value,
+		},
+		'put'
+	)
+
+	if (res?.code === 200) {
+		uni.showToast({ title: t('components.notifyDialog.operationSuccess') })
+		cancle(true)
+	}
+}
+
+const cancle = (refresh?: boolean) => {
+	emit('close', refresh)
+}
+
+watch(
+	() => visible.value,
+	(val) => {
+		if (val) content.value = ''
+	}
+)
 </script>
 <style scoped lang="css">
 .fizz-dialog .mask{

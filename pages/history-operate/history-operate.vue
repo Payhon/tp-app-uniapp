@@ -28,190 +28,61 @@
 		
 		<view class="tp-tmp"></view>		
 		
-		<DatePicke :startYear="startYear" :endYear="endYear" :val="selectedTime" @confirm="onConfirm" ref="DatePicke"></DatePicke>
+		<DatePicke :startYear="startYear" :endYear="endYear" :val="selectedTime" @confirm="onConfirm" ref="datePickeRef"></DatePicke>
 		
 	</view>
 </template>
 
-<script>
-	// 
-	import DatePicke from '@/components/uni/DatePicke/DatePicke.vue';
-	// 
-	export default {
-		components:{
-			DatePicke
-		},
-		data() {
-			return {
-				startYear:'2016',
-				endYear:'2021',
-				selectedTime:"2021-04",
-				date:'2021',
-				month:'04',
-				logData:[
-					{
-						month:4,
-						date:25,
-						list:[
-							{
-								id:1000,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							},
-							{
-								id:1001,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-oxygen.png',
-								status:1
-							},
-							{
-								id:1002,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							},
-							{
-								id:1002,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							}
-						]
-					},
-					{
-						month:4,
-						date:24,
-						list:[
-							{
-								id:1000,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							},
-							{
-								id:1001,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-oxygen.png',
-								status:1
-							},
-							{
-								id:1002,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							},
-							{
-								id:1002,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							}
-						]
-					},
-					{
-						month:4,
-						date:23,
-						list:[
-							{
-								id:1000,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							},
-							{
-								id:1001,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-oxygen.png',
-								status:1
-							},
-							{
-								id:1002,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							},
-							{
-								id:1002,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							}
-						]
-					},
-					{
-						month:4,
-						date:22,
-						list:[
-							{
-								id:1000,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							},
-							{
-								id:1001,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-oxygen.png',
-								status:1
-							},
-							{
-								id:1002,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							},
-							{
-								id:1002,
-								time:'14:22',
-								log: this.$t('pages.history.pumpOnWhenPHHigh'),
-								icon:'/static/icon/icon-small-ph.png',
-								status:0
-							}
-						]
-					}
-				]
-			}
-		},
-		onShow() {
-			uni.setNavigationBarTitle({
-				title: this.$t('pages.historyOperation')
-			})
-		},
-		methods: {
-			//
-			doOpenSelectDateTime:function(){
-				this.$refs.DatePicke.show();
-			},
-			onConfirm:function(e){
-				// 
-				let dateTime = e;
-				let dateArr = dateTime.split('-');
-				// 
-				this.date = dateArr[0];
-				this.month = dateArr[1];
-				// 
-				this.selectedTime = this.date+'-'+this.month;
-				// 
-			}
-			//
-		}
-	}
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+import DatePicke from '@/components/uni/DatePicke/DatePicke.vue'
+
+type LogItem = { id: number; time: string; log: string; icon: string; status: 0 | 1 }
+type LogGroup = { month: number; date: number; list: LogItem[] }
+
+const { t } = useI18n()
+
+const datePickeRef = ref<any>(null)
+
+const startYear = ref<string>('2016')
+const endYear = ref<string>('2021')
+const selectedTime = ref<string>('2021-04')
+const date = ref<string>('2021')
+const month = ref<string>('04')
+
+const logText = computed(() => t('pages.history.pumpOnWhenPHHigh'))
+const logData = computed<LogGroup[]>(() => {
+	const mkList = (): LogItem[] => [
+		{ id: 1000, time: '14:22', log: logText.value, icon: '/static/icon/icon-small-ph.png', status: 0 },
+		{ id: 1001, time: '14:22', log: logText.value, icon: '/static/icon/icon-small-oxygen.png', status: 1 },
+		{ id: 1002, time: '14:22', log: logText.value, icon: '/static/icon/icon-small-ph.png', status: 0 },
+		{ id: 1002, time: '14:22', log: logText.value, icon: '/static/icon/icon-small-ph.png', status: 0 },
+	]
+	return [
+		{ month: 4, date: 25, list: mkList() },
+		{ month: 4, date: 24, list: mkList() },
+		{ month: 4, date: 23, list: mkList() },
+		{ month: 4, date: 22, list: mkList() },
+	]
+})
+
+const doOpenSelectDateTime = () => {
+	datePickeRef.value?.show?.()
+}
+
+const onConfirm = (e: string) => {
+	const dateTime = e
+	const dateArr = dateTime.split('-')
+	date.value = dateArr[0] || ''
+	month.value = dateArr[1] || ''
+	selectedTime.value = `${date.value}-${month.value}`
+}
+
+onShow(() => {
+	uni.setNavigationBarTitle({ title: t('pages.historyOperation') })
+})
 </script>
 
 <style>
@@ -299,3 +170,4 @@
 	height: 35rpx;
 }
 </style>
+

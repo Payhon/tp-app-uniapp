@@ -83,83 +83,78 @@
 	</view>
 </template>
 
-<script>
+<script setup lang="ts">
+import { computed, getCurrentInstance, ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
 import dayjs from 'dayjs'
 
-export default {
-	data() {
-		return {
-			detail: {
-				alarm_device_list: [],
-				created_at: ''
-			},
-			levelClassMap: {
-				H: 'level-high',
-				M: 'level-medium',
-				L: 'level-low',
-				'1': 'level-high',
-				'2': 'level-medium',
-				'3': 'level-low',
-				default: 'level-default'
-			}
-		}
-	},
-	computed: {
-		deviceList() {
-			return this.detail?.alarm_device_list || []
-		},
-		alertTimeValue() {
-			return this.detail?.create_at
-				|| this.detail?.createdAt
-				|| this.detail?.alarm_time
-				|| this.detail?.alarmTime
-				|| this.detail?.timestamp
-				|| ''
-		}
-	},
-	onShow() {
-		uni.setNavigationBarTitle({
-			title: this.$t('pages.notifyDetailTitle')
-		})
-	},
-	onLoad() {
-		const eventChannel = this.getOpenerEventChannel();
-		if (eventChannel) {
-			eventChannel.on('acceptData', (data) => {
-				if (data && data.item) {
-					this.detail = {
-						alarm_device_list: [],
-						...data.item
-					};
-				} else {
-					console.error('Invalid data received:', data);
-				}
-			});
-		} else {
-			console.error('Failed to get event channel');
-		}
-	},
-	methods: {
-		formatDate(date) {
-			if (!date && date !== 0) {
-				return '--'
-			}
-			if (typeof date === 'number' || /^\d+$/.test(date)) {
-				const num = Number(date)
-				const ms = num < 1e12 ? num * 1000 : num
-				const parsedNum = dayjs(ms)
-				if (parsedNum.isValid()) {
-					return parsedNum.format('YYYY-MM-DD HH:mm')
-				}
-			}
-			const parsed = dayjs(date)
-			if (parsed.isValid()) {
-				return parsed.format('YYYY-MM-DD HH:mm')
-			}
-			return date || '--'
-		}
+type DeviceInfo = { id?: string | number; name?: string; device_name?: string } & Record<string, unknown>
+type AlarmDetail = {
+	alarm_level?: string | number
+	alarm_status?: string | number
+	name?: string
+	alarm_config_name?: string
+	content?: string
+	description?: string
+	alarm_device_list?: DeviceInfo[]
+	created_at?: string
+	create_at?: string
+	createdAt?: string
+	alarm_time?: string | number
+	alarmTime?: string | number
+	timestamp?: string | number
+} & Record<string, unknown>
+
+const { t } = useI18n()
+
+const detail = ref<AlarmDetail>({ alarm_device_list: [], created_at: '' })
+
+const levelClassMap = {
+	H: 'level-high',
+	M: 'level-medium',
+	L: 'level-low',
+	'1': 'level-high',
+	'2': 'level-medium',
+	'3': 'level-low',
+	default: 'level-default',
+} as const
+
+const deviceList = computed(() => detail.value?.alarm_device_list || [])
+const alertTimeValue = computed(() => detail.value?.create_at || detail.value?.createdAt || detail.value?.alarm_time || detail.value?.alarmTime || detail.value?.timestamp || '')
+
+const formatDate = (date: any) => {
+	if (!date && date !== 0) return '--'
+	if (typeof date === 'number' || /^\d+$/.test(String(date))) {
+		const num = Number(date)
+		const ms = num < 1e12 ? num * 1000 : num
+		const parsedNum = dayjs(ms)
+		if (parsedNum.isValid()) return parsedNum.format('YYYY-MM-DD HH:mm')
 	}
+	const parsed = dayjs(date)
+	if (parsed.isValid()) return parsed.format('YYYY-MM-DD HH:mm')
+	return date || '--'
 }
+
+onShow(() => {
+	uni.setNavigationBarTitle({ title: t('pages.notifyDetailTitle') })
+})
+
+onLoad(() => {
+	const { proxy } = getCurrentInstance() || {}
+	const eventChannel = (proxy as any)?.getOpenerEventChannel?.()
+	if (eventChannel) {
+		eventChannel.on('acceptData', (data: any) => {
+			if (data && data.item) {
+				detail.value = { alarm_device_list: [], ...data.item }
+			} else {
+				console.error('Invalid data received:', data)
+			}
+		})
+	} else {
+		console.error('Failed to get event channel')
+	}
+})
 </script>
 
 <style lang="scss" scoped>

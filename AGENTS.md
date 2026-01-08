@@ -4,7 +4,15 @@
 
 - 本项目为 **uni-app（HBuilderX）** 项目，当前以 **Vue 3 + TypeScript + Pinia** 为基础能力，处于**渐进迁移**阶段：
   - 新代码优先使用 Vue 3 Composition API / `<script setup lang="ts">`
-  - 老页面仍可能保留 Options API/历史写法（为了不改业务逻辑）；迁移时以“行为不变”为第一原则
+  - 老页面仍可能保留 Options API/历史写法（为了不改业务逻辑）；迁移时以"行为不变"为第一原则
+- **跨平台兼容性要求（重要）**：
+  - APP 需要完整兼容如下环境：
+    - 微信小程序
+    - iOS 环境
+    - 安卓环境
+  - 所有页面、组件、功能必须在以上 3 个环境正常运行
+  - 开发时需使用 uni-app 条件编译（`#ifdef` / `#endif`）处理平台差异
+  - 避免使用平台特定的 API，如需使用必须添加平台判断和降级方案
 - 关键兼容配置：
   - `manifest.json` 已设置 `"vueVersion": "3"`（否则会出现 Vue2/Vue3 类型与编译行为混杂）
   - HBuilderX + pnpm 场景下依赖需要 hoist：见 `.npmrc`（`node-linker=hoisted`、`shamefully-hoist=true`）
@@ -21,6 +29,18 @@
 - `static/`: static assets (icons/images/js libs).
 - `uni_modules/`: third‑party uni modules (keep vendor edits minimal; patch upstream when possible).
 - Platform/config entry points: `App.vue`, `main.ts`, `manifest.json`, `uni.scss`.
+
+## UI 组件库
+
+- **uView Next**：项目已集成 `uni_modules/uview-next` UI 组件库，开发时优先使用该组件库的组件。
+- 使用方式：
+  - 在 `main.ts` 中已全局引入 uView，可直接在模板中使用 `<u-button>`、`<u-input>` 等组件
+  - 参考 uView 官方文档：https://uview.d3u.cn/
+  - 组件路径：`uni_modules/uview-next/components/`
+- 注意事项：
+  - 优先使用 uView 组件而非原生 HTML 标签（如使用 `<u-button>` 而非 `<button>`）
+  - 如需自定义样式，通过 `customStyle` 或 `class` 属性覆盖，避免直接修改 `uni_modules` 源码
+  - 新增功能时，先检查 uView 是否已有对应组件，避免重复造轮子
 
 ## Build, Test, and Development Commands
 
@@ -65,7 +85,7 @@ This is a uni-app project typically run via HBuilderX.
 ## i18n（多语言）
 
 - Vue3 下使用 `vue-i18n`（`legacy: false`，`globalInjection: true`），模板里仍可用 `$t(...)`。
-- `pages.json` 里标题/TabBar 文案使用 `%xxx%` 占位符，语言字典在 `lang/en-US.js`、`lang/zh-CN.js`。
+- `pages.json` 里标题/TabBar 文案使用 `%xxx%` 占位符，语言字典在 `lang/en-US.ts`、`lang/zh-CN.ts`。
 - TabBar 动态多语言同步在 `lang/index.ts`：
   - **微信小程序**：`uni.setTabBarItem` 只能在 tabBar 页面调用；已做路由保护，新增/调整 tabBar 时需同时更新 `pages.json` 和 `lang/index.ts` 的 keys/paths。
 
@@ -97,4 +117,4 @@ No automated test framework is currently configured in this repo. If you add tes
 ## Security & Configuration Tips
 
 - Do not commit secrets or environment-specific endpoints.
-- Server/base URL can be influenced by local storage (`serverAddress`) and defaults in `common/config.js` / `API/interface.js`; keep production changes intentional and reviewed.
+- Server/base URL can be influenced by local storage (`serverAddress`) and defaults in `common/config.ts` / `API/interface.js`; keep production changes intentional and reviewed.

@@ -1028,6 +1028,6 @@ ${im.title}: ${y} ${im.unit || ''}
 </script>
 
 <style scoped>
-@import '@/common/fishery-monitor.css';
-@import '@/common/deviceDetail.css';
+@import '@/common/styles/fishery-monitor.css';
+@import '@/common/styles/deviceDetail.css';
 </style>

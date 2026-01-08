@@ -461,5 +461,5 @@
 </script>
 
 <style>
-	@import '@/common/ucenter.css';
+	@import '@/common/styles/ucenter.css';
 </style>

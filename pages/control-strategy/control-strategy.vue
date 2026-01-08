@@ -111,24 +111,19 @@
 		</view>
 		
 		<view class="tp-box-sizing tp-pd-l-r-30 tp-mg-t-30">
-			<button class="tp-btn" :loading="loading":class="{'vc-btn-disabled':disabled}" @tap="doUpdateSubmit">{{$t('pages.controlStrategy.save')}}</button>
+			<button class="tp-btn" :loading="loading" :class="{'vc-btn-disabled':disabled}" @tap="doUpdateSubmit">{{$t('pages.controlStrategy.save')}}</button>
 		</view>
 		
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				loading:false,
-				disabled:false,
-			}
-		},
-		methods: {
-			
-		}
-	}
+<script setup lang="ts">
+import { ref } from 'vue'
+
+const loading = ref<boolean>(false)
+const disabled = ref<boolean>(false)
+
+// NOTE: 原页面模板绑定了 radioChange/doUpdateSubmit 但未实现，这里不做行为补齐，避免改变业务逻辑
 </script>
 
 <style>

@@ -117,7 +117,7 @@
         
         <uni-tooltip class="tooltip tooltip-c">
           <uni-icons type="help-filled" size="36rpx" color="#999" @tap="ttt"></uni-icons>
-          <template slot="content">
+          <template #content>
             <text>
               <strong style="margin-right: 16rpx;">0/2 * * * *</strong>{{ $t('components.selectTime.cronExample1') }}<br>
               <strong style="margin-right: 16rpx;">0 0/2 * * *</strong>{{ $t('components.selectTime.cronExample2') }}<br>
@@ -134,151 +134,171 @@
   </view>
 </template>
 
-<script>
-  import CustomSelect from '@/components/custom-select.vue'
-  
-  export default {
-    components: {
-      CustomSelect,
-    },
-    props: {
-      data: {
-        type: [Object],
-        default: () => ({}),
-      },
-    },
-    data() {
-      return {
-        time_condition_type_options: [
-          { value: '1', label: this.$t('components.selectTime.single') },
-          { value: '2', label: this.$t('components.selectTime.repeat') },
-          { value: '0', label: this.$t('components.selectTime.range') },
-          // { value: '3', label: '自定义' },
-        ],
-        intervalOptions: [
-          { value: '1', label: this.$t('components.selectTime.everyHour') },
-          { value: '2', label: this.$t('components.selectTime.everyDay') },
-          { value: '3', label: this.$t('components.selectTime.everyWeek') },
-          { value: '4', label: this.$t('components.selectTime.everyMonth') },
-          { value: '5', label: this.$t('components.selectTime.customCron') },
-        ],
-        minuteOptions: [],
-        weekOptions: [
-          { value: '2', label: this.$t('pages.sceneRuleDetail.monday') },
-          { value: '3', label: this.$t('pages.sceneRuleDetail.tuesday') },
-          { value: '4', label: this.$t('pages.sceneRuleDetail.wednesday') },
-          { value: '5', label: this.$t('pages.sceneRuleDetail.thursday') },
-          { value: '6', label: this.$t('pages.sceneRuleDetail.friday') },
-          { value: '7', label: this.$t('pages.sceneRuleDetail.saturday') },
-          { value: '1', label: this.$t('pages.sceneRuleDetail.sunday') },
-        ],
-        dateOptions: [],
-        date: '',
-        time: '',
-      };
-    },
-    created () {
-      this.initMinuteOptions()
-      this.initDateOptions()
+<script setup lang="ts">
+	import { nextTick, onMounted, ref } from 'vue'
+	import { useI18n } from 'vue-i18n'
+	import CustomSelect from '@/components/custom-select.vue'
 
-      const { 
-        condition_type, // 2 时间条件
-        time_condition_type, // 2 重复
-        v1, // 4 每月
-        v3,
-      } = this.data
-      
-      if (condition_type === '2' && time_condition_type === '2' && v1 === '4') {
-        const [dd, hh, mm] = v3.split(':')
-        this.date = dd
-        this.time = hh+':'+mm
-      }
-    },
-    methods: {
-      ttt () {
-        console.log('=====测试')
-      },
-      initMinuteOptions () {
-        let minuteOptions = []
-        for (let i = 0; i < 60; i++) {
-          const minute = i + ''
-          minuteOptions.push({ value: minute, label: minute.padStart(2, '0') + ':00' })
-        }
-        this.minuteOptions = minuteOptions
-      },
-      initDateOptions () {
-        let dateOptions = []
-        for (let i = 0; i < 31; i++) {
-          const date = i + 1 + ''
-          dateOptions.push({ value: date, label: date + this.$t('components.selectTime.daySuffix') })
-        }
-        this.dateOptions = dateOptions
-      },
-      // 切换 单次、重复、范围
-      timeConditionTypeChange () {
-        this.data.v1 = ''
-        this.data.v2 = ''
-        this.data.v3 = ''
-        this.data.v4 = ''
-        this.data.v5 = ''
-        
-        this.date = ''
-        this.time = ''
-      },
-      // 时间条件为重复时，切换周期
-      intervalChange () {
-        this.data.v2 = ''
-        this.data.v3 = ''
-        this.data.v4 = ''
-        this.data.v5 = ''
-        
-        this.date = ''
-        this.time = ''
-      },
-      bindTimeChange (e) {
-        this.data.v3 = e.detail.value
-      },
-      dateChange () {
-        this.data.v3 = this.date+':'+this.time
-      },
-      bindTimeChange1 (e) {
-        this.time = e.detail.value
-        this.data.v3 = this.date+':'+this.time
-      },
-      bindTimeChange2 (e) {
-        this.data.v4 = e.detail.value
-      },
-      singleDateTimeChange (v1) {
-        this.$nextTick(() => {
-          this.data.v1 = v1.padEnd(16, '00:00')
-        })
-      },
-      v1DateTimeChange (v1) {
-        const v2 = this.data.v2
-        this.$nextTick(() => {
-          if (v2 && v1 > v2) {
-            this.data.v1 = v2.padEnd(16, '00:00')
-          } else {
-            this.data.v1 = v1.padEnd(16, '00:00')
-          }
-        })
-      },
-      v2DateTimeChange (v2) { 
-        const v1 = this.data.v1
-        this.$nextTick(() => {
-          if (this.data.v1 && v2 < this.data.v1) {
-            this.data.v2 = v1.padEnd(16, '00:00')
-          } else {
-            this.data.v2 = v2.padEnd(16, '00:00')
-          }
-        })
-      },
-    },
-  }
+	type TimeConditionData = {
+		condition_type?: string
+		time_condition_type?: string
+		v1?: string
+		v2?: string
+		v3?: string
+		v4?: string
+		v5?: string
+	}
+
+	type OptionItem = { value: string; label: string }
+
+	type Props = {
+		data?: TimeConditionData
+	}
+
+	const props = withDefaults(defineProps<Props>(), {
+		data: () => ({}),
+	})
+
+	// NOTE: data 为父组件传入对象，沿用原逻辑（允许修改其内部字段）
+	const data = ref(props.data as TimeConditionData)
+
+	const { t } = useI18n()
+
+	const time_condition_type_options = ref<OptionItem[]>([])
+	const intervalOptions = ref<OptionItem[]>([])
+	const minuteOptions = ref<OptionItem[]>([])
+	const weekOptions = ref<OptionItem[]>([])
+	const dateOptions = ref<OptionItem[]>([])
+
+	const date = ref<string>('')
+	const time = ref<string>('')
+
+	const ttt = () => {
+		console.log('=====测试')
+	}
+
+	const initMinuteOptions = () => {
+		const out: OptionItem[] = []
+		for (let i = 0; i < 60; i += 1) {
+			const minute = String(i)
+			out.push({ value: minute, label: `${minute.padStart(2, '0')}:00` })
+		}
+		minuteOptions.value = out
+	}
+
+	const initDateOptions = () => {
+		const out: OptionItem[] = []
+		for (let i = 0; i < 31; i += 1) {
+			const dd = String(i + 1)
+			out.push({ value: dd, label: `${dd}${t('components.selectTime.daySuffix')}` })
+		}
+		dateOptions.value = out
+	}
+
+	const initTextOptions = () => {
+		time_condition_type_options.value = [
+			{ value: '1', label: t('components.selectTime.single') },
+			{ value: '2', label: t('components.selectTime.repeat') },
+			{ value: '0', label: t('components.selectTime.range') },
+		]
+		intervalOptions.value = [
+			{ value: '1', label: t('components.selectTime.everyHour') },
+			{ value: '2', label: t('components.selectTime.everyDay') },
+			{ value: '3', label: t('components.selectTime.everyWeek') },
+			{ value: '4', label: t('components.selectTime.everyMonth') },
+			{ value: '5', label: t('components.selectTime.customCron') },
+		]
+		weekOptions.value = [
+			{ value: '2', label: t('pages.sceneRuleDetail.monday') },
+			{ value: '3', label: t('pages.sceneRuleDetail.tuesday') },
+			{ value: '4', label: t('pages.sceneRuleDetail.wednesday') },
+			{ value: '5', label: t('pages.sceneRuleDetail.thursday') },
+			{ value: '6', label: t('pages.sceneRuleDetail.friday') },
+			{ value: '7', label: t('pages.sceneRuleDetail.saturday') },
+			{ value: '1', label: t('pages.sceneRuleDetail.sunday') },
+		]
+	}
+
+	const timeConditionTypeChange = () => {
+		data.value.v1 = ''
+		data.value.v2 = ''
+		data.value.v3 = ''
+		data.value.v4 = ''
+		data.value.v5 = ''
+		date.value = ''
+		time.value = ''
+	}
+
+	const intervalChange = () => {
+		data.value.v2 = ''
+		data.value.v3 = ''
+		data.value.v4 = ''
+		data.value.v5 = ''
+		date.value = ''
+		time.value = ''
+	}
+
+	const bindTimeChange = (e: { detail: { value: string } }) => {
+		data.value.v3 = e.detail.value
+	}
+
+	const dateChange = () => {
+		data.value.v3 = `${date.value}:${time.value}`
+	}
+
+	const bindTimeChange1 = (e: { detail: { value: string } }) => {
+		time.value = e.detail.value
+		data.value.v3 = `${date.value}:${time.value}`
+	}
+
+	const bindTimeChange2 = (e: { detail: { value: string } }) => {
+		data.value.v4 = e.detail.value
+	}
+
+	const singleDateTimeChange = (v1: string) => {
+		nextTick(() => {
+			data.value.v1 = v1.padEnd(16, '00:00')
+		})
+	}
+
+	const v1DateTimeChange = (v1: string) => {
+		const v2 = data.value.v2
+		nextTick(() => {
+			if (v2 && v1 > v2) {
+				data.value.v1 = v2.padEnd(16, '00:00')
+			} else {
+				data.value.v1 = v1.padEnd(16, '00:00')
+			}
+		})
+	}
+
+	const v2DateTimeChange = (v2: string) => {
+		const v1 = data.value.v1 || ''
+		nextTick(() => {
+			if (data.value.v1 && v2 < data.value.v1) {
+				data.value.v2 = v1.padEnd(16, '00:00')
+			} else {
+				data.value.v2 = v2.padEnd(16, '00:00')
+			}
+		})
+	}
+
+	onMounted(() => {
+		initTextOptions()
+		initMinuteOptions()
+		initDateOptions()
+
+		const { condition_type, time_condition_type, v1, v3 } = data.value
+		if (condition_type === '2' && time_condition_type === '2' && v1 === '4' && v3) {
+			const [dd, hh, mm] = v3.split(':')
+			date.value = dd
+			time.value = `${hh}:${mm}`
+		}
+	})
 </script>
 
 <style scoped>
-  @import '@/common/alert-strategy.css';
+  @import '@/common/styles/alert-strategy.css';
   
   .zhi {
     font-size: 26rpx;

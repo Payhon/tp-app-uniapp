@@ -865,7 +865,7 @@
 	}
 </script>
 <style scoped lang="css">
-	@import '@/common/fishery-monitor.css';
+	@import '@/common/styles/fishery-monitor.css';
 
 	.rightIcons {}
 

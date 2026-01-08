@@ -1345,7 +1345,7 @@
   </script>
   
   <style>
-  @import '@/common/alert-strategy.css';
+  @import '@/common/styles/alert-strategy.css';
   .ifGroupItem-class {
     position: relative;
   }

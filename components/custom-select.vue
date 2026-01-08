@@ -27,152 +27,139 @@
   
 </template>
 
-<script>
-  export default {
-    model:{ // 建议显示把这个写上
-      event:'update:value',
-      prop: 'value'
-    },
-    props: {
-      clearable: {
-        type: Boolean,
-        default: false,
-      },
-      value: {
-        type: [String, Number],
-      },
-      options: {
-        type: Array,
-        default: () => [],
-      },
-      optionValue: {
-        type: String,
-        default: 'value',
-      },
-      optionLabel: {
-        type: String,
-        default: 'label',
-      },
-      label: {
-        type: String,
-        default: '',
-      },
-      placeholder: {
-        type: String,
-        default: '',
-      },
-    },
-    
-    watch: {
-      value: {
-        handler(n, o) {
-          this.$emit('change', n, o)
-          // 当 value 变化时，清空 currentDisplayText，让计算属性重新计算
-          if (n !== o) {
-            this.currentDisplayText = ''
-          }
-          // 使用 nextTick 确保在下一个 tick 更新
-          this.$nextTick(() => {
-            this.$forceUpdate()
-          })
-        },
-        immediate: false
-      },
-      options: {
-        handler() {
-          // 当选项列表更新时，强制更新显示值
-          this.$nextTick(() => {
-            this.$forceUpdate()
-          })
-        },
-        deep: true,
-        immediate: false
-      }
-    },
-    computed: {
-      showValue () {
-        console.log('showValue computed - value:', this.value, 'options length:', this.options?.length, 'optionValue:', this.optionValue, 'optionLabel:', this.optionLabel)
-        
-        // 如果 value 为空（包括 null, undefined, ''），返回空字符串
-        if (this.value === null || this.value === undefined || this.value === '') {
-          console.log('showValue - value is empty')
-          return ''
-        }
-        
-        // 如果 options 为空，返回空字符串
-        if (!this.options || this.options.length === 0) {
-          console.log('showValue - options is empty')
-          return ''
-        }
-        
-        // 查找匹配的选项
-        const option = this.options.find(item => {
-          if (!item) return false
-          const itemValue = item[this.optionValue]
-          // 严格相等比较
-          if (itemValue === this.value) {
-            return true
-          }
-          // 字符串转换比较
-          if (String(itemValue) === String(this.value)) {
-            return true
-          }
-          // 数字类型比较（处理 0 和数字字符串的情况）
-          const numItem = Number(itemValue)
-          const numValue = Number(this.value)
-          if (!isNaN(numItem) && !isNaN(numValue) && numItem === numValue) {
-            return true
-          }
-          return false
-        })
-        
-        if (option && option[this.optionLabel] !== undefined && option[this.optionLabel] !== null) {
-          const displayText = String(option[this.optionLabel])
-          console.log('showValue found:', { value: this.value, option, displayText, optionLabel: this.optionLabel })
-          return displayText
-        } else {
-          console.log('showValue not found:', { value: this.value, valueType: typeof this.value, options: this.options.map(o => ({ id: o[this.optionValue], name: o[this.optionLabel] })), optionValue: this.optionValue })
-          return ''
-        }
-      },
-    },
-    data () {
-      return {
-        currentDisplayText: '' // 当前显示的文本
-      }
-    },
-    created () {
-      
-    },
-    methods: {
-      clear (e) {
-        this.$emit('update:value')
-      },
-      showPop (e) {
-        console.log('showPop', e)
-        this.$emit('click')
-        this.$refs.pop.open()
-      },
-      hidePop() {
-        this.$refs.pop.close()
-      },
-      onSelect (option) {
-        if (!option) return
-        const newValue = option[this.optionValue]
-        const displayText = option[this.optionLabel] || ''
-        console.log('onSelect:', { option, newValue, displayText, optionValue: this.optionValue, optionLabel: this.optionLabel })
-        // 立即更新显示文本
-        this.currentDisplayText = String(displayText)
-        this.$emit('update:value', newValue)
-        this.$emit('change', newValue)
-        this.hidePop()
-        // 强制更新以确保显示值刷新
-        this.$nextTick(() => {
-          this.$forceUpdate()
-        })
-      },
-    },
-  }
+<script setup lang="ts">
+	import { computed, nextTick, ref, toRefs, watch } from 'vue'
+
+	type SelectValue = string | number | null | undefined
+	type SelectOption = Record<string, unknown>
+
+	type Props = {
+		// 兼容 Vue2 v-model（value/update:value）与 Vue3 v-model（modelValue/update:modelValue）
+		value?: SelectValue
+		modelValue?: SelectValue
+		clearable?: boolean
+		options?: SelectOption[]
+		optionValue?: string
+		optionLabel?: string
+		label?: string
+		placeholder?: string
+	}
+
+	const props = withDefaults(defineProps<Props>(), {
+		clearable: false,
+		options: () => [],
+		optionValue: 'value',
+		optionLabel: 'label',
+		label: '',
+		placeholder: '',
+	})
+
+	const emit = defineEmits<{
+		(e: 'update:value', v?: SelectValue): void
+		(e: 'update:modelValue', v?: SelectValue): void
+		(e: 'change', n?: SelectValue, o?: SelectValue): void
+		(e: 'click'): void
+	}>()
+
+	const { clearable, options, optionValue, optionLabel, label, placeholder } = toRefs(props)
+
+	const pop = ref<any>(null) // NOTE: uni-ui 组件实例方法类型未在项目中显式声明
+	const currentDisplayText = ref<string>('') // 当前显示的文本
+
+	const value = computed<SelectValue>(() => (props.value !== undefined ? props.value : props.modelValue))
+
+	const showValue = computed<string>(() => {
+		console.log(
+			'showValue computed - value:',
+			value.value,
+			'options length:',
+			options.value?.length,
+			'optionValue:',
+			optionValue.value,
+			'optionLabel:',
+			optionLabel.value
+		)
+
+		if (value.value === null || value.value === undefined || value.value === '') {
+			console.log('showValue - value is empty')
+			return ''
+		}
+
+		if (!options.value || options.value.length === 0) {
+			console.log('showValue - options is empty')
+			return ''
+		}
+
+		const option = options.value.find((item) => {
+			if (!item) return false
+			const itemValue = item[optionValue.value]
+			if (itemValue === value.value) return true
+			if (String(itemValue) === String(value.value)) return true
+			const numItem = Number(itemValue)
+			const numValue = Number(value.value)
+			if (!Number.isNaN(numItem) && !Number.isNaN(numValue) && numItem === numValue) return true
+			return false
+		})
+
+		if (option && option[optionLabel.value] !== undefined && option[optionLabel.value] !== null) {
+			const displayText = String(option[optionLabel.value])
+			console.log('showValue found:', { value: value.value, option, displayText, optionLabel: optionLabel.value })
+			return displayText
+		}
+
+		console.log('showValue not found:', {
+			value: value.value,
+			valueType: typeof value.value,
+			options: options.value.map((o) => ({ id: o[optionValue.value], name: o[optionLabel.value] })),
+			optionValue: optionValue.value,
+		})
+		return ''
+	})
+
+	watch(
+		() => value.value,
+		(n, o) => {
+			emit('change', n, o)
+			if (n !== o) currentDisplayText.value = ''
+			nextTick(() => {})
+		}
+	)
+
+	watch(
+		() => options.value,
+		() => {
+			nextTick(() => {})
+		},
+		{ deep: true }
+	)
+
+	const clear = () => {
+		emit('update:value')
+		emit('update:modelValue')
+	}
+
+	const showPop = (e?: unknown) => {
+		console.log('showPop', e)
+		emit('click')
+		pop.value?.open?.()
+	}
+
+	const hidePop = () => {
+		pop.value?.close?.()
+	}
+
+	const onSelect = (option: SelectOption) => {
+		if (!option) return
+		const newValue = option[optionValue.value] as SelectValue
+		const displayText = (option[optionLabel.value] ?? '') as SelectValue
+		console.log('onSelect:', { option, newValue, displayText, optionValue: optionValue.value, optionLabel: optionLabel.value })
+		currentDisplayText.value = String(displayText ?? '')
+		emit('update:value', newValue)
+		emit('update:modelValue', newValue)
+		emit('change', newValue)
+		hidePop()
+		nextTick(() => {})
+	}
 </script>
 
 <style scoped>

@@ -14,62 +14,61 @@
 			</view>
 		</view>
 		<!-- 消息提示框 -->
-		<cys-toast ref="toast" :msg="toast.msg" direction="row" location="top"></cys-toast>
+		<cys-toast ref="toastRef" :msg="toast.msg" direction="row" location="top"></cys-toast>
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				toast: {
-					msg: ''
-				},
-				code: '',
-				pageHeight: 0,
-				marginTopHeight: 0,
-				groupId: '',
-				name: ''
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+import { useInjected } from '@/common/composables/useInjected'
+
+const { t } = useI18n()
+const { apiRequest } = useInjected()
+
+const toast = ref<{ msg: string }>({ msg: '' })
+const toastRef = ref<any>(null)
+
+const code = ref<string>('')
+const pageHeight = ref<string | number>(0)
+const marginTopHeight = ref<string | number>(0)
+const groupId = ref<string>('') // NOTE: 原页面读取但未使用，保持兼容
+const name = ref<string>('')
+
+const onCommit = async () => {
+	if (name.value) {
+		uni.showLoading({ title: t('common.loading') })
+		try {
+			const req = apiRequest
+			if (!req) return
+			const res = await req<unknown>('/api/v1/device/active', { device_number: code.value, name: name.value }, 'put')
+			if (res.code === 200) {
+				uni.switchTab({ url: '../fishery-monitor/fishery-monitor' })
+			} else {
+				toast.value.msg = res.message || ''
+				toastRef.value?.show?.()
 			}
-		},
-		onLoad(option) {
-			this.code = option.code
-			this.groupId = option.groupId
-		},
-		onShow() {
-      uni.setNavigationBarTitle({
-        title: this.$t('pages.addDevice')
-      })
-			this.marginTopHeight = uni.getStorageSync('contentPaddingTop');
-			this.pageHeight = uni.getStorageSync('pageHeight');
-		},
-		methods: {
-			onCommit() {
-				if (this.name) {
-					uni.showLoading({
-						title: this.$t('common.loading')
-					});
-					this.API.apiRequest('/api/v1/device/active', {
-						device_number: this.code,
-						name: this.name
-					}, 'put').then(res => {
-						if (res.code === 200) {
-							uni.switchTab({
-								url: '../fishery-monitor/fishery-monitor'
-							});
-						} else {
-							this.toast.msg = res.message
-							this.$refs.toast.show();
-						}
-						uni.hideLoading()
-					})
-				} else {
-					this.toast.msg = this.$t('pages.addMonitor.deviceNameRequired');
-					this.$refs.toast.show();
-				}
-			}
+		} finally {
+			uni.hideLoading()
 		}
+		return
 	}
+	toast.value.msg = t('pages.addMonitor.deviceNameRequired')
+	toastRef.value?.show?.()
+}
+
+onLoad((option) => {
+	const opt = option as Record<string, string | undefined>
+	code.value = opt.code || ''
+	groupId.value = opt.groupId || ''
+})
+
+onShow(() => {
+	uni.setNavigationBarTitle({ title: t('pages.addDevice') })
+	marginTopHeight.value = uni.getStorageSync('contentPaddingTop')
+	pageHeight.value = uni.getStorageSync('pageHeight')
+})
 </script>
 
 <style>

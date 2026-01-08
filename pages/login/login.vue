@@ -1,59 +1,54 @@
 <template>
 	<view class="auth-page">
-		<image class="page-bg" src="/static/image/bg.png" mode="aspectFill" />
+		<image class="page-bg" src="/static/image/bg@2x.png" mode="aspectFill" />
 		<view class="brand">
-			<image class="brand-logo" src="/static/image/logo.png" mode="heightFix" />
+			<image class="brand-logo" src="/static/image/logo@2x.png" mode="heightFix" />
 		</view>
 
 		<view class="auth-card">
-				<view class="tabs">
-					<view class="tab" :class="{ active: activeTab === 'phone' }" @tap="activeTab = 'phone'">
-						<text class="tab-text">{{ $t('auth.login.tabAccount') }}</text>
-						<view class="tab-line" v-if="activeTab === 'phone'"></view>
-					</view>
-					<view class="tab" :class="{ active: activeTab === 'email' }" @tap="activeTab = 'email'">
-						<text class="tab-text">{{ $t('auth.login.tabEmail') }}</text>
-						<view class="tab-line" v-if="activeTab === 'email'"></view>
-					</view>
+			<view class="tabs">
+				<view class="tab" :class="{ active: activeTab === 'phone' }" @tap="activeTab = 'phone'">
+					<text class="tab-text">{{ $t('auth.login.tabAccount') }}</text>
+					<view class="tab-line" v-if="activeTab === 'phone'"></view>
 				</view>
+				<view class="tab" :class="{ active: activeTab === 'email' }" @tap="activeTab = 'email'">
+					<text class="tab-text">{{ $t('auth.login.tabEmail') }}</text>
+					<view class="tab-line" v-if="activeTab === 'email'"></view>
+				</view>
+			</view>
 
 			<view class="form">
 				<view class="ipt">
-					<uni-icons :type="activeTab === 'phone' ? 'phone-filled' : 'email-filled'" size="20" color="#9ca3af" />
-					<input
-						class="ipt-input"
-						type="text"
+					<uni-icons :type="activeTab === 'phone' ? 'phone-filled' : 'email-filled'" size="20"
+						color="#9ca3af" />
+					<input class="ipt-input" type="text"
 						:placeholder="activeTab === 'phone' ? $t('auth.login.placeholderPhone') : $t('auth.login.placeholderEmail')"
-						placeholder-class="ipt-placeholder"
-						v-model="identifier"
-					/>
+						placeholder-class="ipt-placeholder" v-model="identifier" />
 				</view>
 
 				<view class="ipt">
 					<uni-icons type="locked-filled" size="20" color="#9ca3af" />
-					<input
-						class="ipt-input"
-						type="text"
-						password="true"
-						:placeholder="$t('auth.login.placeholderPassword')"
-						placeholder-class="ipt-placeholder"
-						v-model="password"
-					/>
+					<input class="ipt-input" type="text" password="true"
+						:placeholder="$t('auth.login.placeholderPassword')" placeholder-class="ipt-placeholder"
+						v-model="password" />
 				</view>
 
 				<view class="policy-row">
-						<checkbox-group @change="onAgreeChange">
-							<label class="policy-label">
-								<checkbox value="1" :checked="agree" color="#0b3bb6" style="transform:scale(0.8)" />
-								<text class="policy-text">{{ $t('auth.policy.agreePrefix') }}</text>
-								<text class="policy-link" @tap.stop="openContent('user_policy')">{{ $t('auth.policy.userAgreement') }}</text>
-								<text class="policy-text">{{ $t('auth.policy.and') }}</text>
-								<text class="policy-link" @tap.stop="openContent('privacy_policy')">{{ $t('auth.policy.privacyPolicy') }}</text>
-							</label>
-						</checkbox-group>
-					</view>
+					<checkbox-group @change="onAgreeChange">
+						<label class="policy-label">
+							<checkbox value="1" :checked="agree" color="#0b3bb6" style="transform:scale(0.8)" />
+							<text class="policy-text">{{ $t('auth.policy.agreePrefix') }}</text>
+							<text class="policy-link" @tap.stop="openContent('user_policy')">{{
+								$t('auth.policy.userAgreement') }}</text>
+							<text class="policy-text">{{ $t('auth.policy.and') }}</text>
+							<text class="policy-link" @tap.stop="openContent('privacy_policy')">{{
+								$t('auth.policy.privacyPolicy') }}</text>
+						</label>
+					</checkbox-group>
+				</view>
 
-				<button class="primary-btn" :loading="loading" :disabled="!canSubmit" @tap="doLogin">{{ $t('auth.login.loginBtn') }}</button>
+				<button class="primary-btn" :loading="loading" :disabled="!canSubmit" @tap="doLogin">{{
+					$t('auth.login.loginBtn') }}</button>
 
 				<view class="links">
 					<text class="link" @tap="goRegister">{{ $t('auth.login.createAccount') }}</text>
@@ -158,7 +153,7 @@ const afterLoginSuccess = async (token: string) => {
 		.then((rsp: ApiResponse) => {
 			if (rsp && rsp.code === 200 && rsp.data) uni.setStorageSync('tenant_id', rsp.data)
 		})
-		.catch(() => {})
+		.catch(() => { })
 
 	// #ifdef APP-PLUS
 	try {
@@ -172,7 +167,7 @@ const afterLoginSuccess = async (token: string) => {
 					.catch(() => uni.setStorageSync('push_id', cid))
 			}
 		})
-	} catch (e) {}
+	} catch (e) { }
 	// #endif
 
 	uni.switchTab({
@@ -251,39 +246,40 @@ page {
 	background: #f6f7fb;
 }
 
-	.auth-page {
-		min-height: 100vh;
-		padding: 80rpx 40rpx 60rpx;
-		box-sizing: border-box;
-		background: #f6f7fb;
-		position: relative;
-		overflow: hidden;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-	}
+.auth-page {
+	min-height: 100vh;
+	padding: 80rpx 40rpx 60rpx;
+	box-sizing: border-box;
+	background: #f6f7fb;
+	position: relative;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+}
 
-	.page-bg {
-		position: absolute;
-		left: 0;
-		top: 0;
-		width: 100%;
-		height: 100%;
-		z-index: 0;
-	}
+.page-bg {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 0;
+}
 
-	.brand,
-	.auth-card,
-	.other {
-		position: relative;
-		z-index: 1;
-	}
+.brand,
+.auth-card,
+.other {
+	position: relative;
+	z-index: 1;
+}
 
-	.brand {
-		width: 100%;
-		display: flex;
-		justify-content: center;
-		margin-top: 10rpx;
+.brand {
+	width: 100%;
+	display: flex;
+	justify-content: center;
+	margin-top: 10rpx;
 	margin-bottom: 40rpx;
 }
 
@@ -293,7 +289,8 @@ page {
 
 .auth-card {
 	width: 100%;
-	max-width: 680rpx;
+	max-width: 686rpx;
+	margin: 0 32rpx;
 	background: rgba(255, 255, 255, 0.92);
 	backdrop-filter: blur(10rpx);
 	border-radius: 34rpx;

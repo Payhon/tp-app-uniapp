@@ -4,27 +4,26 @@
   </view>
 </template>
 
-<script>
-export default {
-  data() {
-    return {
-      url: ''
-    };
-  },
-  onShow(){
-    uni.setNavigationBarTitle({
-        title: this.$t('pages.deviceDetailTitle')
-      })
-  },
-  onLoad(options) {
-    const decodedUrl = decodeURIComponent(options.url);
-    const lang = uni.getStorageSync('language'); // 获取当前系统语言
-    
-    // 将lang作为参数添加到URL中
-    const separator = decodedUrl.includes('?') ? '&' : '?';
-    this.url = `${decodedUrl}${separator}lang=${lang}`;
-  }
-};
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+
+const url = ref<string>('')
+
+onShow(() => {
+	uni.setNavigationBarTitle({ title: t('pages.deviceDetailTitle') })
+})
+
+onLoad((options) => {
+	const opt = options as Record<string, string | undefined>
+	const decodedUrl = decodeURIComponent(opt.url || '')
+	const lang = uni.getStorageSync('language')
+	const separator = decodedUrl.includes('?') ? '&' : '?'
+	url.value = `${decodedUrl}${separator}lang=${lang}`
+})
 </script>
 
 <style scoped>

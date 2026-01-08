@@ -89,13 +89,13 @@ onHide(() => {
 
 <style>
 	/* 引入公共样式 */
-	@import './common/uni.css';
+	@import './common/styles/uni.css';
 	/* 引入字体库样式 */
-	@import './common/icon.css';
+	@import './common/styles/icon.css';
 	/* 引入动画库 */
-	@import './common/animate.css';
+	@import './common/styles/animate.css';
 	/* 引入公共库样式 */
-	@import './common/util.css';
+	@import './common/styles/util.css';
 	/* */ 
-	@import './common/common.css';
+	@import './common/styles/common.css';
 </style>

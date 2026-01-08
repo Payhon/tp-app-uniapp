@@ -10,95 +10,48 @@
 	</view>
 </template>
 
-<script>
-	import { getDeviceInfo, getWindowInfo } from '@/common/platform'
+<script setup lang="ts">
+	import { getCurrentInstance, nextTick, onMounted, ref, toRefs } from 'vue'
+	import { useNavBarMetrics } from '@/common/composables/useNavBarMetrics'
 
-	export default {
-		data() {
-			return {
-				toast: {
-					msg: ''
-				},
-				topHeight: 0,
-				paddingTop: 0,
-				imgTop: 0
-			};
-		},
-		props: {
-			iconColor:{
-				type: String,
-				default: '#fff'
-			},
-			pageTitle: {
-				type: String,
-				default: ''
-			},
-			background:{
-				type: String,
-				default: '#FFFFFF'
-			},
-			fontColor: {
-				type: String,
-				default: '#1B1B1B'
-			}
-		},
-		onLoad() {
-			let userDeatail = this.$login.isLoginType();
-		},
-		onReady() {
-			// #ifdef MP-WEIXIN
-			const winInfo = getWindowInfo()
-			const devInfo = getDeviceInfo()
-			const statusBarHeight = winInfo.statusBarHeight || 0
-			const platform = devInfo.platform || ''
-			//页面的高度
-			uni.setStorageSync('pageHeight', (winInfo.windowHeight || 0) + 'px');
-			// 状态栏高度
-			uni.setStorageSync('statusBarHeight', statusBarHeight);
-				const {
-					top,
-					height
-				} = uni.getMenuButtonBoundingClientRect();
-			// 胶囊按钮高度 一般是32 如果获取不到就使用32
-			uni.setStorageSync('menuButtonHeight', height ? height : 32);
-			// 判断胶囊按钮信息是否成功获取
-			if (top && top !== 0 && height && height !== 0) {
-				const navigationBarHeight = (top - statusBarHeight) * 2 + height;
-				// 导航栏高度
-				uni.setStorageSync('navigationBarHeight', navigationBarHeight);
-			} else {
-				uni.setStorageSync('navigationBarHeight', platform === 'android' ? 48 : 40);
-			}
-			// 导航栏和状态栏高度
-			var navigationBarAndStatusBarHeight = uni.getStorageSync('statusBarHeight') + uni.getStorageSync(
-				'navigationBarHeight') + 'px';
-			this.topHeight = navigationBarAndStatusBarHeight;
-			this.paddingTop = uni.getStorageSync('statusBarHeight') / 2 + 'px';
-				this.imgTop = uni.getStorageSync('statusBarHeight') + uni.getStorageSync('navigationBarHeight') -40 + 'rpx';
-				uni.setStorageSync('contentPaddingTop', navigationBarAndStatusBarHeight);
-				// #endif
+	type Props = {
+		iconColor?: string
+		pageTitle?: string
+		background?: string
+		fontColor?: string
+	}
 
-			// #ifndef MP-WEIXIN
-			const info = uni.getSystemInfoSync()
-			uni.setStorageSync('pageHeight', (info.windowHeight || 0) + 'px')
-			uni.setStorageSync('statusBarHeight', info.statusBarHeight || 0)
-			// #endif
-		},
-		mounted() {
-			uni.getSystemInfo({
-				success: res => {
-					this.height = res.screenHeight;
-				}
-			});
-		},
-		methods: {
-			clickLeftBtn(){
-				uni.navigateBack()
+	const props = withDefaults(defineProps<Props>(), {
+		iconColor: '#fff',
+		pageTitle: '',
+		background: '#FFFFFF',
+		fontColor: '#1B1B1B',
+	})
+	const { iconColor, pageTitle, background, fontColor } = toRefs(props)
+
+	const { topHeight, paddingTop, imgTop, init } = useNavBarMetrics()
+	const height = ref<number>(0)
+
+	const clickLeftBtn = () => {
+		uni.navigateBack()
+	}
+
+	onMounted(async () => {
+		// NOTE: $login 是全局注入（类型取决于项目注入方式），这里保持渐进式类型，不影响运行逻辑
+		const { proxy } = getCurrentInstance() || {}
+		;(proxy as any)?.$login?.isLoginType?.()
+
+		await nextTick()
+		init()
+
+		uni.getSystemInfo({
+			success: (res) => {
+				height.value = res.screenHeight || 0
 			},
-		}
-	};
+		})
+	})
 </script>
 
 <style scoped lang="scss">
-	@import '@/common/topNav.scss';
+	@import '@/common/styles/topNav.scss';
 </style>

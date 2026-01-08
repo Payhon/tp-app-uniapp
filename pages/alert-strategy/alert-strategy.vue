@@ -61,7 +61,7 @@
 					<view>{{ $t('pages.alertStrategy.enterValue') }}</view>
 					<input type="number" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.alertStrategy.enterNumberValue')" placeholder-class="tp-plc"
 						v-model="rule.num" v-if="rule.filedType == 3" />
-					<input v-else type="text'" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.alertStrategy.enterValue')"
+					<input v-else type="text" class="tp-flex-1 tp-mg-l-20" :placeholder="$t('pages.alertStrategy.enterValue')"
 						placeholder-class="tp-plc" v-model="rule.num" />
 				</view>
 				<view class="tp-ipt-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-25"
@@ -143,7 +143,7 @@
 				<view class="logInfo">
 						<view class="info_title">
 							{{ $t('pages.alertStrategy.addTriggerCondition') }}
-							<image src="../../static/icon/close.png" alt="" @click="$refs.addFormPopup.close()" />
+							<image src="../../static/icon/close.png" alt="" @click="closeAddFormPopup" />
 						</view>
 					<view class="info_header">
 						<view class="tp-circle tp-mg-l-r-20 tp-active" style="margin-left: 10rpx;">
@@ -185,7 +185,7 @@
 						</view>
 					</view>
 					<view class="info_btn">
-						<view class="btn_del" @click="$refs.addFormPopup.close()">{{ $t('common.cancel') }}</view>
+						<view class="btn_del" @click="closeAddFormPopup">{{ $t('common.cancel') }}</view>
 						<view class="btn_save" @click="saveAddForm()">
 							{{ $t('common.save') }}
 						</view>
@@ -194,409 +194,448 @@
 			</uni-popup>
 
 			<!-- 消息提示框 -->
-			<cys-toast ref="toast" :msg="toast.msg" location="top"></cys-toast>
+			<cys-toast ref="toastRef" :msg="toast.msg" location="top"></cys-toast>
 		</view>
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				conditionList: [],
-				currentRule: {
-					tj: '',
-					tjName: '',
-					fh: '',
-					fhName: '',
-					filedType: '',
-					num: '',
-					field_symbol: ''
-				},
-				addForm: {
-					tj: '',
-					tjName: '',
-					fh: '',
-					fhName: '',
-					filedType: '',
-					num: '',
-					field_symbol: '',
-					gx: '',
-					gxName: ''
-				},
-				type: '',
-				addType: '',
-				relationshipList: [{
-						name: this.$t('pages.alertStrategy.and'),
-						id: '&&'
-					},
-					{
-						name: this.$t('pages.alertStrategy.or'),
-						id: '||'
-					}
-				], // 关系
-				rulesList: [{
-					tj: '',
-					tjName: '',
-					fh: '',
-					fhName: '',
-					filedType: '',
-					num: '',
-					field_symbol: ''
-				}],
-				eqpList: [],
-				eqpGroupsList: [],
-				loading: false,
-				toast: {
-					msg: ''
-				},
-				formData: {
-					describe: '',
-					name: '',
-					groupName: '',
-					group: '',
-					eqp: '',
-					eqpName: '',
-					message: ''
-				},
-				fuhaoList: [{
-						name: this.$t('pages.addControl.greaterThan'),
-						id: '>'
-					},
-					{
-						name: this.$t('pages.addControl.lessThan'),
-						id: '<'
-					},
-					{
-						name: this.$t('pages.addControl.equal'),
-						id: '='
-					},
-					{
-						name: this.$t('pages.addControl.greaterThanOrEqual'),
-						id: '≥'
-					},
-					{
-						name: this.$t('pages.addControl.greaterThanOrEqual'),
-						id: '≤'
-					},
-				],
-			}
-		},
-		onShow() {
-      uni.setNavigationBarTitle({
-        title: this.$t('pages.addAlertStrategy')
-      })
-		},
-		onLoad() {},
-		methods: {
-			validate() {
-				if(!this.formData.name){
-					this.toast.msg = this.$t('pages.alertStrategy.inputStrategyName');
-					this.$refs.toast.show();
-					return false
-				}
-				if(!this.formData.describe){
-					this.toast.msg = this.$t('pages.alertStrategy.inputDescription');
-					this.$refs.toast.show();
-					return false
-				}
-				if(!this.formData.group){
-					this.toast.msg = this.$t('pages.alertStrategy.selectDeviceGroup');
-					this.$refs.toast.show();
-					return false
-				}
-				if(!this.formData.eqp){
-					this.toast.msg = this.$t('pages.alertStrategy.selectDevice');
-					this.$refs.toast.show();
-					return false
-				}
-				return true
-			},
-			// 保存告警策略
-			doUpdateSubmit() {
-				if (this.validate()) {
-					var newArry = []
-					this.rulesList.forEach((e, i) => {
-						const obj = {
-							field: e.tj,
-							condition: e.fh,
-							value: e.num,
-							operator: e.gx ? e.gx : ''
-						}
-						newArry.push(obj)
-					})
-					var params = {
-						wid: uni.getStorageSync('ywId'), //业务Id
-						name: this.formData.name,
-						describe: this.formData.describe,
-						sensor: this.formData.group,
-						bid: this.formData.eqp,
-						config: JSON.stringify(newArry),
-						message: this.formData.message
-					}
-				}
-				console.log('params==', params)
-				uni.showLoading({
-					title: this.$t('pages.alertStrategy.loading')
-				});
-				this.API.apiRequest('/api/warning/add', params, 'post').then(res => {
-					if (res.code == 200) {
-						this.toast.msg = res.message
-						this.$refs.toast.show();
-						uni.navigateBack(-1)
-					} else {
-						this.toast.msg = res.message
-						this.$refs.toast.show();
-					}
-					uni.hideLoading()
-				}).finally(() => {
-					uni.hideLoading()
-				});
-			},
-			// 新增一行
-			toAdd() {
-				this.$refs.addFormPopup.open()
-			},
-			// 删除触发条件
-			toDel(data, index) {
-				this.rulesList.forEach((item, itemIndex) => {
-					if (itemIndex == index) {
-						this.rulesList.splice(index, 1)
-					}
-				})
-			},
-			// 验证保存触发条件
-			validateSave() {
-				if (!this.addForm.gx) {
-					this.toast.msg = this.$t('pages.alertStrategy.pleaseSelectRelation');
-					this.$refs.toast.show();
-					return false
-				}
-				if (!this.addForm.tj) {
-					this.toast.msg = this.$t('pages.alertStrategy.selectCondition');
-					this.$refs.toast.show();
-					return false
-				}
-				if (!this.addForm.fh) {
-					this.toast.msg = this.$t('pages.alertStrategy.selectSymbol');
-					this.$refs.toast.show();
-					return false
-				}
-				if (!this.addForm.num) {
-					this.toast.msg = this.$t('pages.alertStrategy.enterNumberValue');
-					this.$refs.toast.show();
-					return false
-				}
-				return true
-			},
-			// 保存新增触发条件
-			saveAddForm() {
-				if (this.validateSave()) {
-					this.rulesList.push({
-						tj: this.addForm.tj,
-						tjName: this.addForm.tjName,
-						fh: this.addForm.fh,
-						fhName: this.addForm.fhName,
-						filedType: this.addForm.filedType,
-						num: this.addForm.num,
-						field_symbol: this.addForm.field_symbol,
-						gx: this.addForm.gx,
-						gxName: this.addForm.gxName
-					})
-					this.$refs.addFormPopup.close()
-				}
-			},
-			// 确定关系
-			confirmrRelationship(item) {
-				this.addForm.gx = item.id
-				this.addForm.gxName = item.name
-				this.$refs.relationshipPopup.close()
-				this.$refs.addFormPopup.open()
-			},
-			// 选择关系
-			relationship() {
-				this.$refs.addFormPopup.close()
-				this.$refs.relationshipPopup.open()
-			},
-			// 确定符号
-			confirmFh(item) {
-				if (this.type == '1') {
-					this.currentRule.fh = item.id
-					this.currentRule.fhName = item.name
-					this.$refs.fuhaoPopup.close()
-				} else if (this.addType == '1') {
-					this.addForm.fh = item.id
-					this.addForm.fhName = item.name
-					this.$refs.fuhaoPopup.close()
-					this.$refs.addFormPopup.open()
-				}
-			},
-			// 新增框选择符号
-			toSelectFhAdd() {
-				this.type = ''
-				this.addType = '1'
-				this.$refs.addFormPopup.close()
-				this.$refs.fuhaoPopup.open()
-			},
-			// 选择符号
-			toSelectFh(rule) {
-				this.type = '1'
-				this.addType = ''
-				this.currentRule = rule
-				this.$refs.fuhaoPopup.open()
-			},
-			// 确定条件选择
-			confirmCondition(item) {
-				if (this.type == '1') {
-					this.currentRule.tj = item.key
-					this.currentRule.tjName = item.name
-					this.currentRule.filedType = item.type
-					this.currentRule.field_symbol = item.symbol
-					this.$refs.tiaojianPopup.close()
-				} else if (this.addType == '1') {
-					this.addForm.tj = item.key
-					this.addForm.tjName = item.name
-					this.addForm.filedType = item.type
-					this.addForm.field_symbol = item.symbol
-					this.$refs.tiaojianPopup.close()
-					this.$refs.addFormPopup.open()
-				}
-			},
-			// 新增框选择条件
-			toSelectTjAdd() {
-				this.type = ''
-				this.addType = '1'
-				if (this.formData.eqp) {
-					uni.showLoading({
-						title: this.$t('pages.alertStrategy.loading')
-					});
-					this.API.apiRequest('/api/automation/show', {
-						bid: this.formData.eqp
-					}, 'post').then(res => {
-						if (res.code === 200) {
-							if (res.data && res.data.length > 0) {
-								this.$refs.addFormPopup.close()
-								this.$refs.tiaojianPopup.open()
-								this.conditionList = res.data
-							} else {
-								this.toast.msg = this.$t('pages.alertStrategy.noSelectableData');
-								this.$refs.toast.show();
-							}
-						}
-						uni.hideLoading()
-					}).finally(() => {
-						uni.hideLoading()
-					});
-				} else {
-					this.toast.msg = this.$t('pages.alertStrategy.selectDevice');
-					this.$refs.toast.show();
-				}
-			},
-			// 选择条件
-			toSelectTj(rule) {
-				this.type = '1'
-				this.addType = ''
-				this.currentRule = rule
-				if (this.formData.eqp) {
-					uni.showLoading({
-						title: this.$t('pages.alertStrategy.loading')
-					});
-					this.API.apiRequest('/api/automation/show', {
-						bid: this.formData.eqp
-					}, 'post').then(res => {
-						if (res.code === 200) {
-							if (res.data && res.data.length > 0) {
-								this.$refs.tiaojianPopup.open()
-								this.conditionList = res.data
-							} else {
-								this.toast.msg = this.$t('pages.alertStrategy.noSelectableData');
-								this.$refs.toast.show();
-							}
-						}
-						uni.hideLoading()
-					}).finally(() => {
-						uni.hideLoading()
-					});
-				} else {
-					this.toast.msg = this.$t('pages.alertStrategy.selectDevice');
-					this.$refs.toast.show();
-				}
-			},
-			// 确定选择设备
-			comfirEqp(item) {
-				this.formData.eqp = item.device_id
-				this.formData.eqpName = item.name
-				this.$refs.epqPopup.close()
-			},
-			// 选择设备
-			toSelectEqp() {
-				if (this.formData.groupName) {
-					uni.showLoading({
-						title: this.$t('pages.alertStrategy.loading')
-					});
-					this.API.apiRequest('/api/kv/current/asset/a', {
-						asset_id: this.formData.group
-					}, 'post').then(res => {
-						if (res.code === 200) {
-							if (res.data && res.data.devices.length > 0) {
-								this.$refs.epqPopup.open()
-								this.eqpList = res.data.devices
-							} else {
-								this.toast.msg = this.$t('pages.alertStrategy.noSelectableData');
-								this.$refs.toast.show();
-							}
-						}
-						uni.hideLoading()
-					}).finally(() => {
-						uni.hideLoading()
-					});
-				} else {
-					this.toast.msg = this.$t('pages.alertStrategy.selectDeviceGroup');
-					this.$refs.toast.show();
-				}
-			},
-			// 确定选择设备分组
-			toConfirmeqpGroup(item) {
-				this.formData.group = item.id
-				this.formData.groupName = item.device_group
-				this.$refs.groupPopup.close()
-			},
-			// 选择设备分组
-			toSelectGroup() {
-				uni.showLoading({
-					title: this.$t('pages.alertStrategy.loading')
-				});
-				this.API.apiRequest('/api/asset/list/d', {
-					business_id: uni.getStorageSync('ywId')
-				}, 'post').then(res => {
-					if (res.code === 200) {
-						if (res.data && res.data.length > 0) {
-							this.$refs.groupPopup.open()
-							this.eqpGroupsList = res.data
-						} else {
-							this.toast.msg = this.$t('pages.alertStrategy.noSelectableData');
-							this.$refs.toast.show();
-						}
-					}
-					uni.hideLoading()
-				}).finally(() => {
-					uni.hideLoading()
-				});
-			},
-			empty() {
-				this.name = ''
-				this.describe = ''
-				this.message = ''
-				this.currentEqp = {}
-				this.warningNum = ''
-				this.currentSel = {}
-				this.currentZc = {}
-				this.currentEqpSx = {}
-			}
+<script setup lang="ts">
+import { reactive, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+import { useInjected, type ApiResponse } from '@/common/composables/useInjected'
+
+interface ConditionItem {
+	key: string
+	name: string
+	type: string | number
+	symbol: string
+}
+
+interface RuleItem {
+	tj: string
+	tjName?: string
+	fh: string
+	fhName?: string
+	filedType: string | number
+	num: string
+	field_symbol: string
+	gx?: string
+	gxName?: string
+}
+
+interface PopupLike {
+	open?: () => void
+	close?: () => void
+}
+
+interface EqpGroupItem {
+	id: string
+	device_group: string
+}
+
+interface EqpItem {
+	device_id: string
+	name: string
+}
+
+interface FuhaoItem {
+	name: string
+	id: string
+}
+
+interface RelationshipItem {
+	name: string
+	id: string
+}
+
+type AutomationShowRes = ApiResponse<ConditionItem[]>
+type AssetListRes = ApiResponse<EqpGroupItem[]>
+type AssetDevicesRes = ApiResponse<{ devices: EqpItem[] }>
+type WarningAddRes = ApiResponse<unknown>
+
+const { t } = useI18n()
+const { apiRequest } = useInjected()
+
+const groupPopup = ref<PopupLike | null>(null)
+const epqPopup = ref<PopupLike | null>(null)
+const tiaojianPopup = ref<PopupLike | null>(null)
+const fuhaoPopup = ref<PopupLike | null>(null)
+const relationshipPopup = ref<PopupLike | null>(null)
+const addFormPopup = ref<PopupLike | null>(null)
+
+const toastRef = ref<any>(null)
+const toast = reactive<{ msg: string }>({ msg: '' })
+
+const conditionList = ref<ConditionItem[]>([])
+const eqpList = ref<EqpItem[]>([])
+const eqpGroupsList = ref<EqpGroupItem[]>([])
+
+const type = ref<string>('')
+const addType = ref<string>('')
+
+const currentRule = ref<RuleItem | null>({
+	tj: '',
+	tjName: '',
+	fh: '',
+	fhName: '',
+	filedType: '',
+	num: '',
+	field_symbol: ''
+})
+
+const addForm = reactive<RuleItem & { gx: string; gxName: string }>({
+	tj: '',
+	tjName: '',
+	fh: '',
+	fhName: '',
+	filedType: '',
+	num: '',
+	field_symbol: '',
+	gx: '',
+	gxName: ''
+})
+
+const relationshipList = ref<RelationshipItem[]>([
+	{ name: t('pages.alertStrategy.and') as string, id: '&&' },
+	{ name: t('pages.alertStrategy.or') as string, id: '||' }
+])
+
+const rulesList = ref<RuleItem[]>([
+	{
+		tj: '',
+		tjName: '',
+		fh: '',
+		fhName: '',
+		filedType: '',
+		num: '',
+		field_symbol: ''
+	}
+])
+
+const formData = reactive({
+	describe: '',
+	name: '',
+	groupName: '',
+	group: '',
+	eqp: '',
+	eqpName: '',
+	message: ''
+})
+
+const fuhaoList = ref<FuhaoItem[]>([
+	{ name: t('pages.addControl.greaterThan') as string, id: '>' },
+	{ name: t('pages.addControl.lessThan') as string, id: '<' },
+	{ name: t('pages.addControl.equal') as string, id: '=' },
+	{ name: t('pages.addControl.greaterThanOrEqual') as string, id: '≥' },
+	{ name: t('pages.addControl.greaterThanOrEqual') as string, id: '≤' }
+])
+
+const showMsg = (msg: string) => {
+	toast.msg = msg
+	toastRef.value?.show?.()
+}
+
+const closeAddFormPopup = () => {
+	addFormPopup.value?.close?.()
+}
+
+onShow(() => {
+	uni.setNavigationBarTitle({ title: t('pages.addAlertStrategy') as string })
+})
+
+const validate = () => {
+	if (!formData.name) {
+		showMsg(t('pages.alertStrategy.inputStrategyName') as string)
+		return false
+	}
+	if (!formData.describe) {
+		showMsg(t('pages.alertStrategy.inputDescription') as string)
+		return false
+	}
+	if (!formData.group) {
+		showMsg(t('pages.alertStrategy.selectDeviceGroup') as string)
+		return false
+	}
+	if (!formData.eqp) {
+		showMsg(t('pages.alertStrategy.selectDevice') as string)
+		return false
+	}
+	return true
+}
+
+// 保存告警策略（保持原逻辑：validate 不通过也会继续走请求）
+const doUpdateSubmit = async () => {
+	const req = apiRequest
+	if (!req) return
+
+	let params: Record<string, unknown> | undefined
+	if (validate()) {
+		const newArry: Array<{ field: string; condition: string; value: string; operator: string }> = []
+		rulesList.value.forEach((e) => {
+			newArry.push({
+				field: e.tj,
+				condition: e.fh,
+				value: e.num,
+				operator: e.gx ? e.gx : ''
+			})
+		})
+		params = {
+			wid: uni.getStorageSync('ywId'), //业务Id
+			name: formData.name,
+			describe: formData.describe,
+			sensor: formData.group,
+			bid: formData.eqp,
+			config: JSON.stringify(newArry),
+			message: formData.message
 		}
 	}
+
+	// 保留原日志输出
+	// eslint-disable-next-line no-console
+	console.log('params==', params)
+
+	uni.showLoading({ title: t('pages.alertStrategy.loading') as string })
+	try {
+		const res = (await req<unknown>('/api/warning/add', params, 'post')) as WarningAddRes
+		showMsg(res.message || '')
+		if (res.code === 200) {
+			uni.navigateBack(-1)
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const toAdd = () => {
+	addFormPopup.value?.open?.()
+}
+
+const toDel = (_data: unknown, index: number) => {
+	rulesList.value.forEach((_item, itemIndex) => {
+		if (itemIndex === index) {
+			rulesList.value.splice(index, 1)
+		}
+	})
+}
+
+const validateSave = () => {
+	if (!addForm.gx) {
+		showMsg(t('pages.alertStrategy.pleaseSelectRelation') as string)
+		return false
+	}
+	if (!addForm.tj) {
+		showMsg(t('pages.alertStrategy.selectCondition') as string)
+		return false
+	}
+	if (!addForm.fh) {
+		showMsg(t('pages.alertStrategy.selectSymbol') as string)
+		return false
+	}
+	if (!addForm.num) {
+		showMsg(t('pages.alertStrategy.enterNumberValue') as string)
+		return false
+	}
+	return true
+}
+
+const saveAddForm = () => {
+	if (validateSave()) {
+		rulesList.value.push({
+			tj: addForm.tj,
+			tjName: addForm.tjName,
+			fh: addForm.fh,
+			fhName: addForm.fhName,
+			filedType: addForm.filedType,
+			num: addForm.num,
+			field_symbol: addForm.field_symbol,
+			gx: addForm.gx,
+			gxName: addForm.gxName
+		})
+		closeAddFormPopup()
+	}
+}
+
+const confirmrRelationship = (item: RelationshipItem) => {
+	addForm.gx = item.id
+	addForm.gxName = item.name
+	relationshipPopup.value?.close?.()
+	addFormPopup.value?.open?.()
+}
+
+const relationship = () => {
+	closeAddFormPopup()
+	relationshipPopup.value?.open?.()
+}
+
+const confirmFh = (item: FuhaoItem) => {
+	if (type.value === '1') {
+		const target = currentRule.value
+		if (target) {
+			target.fh = item.id
+			target.fhName = item.name
+		}
+		fuhaoPopup.value?.close?.()
+	} else if (addType.value === '1') {
+		addForm.fh = item.id
+		addForm.fhName = item.name
+		fuhaoPopup.value?.close?.()
+		addFormPopup.value?.open?.()
+	}
+}
+
+const toSelectFhAdd = () => {
+	type.value = ''
+	addType.value = '1'
+	closeAddFormPopup()
+	fuhaoPopup.value?.open?.()
+}
+
+const toSelectFh = (rule: RuleItem) => {
+	type.value = '1'
+	addType.value = ''
+	currentRule.value = rule
+	fuhaoPopup.value?.open?.()
+}
+
+const confirmCondition = (item: ConditionItem) => {
+	if (type.value === '1') {
+		const target = currentRule.value
+		if (target) {
+			target.tj = item.key
+			target.tjName = item.name
+			target.filedType = item.type
+			target.field_symbol = item.symbol
+		}
+		tiaojianPopup.value?.close?.()
+	} else if (addType.value === '1') {
+		addForm.tj = item.key
+		addForm.tjName = item.name
+		addForm.filedType = item.type
+		addForm.field_symbol = item.symbol
+		tiaojianPopup.value?.close?.()
+		addFormPopup.value?.open?.()
+	}
+}
+
+const toSelectTjAdd = async () => {
+	const req = apiRequest
+	if (!req) return
+
+	type.value = ''
+	addType.value = '1'
+	if (formData.eqp) {
+		uni.showLoading({ title: t('pages.alertStrategy.loading') as string })
+		try {
+			const res = (await req<ConditionItem[]>('/api/automation/show', { bid: formData.eqp }, 'post')) as AutomationShowRes
+			if (res.code === 200) {
+				if (res.data && res.data.length > 0) {
+					closeAddFormPopup()
+					tiaojianPopup.value?.open?.()
+					conditionList.value = res.data
+				} else {
+					showMsg(t('pages.alertStrategy.noSelectableData') as string)
+				}
+			}
+		} finally {
+			uni.hideLoading()
+		}
+	} else {
+		showMsg(t('pages.alertStrategy.selectDevice') as string)
+	}
+}
+
+const toSelectTj = async (rule: RuleItem) => {
+	const req = apiRequest
+	if (!req) return
+
+	type.value = '1'
+	addType.value = ''
+	currentRule.value = rule
+	if (formData.eqp) {
+		uni.showLoading({ title: t('pages.alertStrategy.loading') as string })
+		try {
+			const res = (await req<ConditionItem[]>('/api/automation/show', { bid: formData.eqp }, 'post')) as AutomationShowRes
+			if (res.code === 200) {
+				if (res.data && res.data.length > 0) {
+					tiaojianPopup.value?.open?.()
+					conditionList.value = res.data
+				} else {
+					showMsg(t('pages.alertStrategy.noSelectableData') as string)
+				}
+			}
+		} finally {
+			uni.hideLoading()
+		}
+	} else {
+		showMsg(t('pages.alertStrategy.selectDevice') as string)
+	}
+}
+
+const comfirEqp = (item: EqpItem) => {
+	formData.eqp = item.device_id
+	formData.eqpName = item.name
+	epqPopup.value?.close?.()
+}
+
+const toSelectEqp = async () => {
+	const req = apiRequest
+	if (!req) return
+
+	if (formData.groupName) {
+		uni.showLoading({ title: t('pages.alertStrategy.loading') as string })
+		try {
+			const res = (await req<{ devices: EqpItem[] }>('/api/kv/current/asset/a', { asset_id: formData.group }, 'post')) as AssetDevicesRes
+			if (res.code === 200) {
+				if (res.data && res.data.devices.length > 0) {
+					epqPopup.value?.open?.()
+					eqpList.value = res.data.devices
+				} else {
+					showMsg(t('pages.alertStrategy.noSelectableData') as string)
+				}
+			}
+		} finally {
+			uni.hideLoading()
+		}
+	} else {
+		showMsg(t('pages.alertStrategy.selectDeviceGroup') as string)
+	}
+}
+
+const toConfirmeqpGroup = (item: EqpGroupItem) => {
+	formData.group = item.id
+	formData.groupName = item.device_group
+	groupPopup.value?.close?.()
+}
+
+const toSelectGroup = async () => {
+	const req = apiRequest
+	if (!req) return
+
+	uni.showLoading({ title: t('pages.alertStrategy.loading') as string })
+	try {
+		const res = (await req<EqpGroupItem[]>('/api/asset/list/d', { business_id: uni.getStorageSync('ywId') }, 'post')) as AssetListRes
+		if (res.code === 200) {
+			if (res.data && res.data.length > 0) {
+				groupPopup.value?.open?.()
+				eqpGroupsList.value = res.data
+			} else {
+				showMsg(t('pages.alertStrategy.noSelectableData') as string)
+			}
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const empty = () => {
+	formData.name = ''
+	formData.describe = ''
+	formData.message = ''
+}
 </script>
 
 <style>
-	@import '@/common/alert-strategy.css';
+	@import '@/common/styles/alert-strategy.css';
 </style>

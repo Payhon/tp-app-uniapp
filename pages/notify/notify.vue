@@ -57,155 +57,136 @@
 	</view>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad, onPageScroll, onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
 import dayjs from 'dayjs'
 import NotofyDialog from '@/components/notify-dialog'
+import { useInjected } from '@/common/composables/useInjected'
 
-export default {
-	components: {NotofyDialog},
-		data() {
-		return {
-			page: 1,
-			pageSize: 10,
-			loadEnd: false,
-			loading: false,
-			list: [],
-			showDialog: false,
-			handleInfo: {
-				id: '',
-				status: ''
-			},
-			levelClassMap: {
-				H: 'level-high',
-				M: 'level-medium',
-				L: 'level-low',
-				'1': 'level-high',
-				'2': 'level-medium',
-				'3': 'level-low',
-				default: 'level-default'
-			},
-			showScrollTop: false // 控制回到顶部按钮显示
-		}
-	},
-	onShow() {
-		uni.setNavigationBarTitle({
-			title: this.$t('pages.notifyTitle')
-		})
-	},
-	// 监听页面滚动
-	onPageScroll(e) {
-		// 当滚动超过300px时显示回到顶部按钮
-		this.showScrollTop = e.scrollTop > 300;
-	},
-	methods: {
-		// 滚动到顶部
-		scrollToTop() {
-			uni.pageScrollTo({
-				scrollTop: 0,
-				duration: 300 // 动画持续时间，单位ms
-			});
-		},
-		formatDate(date) {
-			return dayjs(date).format('YYYY-MM-DD HH:mm')
-		},
-		closeDialog(refresh){
-			this.showDialog = false
-			if(refresh){
-				this.list = this.list.filter(l => l.id !== this.handleInfo.id)
-			}
-			this.handleInfo = {id :'', status: ''}
-		},
-		
-		async goDetail(item) {
-			if (!item) {
-				console.error('Invalid item data:', item);
-				return;
-			}
-			try {
-				const res = await new Promise((resolve, reject) => {
-					uni.navigateTo({
-						url: '/pages/notify/detail',
-						events: {
-							acceptData: (data) => {
-								console.log('Data received:', data);
-							}
-						},
-						success: resolve,
-						fail: reject
-					});
-				});
-				if (res.eventChannel) {
-					// 添加延迟确保监听器已设置
-					await new Promise(resolve => setTimeout(resolve, 100));
-					res.eventChannel.emit('acceptData', { item: item });
-				} else {
-					console.error('Failed to get event channel');
-				}
-			} catch (err) {
-				console.error('Navigation failed:', err);
-			}
-		},
+type AlarmItem = {
+	id: string | number
+	alarm_level?: string | number
+	warning_description?: string
+	name?: string
+	content?: string
+	created_at?: string
+}
 
-		process(id, status) {
-			this.showDialog = true
-			this.handleInfo = {id, status}
-			// uni.showModal({
-			// 	title: `点击确定${status === '1' ? '处理' : '忽略'}警告`,
-			// 	confirmText: '确定',
-			// 	cancelText: '取消',
-			// 	editable: status === '1',
-			// 	placeholderText: '选填',
-			// 	success: res => {
-			// 		if (res.confirm) {
-			// 			this.API.apiRequest('/api/v1/warning/information/edit', {
-			// 				id, processing_result: status, processing_instructions: res.content
-			// 			}, 'post').then(res => {
-			// 				if (res.code === 200) {
-			// 					uni.showToast({
-			// 						title: '操作成功'
-			// 					})
-			// 					this.list = this.list.filter(l => l.id !== id)
-			// 				}
-			// 			})
-			// 		}
-			// 	}
-			// })
-		},
-		getList() {
-			this.loading = true
-			this.API.apiRequest('/api/v1/alarm/info/history', {
-				page: this.page,
-				page_size: this.pageSize
-			}, 'get').then(res => {
-				if (res.code === 200) {
-					const list = res.data.list || []
-					this.list = this.list.concat(list)
-					if (list.length < this.pageSize) {
-						this.loadEnd = true
-					}
-				}
-			}).finally(() => {
-				this.loading = false
+const { t } = useI18n()
+const { apiRequest } = useInjected()
+
+const page = ref<number>(1)
+const pageSize = ref<number>(10)
+const loadEnd = ref<boolean>(false)
+const loading = ref<boolean>(false)
+const list = ref<AlarmItem[]>([])
+
+const showDialog = ref<boolean>(false)
+const handleInfo = ref<{ id: string | number; status: string | number }>({ id: '', status: '' })
+
+const levelClassMap = {
+	H: 'level-high',
+	M: 'level-medium',
+	L: 'level-low',
+	'1': 'level-high',
+	'2': 'level-medium',
+	'3': 'level-low',
+	default: 'level-default',
+} as const
+
+const showScrollTop = ref<boolean>(false)
+
+const scrollToTop = () => {
+	uni.pageScrollTo({ scrollTop: 0, duration: 300 })
+}
+
+const formatDate = (date: string) => dayjs(date).format('YYYY-MM-DD HH:mm')
+
+const closeDialog = (refresh?: boolean) => {
+	showDialog.value = false
+	if (refresh) list.value = list.value.filter((l) => l.id !== handleInfo.value.id)
+	handleInfo.value = { id: '', status: '' }
+}
+
+const goDetail = async (item: AlarmItem) => {
+	if (!item) {
+		console.error('Invalid item data:', item)
+		return
+	}
+	try {
+		const res: any = await new Promise((resolve, reject) => {
+			uni.navigateTo({
+				url: '/pages/notify/detail',
+				events: {
+					acceptData: (data) => {
+						console.log('Data received:', data)
+					},
+				},
+				success: resolve,
+				fail: reject,
 			})
+		})
+		if (res.eventChannel) {
+			await new Promise((resolve) => setTimeout(resolve, 100))
+			res.eventChannel.emit('acceptData', { item })
+		} else {
+			console.error('Failed to get event channel')
 		}
-	},
-	onLoad() {
-		this.getList()
-	},
-	onReachBottom() {
-		if (!this.loadEnd && !this.loading) {
-			this.page++
-			this.getList()
-		}
-	},
-	onPullDownRefresh() {
-		if (!this.loading) {
-			this.page = 1
-			this.loadEnd = false
-			this.getList()		
-		}
+	} catch (err) {
+		console.error('Navigation failed:', err)
 	}
 }
+
+const process = (id: string | number, status: string | number) => {
+	showDialog.value = true
+	handleInfo.value = { id, status }
+}
+
+const getList = () => {
+	const req = apiRequest
+	if (!req) return
+	loading.value = true
+	req<{ list?: AlarmItem[] }>('/api/v1/alarm/info/history', { page: page.value, page_size: pageSize.value }, 'get')
+		.then((res) => {
+			if (res.code === 200) {
+				const next = res.data.list || []
+				list.value = list.value.concat(next)
+				if (next.length < pageSize.value) loadEnd.value = true
+			}
+		})
+		.finally(() => {
+			loading.value = false
+		})
+}
+
+onShow(() => {
+	uni.setNavigationBarTitle({ title: t('pages.notifyTitle') })
+})
+
+onPageScroll((e) => {
+	showScrollTop.value = e.scrollTop > 300
+})
+
+onLoad(() => {
+	getList()
+})
+
+onReachBottom(() => {
+	if (!loadEnd.value && !loading.value) {
+		page.value += 1
+		getList()
+	}
+})
+
+onPullDownRefresh(() => {
+	if (!loading.value) {
+		page.value = 1
+		loadEnd.value = false
+		getList()
+	}
+})
 </script>
 
 <style lang="scss" scoped>

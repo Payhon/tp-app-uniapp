@@ -14,66 +14,57 @@
   
 </template>
 
-<script>
-  import CustomSelect from '@/components/custom-select.vue'
-  
-  export default {
-    components: {
-      CustomSelect,
-    },
-    props: {
-      data: {
-        type: [Object],
-        default: () => ({
-          action_type: '',
-          actions: [],
-        }),
-      },
-      test: String,
-    },
-    watch: {
-      data (n, o) {
-        console.log(n, o)
-      },
-    },
-    data () {
-      return {
-        sceneOptions: [],
-      }
-    },
-    created () {
-      this.querySceneOptions()
-    },
-    mounted () {
-      console.log(123, this.data)
-    },
-    
-    methods: {
-      change () {},
-      querySceneOptions () {
-        // uni.showLoading({
-        // 	title: '加载中'
-        // });
-        
-        const params = {
-          page: 1,
-          page_size: 999,
-        }
-        this.API.apiRequest('/api/v1/scene', params, 'get').then(res => {
-        	if (res.code == 200) {
-        		this.sceneOptions = res.data.data || []
-        	} else {
-        		this.toast.msg = res.message
-        		this.$refs.toast.show();
-        	}
-        }).finally(() => {
-        	uni.hideLoading()
-        });
-      },
-    },
-  }
+<script setup lang="ts">
+import { onMounted, ref, toRefs, watch } from 'vue'
+import CustomSelect from '@/components/custom-select.vue'
+import { useInjected, type ApiResponse } from '@/common/composables/useInjected'
+
+type SceneItem = Record<string, unknown>
+type SceneListRes = { data?: SceneItem[] }
+
+type Props = {
+	data?: { action_type?: string; actions?: Array<Record<string, any>> }
+	test?: string
+}
+
+const props = withDefaults(defineProps<Props>(), {
+	data: () => ({ action_type: '', actions: [] }),
+})
+
+const { data } = toRefs(props)
+const { apiRequest } = useInjected()
+
+const sceneOptions = ref<SceneItem[]>([])
+
+watch(
+	() => data.value,
+	(n, o) => {
+		console.log(n, o)
+	},
+	{ deep: true }
+)
+
+const change = () => {}
+
+const querySceneOptions = async () => {
+	const req = apiRequest as undefined | (<T>(url: string, params: Record<string, unknown>, method: string) => Promise<ApiResponse<T>>)
+	if (!req) return
+
+	const params = { page: 1, page_size: 999 }
+	try {
+		const res = await req<SceneListRes>('/api/v1/scene', params, 'get')
+		if (res.code == 200) sceneOptions.value = res.data.data || []
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+onMounted(() => {
+	querySceneOptions()
+	console.log(123, data.value)
+})
 </script>
 
 <style scoped>
-  @import '@/common/alert-strategy.css';
+  @import '@/common/styles/alert-strategy.css';
 </style>

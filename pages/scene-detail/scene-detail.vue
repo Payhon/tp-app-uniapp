@@ -61,250 +61,315 @@
   </view>
 </template>
 
-<script>
-import Modal from '@/components/x-modal/x-modal';
-import CustomSelect from '@/components/custom-select.vue';
-import ActionsEdit from './actions-edit.vue';
-import {
-  deviceListAll,
-  deviceConfigAll,
-  deviceMetricsMenu,
-  deviceConfigMetricsMenu
-} from '@/service/automation';
+<script setup lang="ts">
+import { reactive, ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
 
-export default {
-  components: {
-    CustomSelect,
-    ActionsEdit,
-    Modal
-  },
-  data() {
-    return {
-      editId: '',
-      formData: {
-        info: {
-          name: '',
-          description: ''
-        },
-        actions: [
-        ],
-      },
-      visible: false,
-      loadingSelect: false,
-      popUpVisible: false
-    };
-  },
-  onShow() {
-    uni.setNavigationBarTitle({
-      title: this.$t('pages.addScene')
-    })
-  },
-  onLoad(options) {
-    this.editId = options.id;
-      uni.setNavigationBarTitle({
-      title: this.editId ? this.$t('pages.sceneDetail.editScene') :  this.$t('pages.sceneDetail.newScene')
-    });
-  },
-  created() {
-    if (this.editId) {
-      this.getInfo();
-    } else {
-      this.formData = {
-        info: {
-          name: '',
-          description: ''
-        },
-        actions: [
-          {
-            actionType: '1',
-            actionInstructList: [{
-              action_target: '',
-              action_type: null,
-              action_param_type: null,
-              action_param: null,
-              actionValue: null,
-              deviceGroupId: null,
-              actionParamOptions: [],
-              actionParamOptionsData: [],
-              actionParamTypeOptions: [],
-              showSubSelect: true,
-              actionParamData: null,
-              placeholder: '',
-              inputFeedback: '',
-              inputValidationStatus: ''
-            }]
-          }
-        ]
-      };
-    }
-    // this.getSceneList('');
-    // this.getAlarmList('');
-  },
-  methods: {
-    getInfo() {
-        uni.showLoading({
-        title: this.$t('common.loading')
-      });
-      const params = {
-        id: this.editId
-      };
-      this.API.apiRequest('/api/v1/scene/detail/' + this.editId, params, 'get')
-        .then((res) => {
-          if (res.code == 200) {
-            this.formData = { ...res.data, actions: this.convertActionsData(res.data.actions) };
-            //this.formData.actions = this.convertActionsData(this.formData.actions);
-          } else {
-            uni.showToast({
-              title: res.message,
-              icon: 'none',
-              duration: 2000
-            });
-          }
-        })
-        .finally(() => {
-          uni.hideLoading();
-        });
-    },
+import Modal from '@/components/x-modal/x-modal'
+import ActionsEdit from './actions-edit.vue'
+import { useInjected } from '@/common/composables/useInjected'
 
-    convertActionsData(actionsData) {
-      const actionGroupsData = [];
-      const actionInstructList = [];
-      actionsData.map((item) => {
-        if (item.action_type === '10' || item.action_type === '11') {
-          item.actionParamOptions = [];
-          const actionValueObj = JSON.parse(item.action_value);
-          if (
-            item.action_param_type === 'c_telemetry' ||
-            item.action_param_type === 'c_attribute' ||
-            item.action_param_type === 'c_command'
-          ) {
-            item.actionValue = item.action_value;
-          }
-          if (item.action_param_type === 'telemetry' || item.action_param_type === 'attributes') {
-            item.actionValue = actionValueObj[item.action_param];
-          }
-          if (item.action_param_type === 'command') {
-            item.actionValue = actionValueObj.params;
-          }
-          item.actionParamOptions = [];
-          actionInstructList.push(item);
-        } else {
-          item.actionType = item.action_type;
-          actionGroupsData.push(item);
-        }
-      });
-      if (actionInstructList.length > 0) {
-        const type1Data = {
-          actionType: '1',
-          actionInstructList
-        };
-        actionGroupsData.push(type1Data);
-      }
-      return actionGroupsData;
-    },
+type ActionParamType =
+	| 'telemetry'
+	| 'attributes'
+	| 'command'
+	| 'c_telemetry'
+	| 'c_attribute'
+	| 'c_command'
+	| string
+	| null
 
-    handlerSubmit() {
-      const configFormData = JSON.parse(JSON.stringify(this.formData.info));
-      
-      const { id, name, description } = this.formData.info;
-      const { actions } = this.formData;
+interface ActionInstructItem {
+	action_target?: string
+	action_type?: string | null
+	action_param_type?: ActionParamType
+	action_param?: string | null
+	action_value?: string
+	actionValue?: unknown
 
-      if (!name) {
-        uni.showToast({
-          title: this.$t('pages.sceneDetail.enterSceneTitle'),
-          icon: 'none',
-          duration: 2000
-        });
-        return;
-      }
+	deviceGroupId?: string | null
+	actionParamOptions?: unknown[]
+	actionParamOptionsData?: unknown[]
+	actionParamTypeOptions?: unknown[]
+	showSubSelect?: boolean
+	actionParamData?: unknown
+	placeholder?: string
+	inputFeedback?: string
+	inputValidationStatus?: string
 
-      const validateResult = this.transActionsOut(actions);
-      configFormData.actions = validateResult;
+	// 兼容接口返回/历史字段
+	[key: string]: unknown
+}
 
-      this.submitData = configFormData;
-      this.visible = true;
-    },
-    cancel() {
-      this.visible = false;
-    },
-    confirm() {
-      this.doSubmit(this.submitData);
-    },
-    doSubmit(submitData) {
-      uni.showLoading({
-        title: this.$t('common.loading')
-      });
+interface ActionGroupItem {
+	actionType: string
+	actionInstructList: ActionInstructItem[]
+	action_type?: string
 
-      let url = '/api/v1/scene';
-      let method = 'put';
-      if (!submitData.id) {
-        method = 'post';
-      }
+	[key: string]: unknown
+}
 
-      this.API.apiRequest(url, submitData, method)
-        .then((res) => {
-          if (res.code == 200) {
-            uni.navigateBack(-1);
-          } else {
-            uni.showToast({
-              title: res.message,
-              icon: 'none',
-              duration: 2000
-            });
-          }
-        })
-        .finally(() => {
-          uni.hideLoading();
-        });
-    },
-    newEdit() {
-      this.getAlarmList('');
-    },
-    transActionsOut(actions) {
-      const actionsData = [];
-      // eslint-disable-next-line array-callback-return
-      actions.map((item) => {
-        if (item.actionType === '1') {
-          // eslint-disable-next-line array-callback-return
-          item.actionInstructList.map((instructItem) => {
-            // 如果是c_telemetry/c_attribute,那么action_value示例格式：{"c_telemetry":2}
-            // 如果是c_command,那么action_value示例格式：{"method":"switch1","params":{"false":0}}
-            if (
-              instructItem.action_param_type === 'c_telemetry' ||
-              instructItem.action_param_type === 'c_attribute' ||
-              instructItem.action_param_type === 'c_command'
-            ) {
-              instructItem.action_value = instructItem.actionValue;
-            }
-            // 如果是telemetry/attribute，那么 action_value示例格式：{"humidity":2}
-            if (instructItem.action_param_type === 'telemetry' || instructItem.action_param_type === 'attributes') {
-              const action_value = {};
-              action_value[instructItem.action_param] = instructItem.actionValue;
-              instructItem.action_value = JSON.stringify(action_value);
-            }
-            // 如果是command/c_command，那么 action_value示例格式:	{"method":"ReSet","params":{"switch":1,"light":"close"}}
-            if (instructItem.action_param_type === 'command') {
-              const action_value = {
-                method: instructItem.action_param,
-                params: JSON.stringify(JSON.parse(instructItem.actionValue))
-              };
-              instructItem.action_value = JSON.stringify(action_value);
-            }
-            actionsData.push(instructItem);
-          });
-        } else {
-          item.action_type = item.actionType;
-          actionsData.push(item);
-        }
-      });
-      return actionsData;
-    }
-  }
-};
+interface SceneInfo {
+	id?: string
+	name: string
+	description: string
+}
+
+interface SceneFormData {
+	info: SceneInfo
+	actions: ActionGroupItem[]
+
+	// 兼容接口返回/历史字段
+	[key: string]: unknown
+}
+
+interface SceneDetailResponseData {
+	info: SceneInfo
+	actions: ActionInstructItem[]
+	[key: string]: unknown
+}
+
+type SubmitData = SceneInfo & { actions: ActionInstructItem[] }
+
+const { t } = useI18n()
+const { apiRequest } = useInjected()
+
+const editId = ref<string>('')
+
+const formData = reactive<SceneFormData>({
+	info: {
+		name: '',
+		description: ''
+	},
+	actions: []
+})
+
+const visible = ref<boolean>(false)
+const submitData = ref<SubmitData | null>(null)
+
+const initEmptyForm = () => {
+	Object.assign(formData, {
+		info: {
+			name: '',
+			description: ''
+		},
+		actions: [
+			{
+				actionType: '1',
+				actionInstructList: [
+					{
+						action_target: '',
+						action_type: null,
+						action_param_type: null,
+						action_param: null,
+						actionValue: null,
+						deviceGroupId: null,
+						actionParamOptions: [],
+						actionParamOptionsData: [],
+						actionParamTypeOptions: [],
+						showSubSelect: true,
+						actionParamData: null,
+						placeholder: '',
+						inputFeedback: '',
+						inputValidationStatus: ''
+					}
+				]
+			}
+		]
+	} satisfies SceneFormData)
+}
+
+onShow(() => {
+	uni.setNavigationBarTitle({
+		title: t('pages.addScene') as string
+	})
+})
+
+onLoad((options) => {
+	const opt = options as Record<string, string | undefined>
+	editId.value = opt.id || ''
+
+	uni.setNavigationBarTitle({
+		title: editId.value ? (t('pages.sceneDetail.editScene') as string) : (t('pages.sceneDetail.newScene') as string)
+	})
+
+	if (editId.value) {
+		void getInfo()
+	} else {
+		initEmptyForm()
+	}
+})
+
+const getInfo = async () => {
+	if (!apiRequest) return
+
+	uni.showLoading({
+		title: t('common.loading') as string
+	})
+
+	try {
+		const params = { id: editId.value }
+		const res = await apiRequest<SceneDetailResponseData>(`/api/v1/scene/detail/${editId.value}`, params, 'get')
+		if (res.code === 200) {
+			Object.assign(formData, {
+				...res.data,
+				actions: convertActionsData(res.data.actions)
+			})
+		} else {
+			uni.showToast({
+				title: res.message || '',
+				icon: 'none',
+				duration: 2000
+			})
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const convertActionsData = (actionsData: ActionInstructItem[]) => {
+	const actionGroupsData: ActionGroupItem[] = []
+	const actionInstructList: ActionInstructItem[] = []
+
+	actionsData.map((item) => {
+		if (item.action_type === '10' || item.action_type === '11') {
+			item.actionParamOptions = []
+			const actionValueObj = JSON.parse(item.action_value as string) as { params?: unknown } & Record<string, unknown>
+
+			if (item.action_param_type === 'c_telemetry' || item.action_param_type === 'c_attribute' || item.action_param_type === 'c_command') {
+				item.actionValue = item.action_value
+			}
+			if (item.action_param_type === 'telemetry' || item.action_param_type === 'attributes') {
+				item.actionValue = actionValueObj[item.action_param as string]
+			}
+			if (item.action_param_type === 'command') {
+				item.actionValue = actionValueObj.params
+			}
+
+			item.actionParamOptions = []
+			actionInstructList.push(item)
+		} else {
+			item.actionType = item.action_type as string
+			actionGroupsData.push(item as unknown as ActionGroupItem)
+		}
+	})
+
+	if (actionInstructList.length > 0) {
+		const type1Data: ActionGroupItem = {
+			actionType: '1',
+			actionInstructList
+		}
+		actionGroupsData.push(type1Data)
+	}
+
+	return actionGroupsData
+}
+
+const handlerSubmit = () => {
+	const configFormData = JSON.parse(JSON.stringify(formData.info)) as SceneInfo
+	const { name } = formData.info
+	const { actions } = formData
+
+	if (!name) {
+		uni.showToast({
+			title: t('pages.sceneDetail.enterSceneTitle') as string,
+			icon: 'none',
+			duration: 2000
+		})
+		return
+	}
+
+	const validateResult = transActionsOut(actions)
+	;(configFormData as SubmitData).actions = validateResult
+
+	submitData.value = configFormData as SubmitData
+	visible.value = true
+}
+
+const cancel = () => {
+	visible.value = false
+}
+
+const confirm = () => {
+	if (!submitData.value) return
+	void doSubmit(submitData.value)
+}
+
+const doSubmit = async (data: SubmitData) => {
+	if (!apiRequest) return
+
+	uni.showLoading({
+		title: t('common.loading') as string
+	})
+
+	try {
+		const url = '/api/v1/scene'
+		const method = data.id ? 'put' : 'post'
+
+		const res = await apiRequest<unknown>(url, data as unknown as Record<string, unknown>, method)
+		if (res.code === 200) {
+			uni.navigateBack(-1)
+		} else {
+			uni.showToast({
+				title: res.message || '',
+				icon: 'none',
+				duration: 2000
+			})
+		}
+	} finally {
+		uni.hideLoading()
+	}
+}
+
+const transActionsOut = (actions: ActionGroupItem[]) => {
+	const actionsData: ActionInstructItem[] = []
+
+	// eslint-disable-next-line array-callback-return
+	actions.map((item) => {
+		if (item.actionType === '1') {
+			// eslint-disable-next-line array-callback-return
+			item.actionInstructList.map((instructItem) => {
+				// 如果是c_telemetry/c_attribute,那么action_value示例格式：{"c_telemetry":2}
+				// 如果是c_command,那么action_value示例格式：{"method":"switch1","params":{"false":0}}
+				if (
+					instructItem.action_param_type === 'c_telemetry' ||
+					instructItem.action_param_type === 'c_attribute' ||
+					instructItem.action_param_type === 'c_command'
+				) {
+					instructItem.action_value = instructItem.actionValue as string
+				}
+
+				// 如果是telemetry/attribute，那么 action_value示例格式：{"humidity":2}
+				if (instructItem.action_param_type === 'telemetry' || instructItem.action_param_type === 'attributes') {
+					const action_value: Record<string, unknown> = {}
+					action_value[instructItem.action_param as string] = instructItem.actionValue
+					instructItem.action_value = JSON.stringify(action_value)
+				}
+
+				// 如果是command/c_command，那么 action_value示例格式:	{"method":"ReSet","params":{"switch":1,"light":"close"}}
+				if (instructItem.action_param_type === 'command') {
+					const action_value = {
+						method: instructItem.action_param,
+						params: JSON.stringify(JSON.parse(instructItem.actionValue as string))
+					}
+					instructItem.action_value = JSON.stringify(action_value)
+				}
+
+				actionsData.push(instructItem)
+			})
+		} else {
+			item.action_type = item.actionType
+			actionsData.push(item as unknown as ActionInstructItem)
+		}
+	})
+
+	return actionsData
+}
 </script>
 
 <style lang="scss">
-	@import '@/common/alert-strategy.css';
+	@import '@/common/styles/alert-strategy.css';
   
   /* Global Reset & Base */
   .pagehome {

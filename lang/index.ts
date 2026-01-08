@@ -21,7 +21,7 @@ function normalizeLocale(raw: unknown): SupportedLocale {
 }
 
 const systemLanguage = getSystemLanguage()
-const locale = normalizeLocale(uni.getStorageSync('language') || systemLanguage || 'en-US')
+const locale = normalizeLocale(uni.getStorageSync('language') || systemLanguage || 'zh-CN')
 
 const i18n = createI18n({
 	legacy: false,

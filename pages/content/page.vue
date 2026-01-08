@@ -15,63 +15,75 @@
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {
-				contentKey: '',
-				title: '',
-				contentHtml: '',
-				loading: false
-			}
-		},
-		onLoad(options) {
-			this.contentKey = options.key || ''
-			this.setTitle()
-			this.loadContent()
-		},
-		methods: {
-			setTitle() {
-				let t = this.$t('pages.contentPage')
-				if (this.contentKey === 'user_policy') t = this.$t('pages.userPolicy')
-				if (this.contentKey === 'privacy_policy') t = this.$t('pages.privacyPolicy')
-				uni.setNavigationBarTitle({
-					title: t
-				})
-			},
-			getLang() {
-				return uni.getStorageSync('language') || 'zh-CN'
-			},
-			getAppId() {
-				// #ifdef APP-PLUS
-				return plus.runtime.appid
-				// #endif
-				return uni.getStorageSync('app_appid') || ''
-			},
-			loadContent() {
-				if (!this.contentKey) return
-				this.loading = true
-				const appid = this.getAppId()
-				this.API.apiRequest(`/api/v1/app/content/pages/${this.contentKey}`, {
-					appid: appid,
-					lang: this.getLang()
-				}, 'get').then(res => {
-					if (res && res.code == 200) {
-						this.title = res.data.title || ''
-						this.contentHtml = res.data.content_html || ''
-					} else {
-						this.contentHtml = ''
-					}
-				}).catch(() => {
-					this.contentHtml = ''
-				}).finally(() => {
-					this.loading = false
-				})
-			}
+<script setup lang="ts">
+import { getCurrentInstance, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+declare const plus: { runtime: { appid: string } }
+
+type ContentPage = { title?: string; content_html?: string }
+type ApiResponse<T> = { code: number; data: T }
+
+const { t } = useI18n()
+
+const contentKey = ref<string>('')
+const title = ref<string>('')
+const contentHtml = ref<string>('')
+const loading = ref<boolean>(false)
+
+const getLang = (): string => uni.getStorageSync('language') || 'zh-CN'
+
+const getAppId = (): string => {
+	// #ifdef APP-PLUS
+	return plus.runtime.appid
+	// #endif
+	return uni.getStorageSync('app_appid') || ''
+}
+
+const getApiRequest = () => {
+	const { proxy } = getCurrentInstance() || {}
+	return (proxy as any)?.API?.apiRequest as
+		| (<T>(url: string, params: Record<string, unknown>, method: string) => Promise<ApiResponse<T>>)
+		| undefined
+}
+
+const setTitle = () => {
+	let pageTitle = t('pages.contentPage')
+	if (contentKey.value === 'user_policy') pageTitle = t('pages.userPolicy')
+	if (contentKey.value === 'privacy_policy') pageTitle = t('pages.privacyPolicy')
+	uni.setNavigationBarTitle({ title: pageTitle })
+}
+
+const loadContent = async () => {
+	if (!contentKey.value) return
+	const apiRequest = getApiRequest()
+	if (!apiRequest) return
+
+	loading.value = true
+	try {
+		const appid = getAppId()
+		const res = await apiRequest<ContentPage>(`/api/v1/app/content/pages/${contentKey.value}`, { appid, lang: getLang() }, 'get')
+		if (res && res.code == 200) {
+			title.value = res.data.title || ''
+			contentHtml.value = res.data.content_html || ''
+		} else {
+			contentHtml.value = ''
 		}
+	} catch {
+		contentHtml.value = ''
+	} finally {
+		loading.value = false
 	}
+}
+
+onLoad((options) => {
+	const opt = options as Record<string, string | undefined>
+	contentKey.value = opt.key || ''
+	setTitle()
+	loadContent()
+})
 </script>
 
 <style>
 </style>
-

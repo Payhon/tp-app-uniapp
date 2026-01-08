@@ -29,159 +29,164 @@
 	</view>
 </template>
 
-<script>
-	import { getDeviceInfo } from '@/common/platform'
+<script setup lang="ts">
+import { getCurrentInstance, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+import { getDeviceInfo } from '@/common/platform'
 
-	export default {
-		data() {
-			return {
-				content: '',
-				images: [],
-				maxImages: 6,
-				submitting: false
-			}
-		},
-		onLoad() {
-			if (!this.$login.isLoginType().isLogin) {
-				uni.showToast({
-					title: this.$t('pages.pleaseLogin'),
-					icon: 'none'
-				})
-				uni.navigateTo({
-					url: '/pages/login/login'
-				})
-				return
-			}
-			uni.setNavigationBarTitle({
-				title: this.$t('pages.submitFeedback')
-			})
-		},
-		methods: {
-			getLang() {
-				return uni.getStorageSync('language') || 'zh-CN'
-			},
-			getAppId() {
-				// #ifdef APP-PLUS
-				return plus.runtime.appid
-				// #endif
-				return uni.getStorageSync('app_appid') || ''
-			},
-			getBaseUrl() {
-				return uni.getStorageSync('serverAddress') || 'http://demo.thingspanel.cn'
-			},
-			getHeaders() {
-				const token = uni.getStorageSync('access_token')
-				const tenantId = uni.getStorageSync('tenant_id')
-				const h = {}
-				if (token) h['x-token'] = token
-				if (tenantId) h['X-TenantID'] = tenantId
-				return h
-			},
-				getDeviceMeta() {
-					const info = getDeviceInfo()
-					let appVersion = ''
-					// #ifdef APP-PLUS
-					appVersion = plus.runtime.version || ''
-					// #endif
-				return {
-					platform: info.platform || '',
-					app_version: appVersion,
-					device_model: info.model || '',
-					os_version: info.system || ''
-				}
-			},
-			chooseImage() {
-				const remain = this.maxImages - this.images.length
-				if (remain <= 0) return
-				uni.chooseImage({
-					count: remain,
-					sizeType: ['compressed'],
-					success: res => {
-						const files = res.tempFilePaths || []
-						this.images = this.images.concat(files)
-					}
-				})
-			},
-			remove(idx) {
-				this.images.splice(idx, 1)
-			},
-			preview(idx) {
-				uni.previewImage({
-					current: idx,
-					urls: this.images
-				})
-			},
-			uploadOne(filePath) {
-				return new Promise((resolve, reject) => {
-					uni.uploadFile({
-						url: this.getBaseUrl() + '/api/v1/file/up',
-						filePath: filePath,
-						name: 'file',
-						formData: {
-							type: 'feedback'
-						},
-						header: this.getHeaders(),
-						success: (res) => {
-							try {
-								const data = JSON.parse(res.data || '{}')
-								if (data && data.code == 200 && data.data && data.data.path) {
-									resolve(data.data.path)
-								} else {
-									reject(new Error(data.message || 'upload failed'))
-								}
-							} catch (e) {
-								reject(e)
-							}
-						},
-						fail: (err) => reject(err)
-					})
-				})
-			},
-			async submit() {
-				const appid = this.getAppId()
-				if (!appid) {
-					uni.showToast({ title: this.$t('pages.appIdMissing'), icon: 'none' })
-					return
-				}
-				if (!this.content || this.content.trim().length === 0) {
-					uni.showToast({ title: this.$t('pages.feedbackEmpty'), icon: 'none' })
-					return
-				}
-				this.submitting = true
-				try {
-					const uploaded = []
-					for (let i = 0; i < this.images.length; i++) {
-						const p = await this.uploadOne(this.images[i])
-						uploaded.push(p)
-					}
-					const meta = this.getDeviceMeta()
-					const res = await this.API.apiRequest('/api/v1/app/content/feedback', {
-						appid: appid,
-						content: this.content,
-						images: uploaded,
-						...meta
-					}, 'post')
-					if (res && res.code == 200) {
-						uni.showToast({ title: this.$t('pages.feedbackSubmitSuccess'), icon: 'none' })
-						this.content = ''
-						this.images = []
-						uni.navigateTo({ url: '/pages/feedback/my-feedback' })
-					} else {
-						uni.showToast({ title: (res && res.message) || this.$t('pages.feedbackSubmitFailed'), icon: 'none' })
-					}
-				} catch (e) {
-					uni.showToast({ title: this.$t('pages.feedbackSubmitFailed'), icon: 'none' })
-				} finally {
-					this.submitting = false
-				}
-			},
-			goMyFeedback() {
-				uni.navigateTo({
-					url: '/pages/feedback/my-feedback'
-				})
-			}
-		}
+declare const plus: { runtime: { appid: string; version?: string } }
+
+type UploadResponse = { code: number; message?: string; data?: { path?: string } }
+type ApiResponse<T> = { code: number; message?: string; data: T }
+
+const { t } = useI18n()
+
+const content = ref<string>('')
+const images = ref<string[]>([])
+const maxImages = ref<number>(6)
+const submitting = ref<boolean>(false)
+
+const getApiRequest = () => {
+	const { proxy } = getCurrentInstance() || {}
+	return (proxy as any)?.API?.apiRequest as
+		| (<T>(url: string, params: Record<string, unknown>, method: string) => Promise<ApiResponse<T>>)
+		| undefined
+}
+
+const getLogin = () => {
+	const { proxy } = getCurrentInstance() || {}
+	return (proxy as any)?.$login as undefined | { isLoginType?: () => { isLogin?: boolean } }
+}
+
+const getAppId = (): string => {
+	// #ifdef APP-PLUS
+	return plus.runtime.appid
+	// #endif
+	return uni.getStorageSync('app_appid') || ''
+}
+
+const getBaseUrl = (): string => uni.getStorageSync('serverAddress') || 'http://demo.thingspanel.cn'
+
+const getHeaders = (): Record<string, string> => {
+	const token = uni.getStorageSync('access_token')
+	const tenantId = uni.getStorageSync('tenant_id')
+	const h: Record<string, string> = {}
+	if (token) h['x-token'] = String(token)
+	if (tenantId) h['X-TenantID'] = String(tenantId)
+	return h
+}
+
+const getDeviceMeta = (): Record<string, unknown> => {
+	const info = getDeviceInfo() as unknown as { platform?: string; model?: string; system?: string }
+	let appVersion = ''
+	// #ifdef APP-PLUS
+	appVersion = plus.runtime.version || ''
+	// #endif
+	return {
+		platform: info.platform || '',
+		app_version: appVersion,
+		device_model: info.model || '',
+		os_version: info.system || '',
 	}
+}
+
+const chooseImage = () => {
+	const remain = maxImages.value - images.value.length
+	if (remain <= 0) return
+	uni.chooseImage({
+		count: remain,
+		sizeType: ['compressed'],
+		success: (res) => {
+			const files = res.tempFilePaths || []
+			images.value = images.value.concat(files)
+		},
+	})
+}
+
+const remove = (idx: number) => {
+	images.value.splice(idx, 1)
+}
+
+const preview = (idx: number) => {
+	uni.previewImage({ current: idx, urls: images.value })
+}
+
+const uploadOne = (filePath: string) =>
+	new Promise<string>((resolve, reject) => {
+		uni.uploadFile({
+			url: `${getBaseUrl()}/api/v1/file/up`,
+			filePath,
+			name: 'file',
+			formData: { type: 'feedback' },
+			header: getHeaders(),
+			success: (res) => {
+				try {
+					const data = JSON.parse(res.data || '{}') as UploadResponse
+					if (data && data.code == 200 && data.data?.path) resolve(data.data.path)
+					else reject(new Error(data.message || 'upload failed'))
+				} catch (e) {
+					reject(e)
+				}
+			},
+			fail: (err) => reject(err),
+		})
+	})
+
+const submit = async () => {
+	const appid = getAppId()
+	if (!appid) {
+		uni.showToast({ title: t('pages.appIdMissing'), icon: 'none' })
+		return
+	}
+	if (!content.value || content.value.trim().length === 0) {
+		uni.showToast({ title: t('pages.feedbackEmpty'), icon: 'none' })
+		return
+	}
+	const apiRequest = getApiRequest()
+	if (!apiRequest) return
+
+	submitting.value = true
+	try {
+		const uploaded: string[] = []
+		for (let i = 0; i < images.value.length; i += 1) {
+			const p = await uploadOne(images.value[i])
+			uploaded.push(p)
+		}
+		const meta = getDeviceMeta()
+		const res = await apiRequest<unknown>(
+			'/api/v1/app/content/feedback',
+			{ appid, content: content.value, images: uploaded, ...meta },
+			'post'
+		)
+		if (res && res.code == 200) {
+			uni.showToast({ title: t('pages.feedbackSubmitSuccess'), icon: 'none' })
+			content.value = ''
+			images.value = []
+			uni.navigateTo({ url: '/pages/feedback/my-feedback' })
+		} else {
+			uni.showToast({ title: res?.message || t('pages.feedbackSubmitFailed'), icon: 'none' })
+		}
+	} catch {
+		uni.showToast({ title: t('pages.feedbackSubmitFailed'), icon: 'none' })
+	} finally {
+		submitting.value = false
+	}
+}
+
+const goMyFeedback = () => {
+	uni.navigateTo({ url: '/pages/feedback/my-feedback' })
+}
+
+onLoad(() => {
+	const login = getLogin()
+	if (!login?.isLoginType?.().isLogin) {
+		uni.showToast({ title: t('pages.pleaseLogin'), icon: 'none' })
+		uni.navigateTo({ url: '/pages/login/login' })
+		return
+	}
+	uni.setNavigationBarTitle({ title: t('pages.submitFeedback') })
+})
 </script>
 
 <style>
