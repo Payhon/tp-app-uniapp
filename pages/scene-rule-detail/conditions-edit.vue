@@ -198,12 +198,11 @@
 
                     <!-- 每小时 -> 选择分 -->
                     <view v-if="ifItem.task_type === 'HOUR'" class="form-item">
-                      <picker
-                        mode="time"
-                        v-model="ifItem.hourTimeValue"
-                        :value="formatMinuteTime(ifItem.hourTimeValue)"
-                        @change="(e) => onHourTimeChange(e, ifItem)"
-                      >
+	                      <picker
+	                        mode="time"
+	                        :value="formatMinuteTime(ifItem.hourTimeValue)"
+	                        @change="(e) => onHourTimeChange(e, ifItem)"
+	                      >
                         <view class="uni-input">{{ formatMinuteTime(ifItem.hourTimeValue) || $t('pages.sceneRuleDetail.selectMinute') }}</view>
                       </picker>
                       <CustomSelect
@@ -215,12 +214,11 @@
 
                     <!-- 每天 -> 选择时分秒 -->
                     <view v-if="ifItem.task_type === 'DAY'" class="form-item">
-                      <picker
-                        mode="time"
-                        v-model="ifItem.dayTimeValue"
-                        :value="formatTime(ifItem.dayTimeValue)"
-                        @change="(e) => onDayTimeChange(e, ifItem)"
-                      >
+	                      <picker
+	                        mode="time"
+	                        :value="formatTime(ifItem.dayTimeValue)"
+	                        @change="(e) => onDayTimeChange(e, ifItem)"
+	                      >
                         <view class="uni-input">{{ formatTime(ifItem.dayTimeValue) || $t('pages.sceneRuleDetail.selectTime') }}</view>
                       </picker>
                       <CustomSelect
@@ -247,12 +245,11 @@
                           </label>
                         </view>
                       </checkbox-group>
-                      <picker
-                        mode="time"
-                        v-model="ifItem.weekTimeValue"
-                        :value="formatTime(ifItem.weekTimeValue)"
-                        @change="(e) => onWeekTimeChange(e, ifItem)"
-                      >
+	                      <picker
+	                        mode="time"
+	                        :value="formatTime(ifItem.weekTimeValue)"
+	                        @change="(e) => onWeekTimeChange(e, ifItem)"
+	                      >
                         <view class="uni-input">{{ formatTime(ifItem.weekTimeValue) || $t('pages.sceneRuleDetail.selectTime') }}</view>
                       </picker>
                       <CustomSelect
@@ -279,12 +276,11 @@
                         </picker>
                         <uni-icons color="#999" type="forward" size="40rpx"></uni-icons>
                       </view>
-                      <picker
-                        mode="time"
-                        v-model="ifItem.monthTimeValue"
-                        :value="formatTime(ifItem.monthTimeValue)"
-                        @change="(e) => onMonthTimeChange(e, ifItem)"
-                      >
+	                      <picker
+	                        mode="time"
+	                        :value="formatTime(ifItem.monthTimeValue)"
+	                        @change="(e) => onMonthTimeChange(e, ifItem)"
+	                      >
                         <view class="uni-input">{{ formatTime(ifItem.monthTimeValue) || $t('pages.sceneRuleDetail.selectTime') }}</view>
                       </picker>
                       <CustomSelect
@@ -322,21 +318,19 @@
                     </checkbox-group>
 
                     <view class="time-range">
-                      <picker
-                        mode="time"
-                        v-model="ifItem.startTimeValue"
-                        :value="formatTime(ifItem.startTimeValue)"
-                        @change="(e) => onStartTimeChange(e, ifItem)"
-                      >
+	                      <picker
+	                        mode="time"
+	                        :value="formatTime(ifItem.startTimeValue)"
+	                        @change="(e) => onStartTimeChange(e, ifItem)"
+	                      >
                         <view class="uni-input">{{ formatTime(ifItem.startTimeValue) || $t('pages.sceneRuleDetail.selectStartTime') }}</view>
                       </picker>
                       <view class="time-range-divider">-</view>
-                      <picker
-                        mode="time"
-                        v-model="ifItem.endTimeValue"
-                        :value="formatTime(ifItem.endTimeValue)"
-                        @change="(e) => onEndTimeChange(e, ifItem)"
-                      >
+	                      <picker
+	                        mode="time"
+	                        :value="formatTime(ifItem.endTimeValue)"
+	                        @change="(e) => onEndTimeChange(e, ifItem)"
+	                      >
                         <view class="uni-input">{{ formatTime(ifItem.endTimeValue) || $t('pages.sceneRuleDetail.selectEndTime') }}</view>
                       </picker>
                     </view>

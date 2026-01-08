@@ -204,7 +204,7 @@
 <script>
 	import dayjs from 'dayjs'
 	import * as echarts from 'echarts';
-	import uCharts from '@/components/u-charts/u-charts.min.js';
+	import uCharts from '@/components/u-charts/u-charts.cjs';
 	import customNav from '@/components/customNav/customNav.vue';
 	import { getWindowInfo } from '@/common/platform'
 var canvaLineA = null;

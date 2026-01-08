@@ -16,101 +16,86 @@
 	</view>
 </template>
 
-<script>
-	//
-	import { mapState } from "vuex";
-	//
-	export default {
-		data() {
-			return {
-				id:'',
-				email:'',
-				is_admin:0,
-				business_id:''
-			}
-		},
-		//
-		computed:{
-			...mapState({
-				userInfo:state=>state.userInfo
-			})
-		},
-		// 
-		onNavigationBarButtonTap(e){
-			// 设置
-			if( e.index ===0 ){
-				//
-				this.handleUpdate();
-				//
-			}
-			// 
-		},
-		//
-		onShow() {
-      uni.setNavigationBarTitle({
-        title: this.$t('pages.modifyEmail')
-      })
-			this.getAccount();
-		},
-		// 
-		methods: {
-			//
-			getAccount(){ 
-				// 
-				if(this.userInfo){
-					this.id				= this.userInfo.id;
-					this.email			= this.userInfo.email;
-					this.is_admin		= this.userInfo.is_admin;
-					this.business_id	= this.userInfo.business_id;
-				}
-				// 
-			},
-			// 验证层
-			check(){ 
-				if(!this.isEmail()){
-					uni.showToast({	
-						title: this.$t('pages.email.invalidEmail'),
-						icon: "none"	
-					});
-					return;
-				}
-				return true;
-			},
-			//
-			handleUpdate(){
-				// 
-				if(!this.check()) return; 
-				//
-				this.$H.post('/user/edit',{id:this.id,email:this.email,is_admin:this.is_admin,business_id:this.business_id},{toke:true}).then(res=>{
-					// 
-					this.loading = this.disabled = false;
-					// 修本地存储
-					this.$store.commit('editUserInfoField',{
-						key:'email',
-						value:this.email
-					})
-					// 
-					return uni.showToast({
-						title: this.$t('pages.email.updateSuccess'),
-						success:()=>{
-							uni.navigateBack({ delta:1 })
-						}
-					})
-					// 
-					//
-				}).catch(err=>{
-					console.log(err);
-				})
-				//
-			},
-			// 手机号验证
-			isEmail(){ 
-				let mPattern = /^([A-Za-z0-9_\-\.])+\@([A-Za-z0-9_\-\.])+\.([A-Za-z]{2,4})$/;
-				return mPattern.test(this.email);
-			}
-			//
-		}
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onNavigationBarButtonTap, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+import http from '@/common/request'
+import { useUserStore } from '@/store/user'
+
+const { t } = useI18n()
+const userStore = useUserStore()
+
+const id = ref<string | number>('')
+const email = ref<string>('')
+const is_admin = ref<number>(0)
+const business_id = ref<string | number>('')
+
+const loading = ref<boolean>(false)
+const disabled = ref<boolean>(false)
+
+const getAccount = () => {
+	const info = userStore.userInfo
+	if (info) {
+		id.value = info.id ?? ''
+		email.value = String(info.email ?? '')
+		is_admin.value = Number(info.is_admin ?? 0)
+		business_id.value = info.business_id ?? ''
 	}
+}
+
+onShow(() => {
+	uni.setNavigationBarTitle({
+		title: t('pages.modifyEmail') as string
+	})
+	getAccount()
+})
+
+onNavigationBarButtonTap((e) => {
+	if (e.index === 0) handleUpdate()
+})
+
+const isEmail = () => {
+	const mPattern = /^([A-Za-z0-9_\-\.])+\@([A-Za-z0-9_\-\.])+\.([A-Za-z]{2,4})$/
+	return mPattern.test(email.value)
+}
+
+const check = () => {
+	if (!isEmail()) {
+		uni.showToast({
+			title: t('pages.email.invalidEmail') as string,
+			icon: 'none'
+		})
+		return false
+	}
+	return true
+}
+
+const handleUpdate = async () => {
+	if (!check()) return
+	try {
+		await http.post(
+			'/user/edit',
+			{ id: id.value, email: email.value, is_admin: is_admin.value, business_id: business_id.value },
+			{ toke: true }
+		)
+		loading.value = false
+		disabled.value = false
+		userStore.editUserInfoField({
+			key: 'email',
+			value: email.value
+		})
+		uni.showToast({
+			title: t('pages.email.updateSuccess') as string,
+			success: () => {
+				uni.navigateBack({ delta: 1 })
+			}
+		})
+	} catch (err) {
+		console.log(err)
+	}
+}
 </script>
 
 <style>

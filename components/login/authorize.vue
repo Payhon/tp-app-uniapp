@@ -21,25 +21,24 @@
 	</view>
 </template>
 
-<script>
-export default {
-	components: {},
-	data() {
-		return {
-		};
-	},
-	props: {},
-	onShow() {},
-	onLoad() {},
-	methods: {
-		getuserinfo(){
-			this.$emit('getuserinfo');
-		},
-		toCancel(){
-			this.$emit('cancel');
-		}
-	}
-};
+<script setup lang="ts">
+import type { ComponentPublicInstance } from 'vue'
+
+// 仅用于让部分编译器将该文件视为 ESM module（避免生成的 .vue.ts 被判定为 script）
+type _ModuleMarker = ComponentPublicInstance
+
+const emit = defineEmits<{
+	(e: 'getuserinfo'): void
+	(e: 'cancel'): void
+}>()
+
+const getuserinfo = () => {
+	emit('getuserinfo')
+}
+
+const toCancel = () => {
+	emit('cancel')
+}
 </script>
 
 <style scoped lang="scss">

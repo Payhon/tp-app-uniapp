@@ -66,10 +66,10 @@
 				</view>
 				<view class="tp-ipt-item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing tp-pd-t-b-25"
 					v-if="index!=0">
-					<view class="del_btn" @click="toDel(data,index)">
-						<image src="../../static/icon/del.png" alt="">{{$t('common.delete')}}
+						<view class="del_btn" @click="toDel(data,index)">
+							<image src="../../static/icon/del.png" alt="" />{{$t('common.delete')}}
+						</view>
 					</view>
-				</view>
 			</view>
 			<view class="tp-panel tp-panel-textarea tp-flex tp-flex-col tp-mg-30 tp-box-sizing tp-pd-20">
 				<view class="tp-mg-b-20">{{ $t('pages.alertStrategy.message') }}</view>
@@ -141,10 +141,10 @@
 			<!-- 新增触发条件 -->
 			<uni-popup ref="addFormPopup" type="bottom" :mask="true" :maskClick="true">
 				<view class="logInfo">
-					<view class="info_title">
-						{{ $t('pages.alertStrategy.addTriggerCondition') }}
-						<image src="../../static/icon/close.png" alt="" @click="$refs.addFormPopup.close()">
-					</view>
+						<view class="info_title">
+							{{ $t('pages.alertStrategy.addTriggerCondition') }}
+							<image src="../../static/icon/close.png" alt="" @click="$refs.addFormPopup.close()" />
+						</view>
 					<view class="info_header">
 						<view class="tp-circle tp-mg-l-r-20 tp-active" style="margin-left: 10rpx;">
 						</view>

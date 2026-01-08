@@ -28,10 +28,10 @@
       </view>
 
       <!-- 条件列表 -->
-      <view class="section-content">
-        <conditions-edit v-if="formData.trigger_condition_groups" ref="conditions"
-          :condition-data.sync="formData.trigger_condition_groups" />
-      </view>
+	      <view class="section-content">
+	        <conditions-edit v-if="formData.trigger_condition_groups" ref="conditions"
+	          v-model:condition-data="formData.trigger_condition_groups" />
+	      </view>
 
       <!-- Section: Then -->
       <view class="section-header">
@@ -39,9 +39,9 @@
       </view>
 
       <!-- 操作列表 -->
-      <view class="section-content">
-        <actions-edit v-if="formData.actions" ref="actions" :actions.sync="formData.actions"></actions-edit>
-      </view>
+	      <view class="section-content">
+	        <actions-edit v-if="formData.actions" ref="actions" v-model:actions="formData.actions"></actions-edit>
+	      </view>
 
       <!-- Save Button -->
       <view class="save-button-container">
@@ -55,11 +55,11 @@
 </template>
 
 <script>
-import ActionsEdit from '../scene-detail/actions-edit.vue';
-import ConditionsEdit from './conditions-edit.vue';
-import CustomSelect from '@/components/custom-select.vue'
-import moment from '@/static/js/moment.js';
-import Modal from '@/components/x-modal/x-modal'
+	import ActionsEdit from '../scene-detail/actions-edit.vue';
+	import ConditionsEdit from './conditions-edit.vue';
+	import CustomSelect from '@/components/custom-select.vue'
+	import moment from 'moment';
+	import Modal from '@/components/x-modal/x-modal'
 
 export default {
   components: {

@@ -41,81 +41,87 @@
 
 </template>
 
-<script>
-	// 
-	import {
-		mapState,
-		mapMutations
-	} from "vuex";
-	// 
-	export default {
-		data() {
-			return {
-				disabled: true,
-				loading: false,
-				email: '1234567@qq.com',
-				password: '12345678',
-				toast: {
-					msg: ''
-				},
-			}
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+import http from '@/common/request'
+import { isLoginType } from '@/store/login'
+import legacyStore from '@/store'
+
+const { t } = useI18n()
+
+const disabled = ref(true)
+const loading = ref(false)
+const email = ref('1234567@qq.com')
+const password = ref('12345678')
+
+const toast = ref<{ msg: string }>({ msg: '' })
+
+const authPopup = ref<any>(null)
+
+const onBtnChange = () => {
+	disabled.value = !(email.value && password.value)
+}
+
+watch([email, password], onBtnChange)
+
+const toCloseLogin = () => {
+	authPopup.value?.close?.()
+}
+
+const getAuth = () => {
+	// #ifdef MP-WEIXIN
+	uni.getUserProfile({
+		desc: t('ucenter.authDescription') as string,
+		success() {
+			uni.setStorageSync('isAuth', '1')
+			authPopup.value?.close?.()
 		},
-		// 
-		watch: {
-			email() {
-				this.onBtnChange();
-			},
-			password() {
-				this.onBtnChange();
-			}
-		},
-		onLoad() {
-			
-		},
-		methods: {
-			// 改变按钮状态
-			onBtnChange() {
-				// 
-				if (this.email && this.password) {
-					this.disabled = false;
-					return;
-				}
-				this.disabled = true;
-			},
-			doLoginSubmit: function() {
-				//判断是否授权
-				let userDeatail = this.$login.isLoginType();
-				this.isAuth = userDeatail.isAuth
-				if (!this.isAuth) { //未授权
-					this.$refs.authPopup.open()
-				}else{
-					let url = "/auth/login";
-					let data = {};
-					data = {
-						email: this.email,
-						password: this.password
-					};
-					this.loading = true;
-					this.$H.post(url, data).then(res => {
-						this.loading = false;
-						// 修改vuex的state，持久化存储
-						this.$store.commit('login', res);
-						this.$store.dispatch('getUserInfo');
-						uni.switchTab({
-							url: '../fishery-monitor/fishery-monitor'
-						});
-						uni.showToast({
-							title: this.$t('components.login.loginSuccess'),
-							icon: 'none'
-						});
-						//
-					}).catch(err => {
-						this.loading = false;
-					});
-				}
-			}
-	},
+		fail(err: unknown) {
+			console.log('未授权err==', err)
+		}
+	})
+	// #endif
+}
+
+const doLoginSubmit = async () => {
+	const userDetail = isLoginType()
+	const isAuth = userDetail.isAuth
+	if (!isAuth) {
+		authPopup.value?.open?.()
+		return
 	}
+
+	const url = '/auth/login'
+	const data = {
+		email: email.value,
+		password: password.value
+	}
+
+	loading.value = true
+	try {
+		const res = await http.post(url, data)
+		legacyStore.commit('login', res)
+		legacyStore.dispatch('getUserInfo')
+		uni.switchTab({
+			url: '../fishery-monitor/fishery-monitor'
+		})
+		uni.showToast({
+			title: t('components.login.loginSuccess') as string,
+			icon: 'none'
+		})
+	} catch (err) {
+		// ignore
+	} finally {
+		loading.value = false
+	}
+}
+
+onLoad(() => {
+	onBtnChange()
+})
 </script>
 
 <style>

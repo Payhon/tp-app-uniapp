@@ -23,88 +23,69 @@
 	</view>
 </template>
 
-<script>
-	export default{
-		name: 'modal',
-		props: {
-			title: {
-				type: String,
-				default: ''
-			},
-			text: {
-				type: String,
-				default: ''
-			},
-			noCancel: {
-				type: Boolean,
-				default: false
-			},
-			cancelText: {
-				type: String,
-				default: ''
-			},
-			cancelStyle: {
-				type: [String, Object]
-			},
-			confirmText: {
-				type: String,
-				default: ''
-			},
-			confirmStyle: {
-				type: [String, Object]
-			},
-			prevent: {
-				type: Boolean,
-				default: true
-			},
-			value: {
-				type: Boolean,
-				default: false
-			}
-		},
-		data(){
-			return{
-				showValue: this.value
-			}
-		},
-		computed: {
-			titleText() {
-				return this.title || this.$t('common.tip')
-			},
-			cancelTextComputed() {
-				return this.cancelText || this.$t('common.cancel')
-			},
-			confirmTextComputed() {
-				return this.confirmText || this.$t('common.ok')
-			}
-		},
-		watch: {
-			value(n, o){
-				this.showValue = n
-			},
-			showValue(n, o){
-				this.$emit('input', n)
-			}
-		},
-		methods: {
-			confirm(){
-				this.showValue = false
-				let msg = {from: 'confirm', confirm: true}
-				this.$emit('confirm', msg)
-				this.$emit('event', msg)
-			},
-			cancel(type){
-				if(this.prevent && type === 2){
-					return;
-				}
-				this.showValue = false
-				let msg = {from: type === 1 ? 'cancel' : 'mask'}
-				type === 1 ? msg.cancel = true : msg.mask = true
-				this.$emit('cancel', msg)
-				this.$emit('event', msg)
-			}
-		}
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+type StyleValue = string | Record<string, string>
+
+const props = defineProps<{
+	title?: string
+	text?: string
+	noCancel?: boolean
+	cancelText?: string
+	cancelStyle?: StyleValue
+	confirmText?: string
+	confirmStyle?: StyleValue
+	prevent?: boolean
+	// Vue3 v-model
+	modelValue?: boolean
+	// Vue2 兼容（历史遗留）
+	value?: boolean
+}>()
+
+const emit = defineEmits<{
+	(e: 'update:modelValue', value: boolean): void
+	(e: 'input', value: boolean): void
+	(e: 'confirm', payload: { from: 'confirm'; confirm: true }): void
+	(e: 'cancel', payload: { from: 'cancel' | 'mask'; cancel?: true; mask?: true }): void
+	(e: 'event', payload: Record<string, unknown>): void
+}>()
+
+const { t } = useI18n()
+
+const showValue = computed<boolean>({
+	get() {
+		if (typeof props.modelValue === 'boolean') return props.modelValue
+		if (typeof props.value === 'boolean') return props.value
+		return false
+	},
+	set(v: boolean) {
+		emit('update:modelValue', v)
+		emit('input', v)
 	}
+})
+
+const titleText = computed(() => props.title || (t('common.tip') as string))
+const cancelTextComputed = computed(() => props.cancelText || (t('common.cancel') as string))
+const confirmTextComputed = computed(() => props.confirmText || (t('common.ok') as string))
+
+const confirm = () => {
+	showValue.value = false
+	const msg = { from: 'confirm' as const, confirm: true as const }
+	emit('confirm', msg)
+	emit('event', msg)
+}
+
+const cancel = (type: 1 | 2) => {
+	if (props.prevent !== false && type === 2) return
+	showValue.value = false
+	const msg: { from: 'cancel' | 'mask'; cancel?: true; mask?: true } = { from: type === 1 ? 'cancel' : 'mask' }
+	if (type === 1) msg.cancel = true
+	else msg.mask = true
+	emit('cancel', msg)
+	emit('event', msg)
+}
 </script>
 
 <style lang="scss">

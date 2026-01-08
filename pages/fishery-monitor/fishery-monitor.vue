@@ -129,9 +129,6 @@ var socketMsgQueue = {
 };
 var Dissolved_Oxygen1, PH1, temperature1;
 //
-import {
-	mapState
-} from "vuex";
 	import dayjs from 'dayjs';
 	import { deviceList as deviceListApi } from '@/service/device'
 	import { updateTabbarText } from '@/lang/index'

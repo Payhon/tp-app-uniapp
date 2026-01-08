@@ -41,100 +41,84 @@
 	</view>
 </template>
 
-<script>
-	//
-	import { mapState } from "vuex";
-	//
-	export default {
-		// 
-		data() {
-			return {
-				uhead:'/static/image/uhead.png',
-				realname:'李萌',
-				phone:'18035274152',
-				email:'102451452@qq.com'
-			}
-		},
-		//
-		computed:{
-			...mapState({
-				userInfo:state=>state.userInfo
-			})
-		},
-		// 
-		onShow() {
-      uni.setNavigationBarTitle({
-        title: this.$t('pages.basicInfo')
-      })
-			this.getAccount();
-			//
-		},
-		// 
-		methods: {
-			// 
-			doChangeRealname:function(){
-				uni.navigateTo({
-					url:'./realname'
-				})
-			},
-			// 
-			doChangePhone:function(){
-				uni.navigateTo({
-					url:'./phone'
-				})
-			},
-			// 
-			doChangeEmail:function(){
-				uni.navigateTo({
-					url:'./email'
-				})
-			},
-			//
-			doOpenChangePwd:function(){
-				uni.navigateTo({
-					url:'../change-pwd/change-pwd'
-				})
-			},
-			//
-			doLogout:function(){
-				uni.showModal({
-					content: this.$t('pages.accounts.logoutConfirm'),
-					confirmText: this.$t('pages.accounts.logoutBtn'),
-					success:(res)=>{
-						if(res.confirm){
-							uni.removeStorageSync('currentYw')
-							uni.removeStorageSync('isAuth')
-							uni.removeStorageSync('access_token')
-							uni.removeStorageSync('ywId')
-							uni.removeStorageSync('currentGroup')
-							this.$store.commit('logout');
-							// 
-							uni.navigateTo({
-								url:'../login/login'
-							})
-							// 
-							uni.showToast({
-								title: this.$t('pages.accounts.logoutSuccess'),
-								icon:'none'
-							})
-							// 
-						}
-					}
-				});
-			},
-			//
-			getAccount(){ 
-				// 
-				if(this.userInfo){
-					this.realname	= this.userInfo.name;
-					this.phone		= this.userInfo.mobile;
-					this.email		= this.userInfo.email;
-				}
-				// 
-			}
-			//
-		}
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+import { useUserStore } from '@/store/user'
+
+const { t } = useI18n()
+const userStore = useUserStore()
+
+const uhead = ref<string>('/static/image/uhead.png')
+const realname = ref<string>('李萌')
+const phone = ref<string>('18035274152')
+const email = ref<string>('102451452@qq.com')
+
+const getAccount = () => {
+	const info = userStore.userInfo
+	if (info) {
+		realname.value = String(info.name ?? '')
+		phone.value = String(info.mobile ?? '')
+		email.value = String(info.email ?? '')
 	}
+}
+
+onShow(() => {
+	uni.setNavigationBarTitle({
+		title: t('pages.basicInfo') as string
+	})
+	getAccount()
+})
+
+const doChangeRealname = () => {
+	uni.navigateTo({
+		url: './realname'
+	})
+}
+
+const doChangePhone = () => {
+	uni.navigateTo({
+		url: './phone'
+	})
+}
+
+const doChangeEmail = () => {
+	uni.navigateTo({
+		url: './email'
+	})
+}
+
+const doOpenChangePwd = () => {
+	uni.navigateTo({
+		url: '../change-pwd/change-pwd'
+	})
+}
+
+const doLogout = () => {
+	uni.showModal({
+		content: t('pages.accounts.logoutConfirm') as string,
+		confirmText: t('pages.accounts.logoutBtn') as string,
+		success: (res) => {
+			if (res.confirm) {
+				uni.removeStorageSync('currentYw')
+				uni.removeStorageSync('isAuth')
+				uni.removeStorageSync('access_token')
+				uni.removeStorageSync('ywId')
+				uni.removeStorageSync('currentGroup')
+				userStore.logout()
+				uni.navigateTo({
+					url: '../login/login'
+				})
+				uni.showToast({
+					title: t('pages.accounts.logoutSuccess') as string,
+					icon: 'none'
+				})
+			}
+		}
+	})
+}
 </script>
 
 <style>

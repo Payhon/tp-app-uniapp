@@ -6,10 +6,10 @@
         <view class="tree-bar-cancel" :style="{'color':cancelColor}" hover-class="hover-c" @tap="_cancel">
           {{ $t('common.close')}}
         </view>
-        <view class="midInput" v-if="showSearch">
-          <input class="searchArea" @input="filterOp" :placeholder=`${{$t('common.pleaseInput') + title}}`/>
-          <icon  class="searchIcon" type="search" />
-        </view>
+	        <view class="midInput" v-if="showSearch">
+	          <input class="searchArea" @input="filterOp" :placeholder="$t('common.pleaseInput') + title" />
+	          <icon  class="searchIcon" type="search" />
+	        </view>
         <view class="tree-bar-title" v-else :style="{'color':titleColor}">{{title}}</view>
         <view class="tree-bar-confirm" :style="{'color':confirmColor}" hover-class="hover-c"
               @tap="_confirm">{{ $t('common.ok')}}</view>

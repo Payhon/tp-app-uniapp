@@ -1,74 +1,90 @@
-<script>
-	export default {
-		onLaunch: function() {
-			// console.log('App Launch')
-			// #ifdef APP-PLUS
-			try {
-				if (typeof uni.getPushClientId === 'function') {
-					uni.getPushClientId({
-						// success: (res) => {
-						// 	console.log('客户端推送标识cid:', res.cid);
-						// },
-						fail() {}
-					})
-				}
-			} catch (e) {}
-			// #endif
-		},
-		async onShow() {
-			// console.log('App Show')
-			// #ifdef APP-PLUS
-			if (typeof uni.onPushMessage !== 'function') return
-			uni.onPushMessage(async (res) => {
-				// console.log("收到推送消息：",res) //监听推送消息
-				if (res.type == 'receive') {  
-					uni.createPushMessage({  
-						title: res.data.title,  
-						content: res.data.content,  
-						payload: res.data.payload,  
-					})
-				} else if (res.type == 'click') {
-					const { alarm_id } = res.data.payload;
-					const headers = {
-						'Authorization': `Bearer ${uni.getStorageSync("access_token")}`
-					};
-					const apiUrl = `/api/v1/alarm/info/history/${alarm_id}`;
-					try {
-						const { code, data } = await this.fetchAlarmInfo(apiUrl, headers);
-						if (code === 200) {
-							this.navigateToDetail(data);
-						} else {
-							console.error('API request failed with code:', code);
-						}
-					} catch (error) {
-						console.error('API request failed:', error);
-					}
-				}
-			});
-			// #endif
-		},
-		methods: {
-			async fetchAlarmInfo(url, headers) {
-				const response = await this.API.apiRequest(url, null, 'get', headers);
-				return response && typeof response.then === 'function' 
-					? await response 
-					: response;
-			},
-			navigateToDetail(data) {
-				uni.navigateTo({
-					url: '/pages/notify/detail',
-					success: (navRes) => {
-						if (navRes.eventChannel) {
-							navRes.eventChannel.emit('acceptData', { item: data });
-						}
-					}
-				});
-			}
-		},
-		onHide: function() {
-			// console.log('App Hide')
-		}
+<script setup lang="ts">
+import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
+
+import api from '@/API/'
+
+type AlarmPayload = {
+	alarm_id?: string | number
+	[key: string]: unknown
+}
+
+type PushMessage = {
+	type?: 'receive' | 'click' | string
+	data?: {
+		title?: string
+		content?: string
+		payload?: AlarmPayload
+		[key: string]: unknown
 	}
+	[key: string]: unknown
+}
+
+const fetchAlarmInfo = async (url: string, headers?: Record<string, string>) => {
+	// NOTE: 现有 apiRequest 额外入参会被忽略；这里保留形参以避免业务侧调用习惯变化
+	const response = await (api as any).apiRequest(url, null, 'get', headers)
+	return response && typeof (response as any).then === 'function' ? await response : response
+}
+
+const navigateToDetail = (data: unknown) => {
+	uni.navigateTo({
+		url: '/pages/notify/detail',
+		success: (navRes) => {
+			if (navRes.eventChannel) {
+				navRes.eventChannel.emit('acceptData', { item: data })
+			}
+		}
+	})
+}
+
+onLaunch(() => {
+	// #ifdef APP-PLUS
+	try {
+		if (typeof uni.getPushClientId === 'function') {
+			uni.getPushClientId({
+				fail() {}
+			})
+		}
+	} catch (e) {}
+	// #endif
+})
+
+onShow(() => {
+	// #ifdef APP-PLUS
+	if (typeof uni.onPushMessage !== 'function') return
+	uni.onPushMessage(async (res: PushMessage) => {
+		if (res.type === 'receive') {
+			uni.createPushMessage({
+				title: res.data?.title,
+				content: res.data?.content,
+				payload: res.data?.payload
+			})
+			return
+		}
+
+		if (res.type === 'click') {
+			const alarmId = res.data?.payload?.alarm_id
+			const headers = {
+				Authorization: `Bearer ${uni.getStorageSync('access_token')}`
+			}
+			const apiUrl = `/api/v1/alarm/info/history/${alarmId ?? ''}`
+			try {
+				const { code, data } = await fetchAlarmInfo(apiUrl, headers)
+				if (code === 200) {
+					navigateToDetail(data)
+				} else {
+					console.error('API request failed with code:', code)
+				}
+			} catch (error) {
+				console.error('API request failed:', error)
+			}
+		}
+	})
+	// #endif
+})
+
+onHide(() => {
+	// no-op
+})
 </script>
 
 <style>

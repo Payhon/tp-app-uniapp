@@ -59,96 +59,104 @@
 	</view>
 </template>
 
-<script>
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import { registerByCode } from '@/service/app-auth'
+import api from '@/API/'
+import type { ApiResponse } from '@/types/api'
 
-export default {
-	components: { uniIcons },
-	data() {
-		return {
-			identifier: '',
-			verifyCode: '',
-			password: '',
-			confirmPassword: '',
-			agree: true,
-			loading: false
+const { t } = useI18n()
+
+const identifier = ref<string>('')
+const verifyCode = ref<string>('')
+const password = ref<string>('')
+const confirmPassword = ref<string>('')
+const agree = ref<boolean>(true)
+const loading = ref<boolean>(false)
+
+const submitDisabled = computed<boolean>(() => !password.value || !confirmPassword.value || !agree.value || loading.value)
+
+onLoad((query?: Record<string, string | undefined>) => {
+	identifier.value = query && query.identifier ? decodeURIComponent(query.identifier) : ''
+	verifyCode.value = query && query.code ? decodeURIComponent(query.code) : ''
+})
+
+const goBack = () => {
+	uni.navigateBack()
+}
+
+const goLogin = () => {
+	uni.navigateTo({ url: '/pages/login/login' })
+}
+
+const openContent = (key: string) => {
+	uni.navigateTo({ url: '/pages/content/page?key=' + key })
+}
+
+const onAgreeChange = (e: { detail: { value: unknown } }) => {
+	agree.value = Array.isArray(e.detail.value) && (e.detail.value as string[]).includes('1')
+}
+
+const validatePassword = (pwd: string) => {
+	const s = String(pwd || '')
+	if (!s.trim()) return { ok: false, msg: t('auth.password.pwdRequired') as string }
+	if (s.length < 8 || s.length > 16) return { ok: false, msg: t('auth.password.pwdLength') as string }
+	const hasLower = /[a-z]/.test(s)
+	const hasNumber = /\d/.test(s)
+	if (!hasLower || !hasNumber) return { ok: false, msg: t('auth.password.pwdRule') as string }
+	return { ok: true as const }
+}
+
+const afterRegisterSuccess = async (token: string) => {
+	uni.setStorageSync('access_token', token)
+	api
+		.apiRequest('/api/v1/user/tenant/id', {}, 'GET')
+		.then((rsp: ApiResponse) => {
+			if (rsp && rsp.code === 200 && rsp.data) uni.setStorageSync('tenant_id', rsp.data)
+		})
+		.catch(() => {})
+	uni.switchTab({ url: '/pages/fishery-monitor/fishery-monitor' })
+}
+
+const submit = async () => {
+	if (loading.value) return
+	if (!identifier.value || !verifyCode.value) {
+		uni.showToast({ title: t('auth.toast.missingParams') as string, icon: 'none' })
+		return
+	}
+	if (!agree.value) {
+		uni.showToast({ title: t('auth.toast.pleaseAgree') as string, icon: 'none' })
+		return
+	}
+	const p1 = validatePassword(password.value)
+	if (!p1.ok) {
+		uni.showToast({ title: p1.msg, icon: 'none' })
+		return
+	}
+	if (password.value !== confirmPassword.value) {
+		uni.showToast({ title: t('auth.toast.passwordMismatch') as string, icon: 'none' })
+		return
+	}
+	loading.value = true
+	try {
+		const resp = (await registerByCode(identifier.value, verifyCode.value, password.value)) as ApiResponse<{ token?: string }>
+		if (resp && resp.code === 200 && resp.data && resp.data.token) {
+			await afterRegisterSuccess(resp.data.token)
+			uni.showToast({ title: t('auth.register.success') as string, icon: 'none' })
+		} else {
+			uni.showToast({
+				title: (resp && (resp.message as string)) || (t('auth.register.failed') as string),
+				icon: 'none'
+			})
 		}
-	},
-	computed: {
-		submitDisabled() {
-			return !this.password || !this.confirmPassword || !this.agree || this.loading
-		}
-	},
-	onLoad(query) {
-		this.identifier = query && query.identifier ? decodeURIComponent(query.identifier) : ''
-		this.verifyCode = query && query.code ? decodeURIComponent(query.code) : ''
-	},
-	methods: {
-		goBack() {
-			uni.navigateBack()
-		},
-		goLogin() {
-			uni.navigateTo({ url: '/pages/login/login' })
-		},
-		openContent(key) {
-			uni.navigateTo({ url: '/pages/content/page?key=' + key })
-		},
-		onAgreeChange(e) {
-			this.agree = Array.isArray(e.detail.value) && e.detail.value.includes('1')
-		},
-		validatePassword(pwd) {
-			const s = String(pwd || '')
-			if (!s.trim()) return { ok: false, msg: this.$t('auth.password.pwdRequired') }
-			if (s.length < 8 || s.length > 16) return { ok: false, msg: this.$t('auth.password.pwdLength') }
-			const hasLower = /[a-z]/.test(s)
-			const hasNumber = /\d/.test(s)
-			if (!hasLower || !hasNumber) return { ok: false, msg: this.$t('auth.password.pwdRule') }
-			return { ok: true }
-		},
-		async afterRegisterSuccess(token) {
-			uni.setStorageSync('access_token', token)
-			this.API.apiRequest('/api/v1/user/tenant/id', {}, 'GET')
-				.then((rsp) => {
-					if (rsp && rsp.code === 200 && rsp.data) uni.setStorageSync('tenant_id', rsp.data)
-				})
-				.catch(() => {})
-			uni.switchTab({ url: '/pages/fishery-monitor/fishery-monitor' })
-		},
-		async submit() {
-			if (this.loading) return
-			if (!this.identifier || !this.verifyCode) {
-				uni.showToast({ title: this.$t('auth.toast.missingParams'), icon: 'none' })
-				return
-			}
-			if (!this.agree) {
-				uni.showToast({ title: this.$t('auth.toast.pleaseAgree'), icon: 'none' })
-				return
-			}
-			const p1 = this.validatePassword(this.password)
-			if (!p1.ok) {
-				uni.showToast({ title: p1.msg, icon: 'none' })
-				return
-			}
-			if (this.password !== this.confirmPassword) {
-				uni.showToast({ title: this.$t('auth.toast.passwordMismatch'), icon: 'none' })
-				return
-			}
-			this.loading = true
-			try {
-				const resp = await registerByCode(this.identifier, this.verifyCode, this.password)
-				if (resp && resp.code === 200 && resp.data && resp.data.token) {
-					await this.afterRegisterSuccess(resp.data.token)
-					uni.showToast({ title: this.$t('auth.register.success'), icon: 'none' })
-				} else {
-					uni.showToast({ title: (resp && resp.message) || this.$t('auth.register.failed'), icon: 'none' })
-				}
-			} catch (e) {
-				uni.showToast({ title: this.$t('auth.toast.networkError'), icon: 'none' })
-			} finally {
-				this.loading = false
-			}
-		}
+	} catch (e) {
+		uni.showToast({ title: t('auth.toast.networkError') as string, icon: 'none' })
+	} finally {
+		loading.value = false
 	}
 }
 </script>

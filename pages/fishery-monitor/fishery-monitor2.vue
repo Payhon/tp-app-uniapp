@@ -227,9 +227,6 @@
 	};
 	var Dissolved_Oxygen1, PH1, temperature1;
 	//
-	import {
-		mapState
-	} from "vuex";
 	import { getDeviceInfo, getWindowInfo } from '@/common/platform'
 	//
 	export default {

@@ -73,155 +73,177 @@
 	</view>
 </template>
 
-<script>
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import { loginByPassword, wxmpLogin } from '@/service/app-auth'
+import api from '@/API/'
+import type { ApiResponse } from '@/types/api'
 
-export default {
-	components: {
-		uniIcons
-	},
-	data() {
+type LoginTab = 'phone' | 'email'
+
+type UniLoginResult = {
+	code: string
+	[key: string]: unknown
+}
+
+type PushClientIdResult = {
+	cid?: string
+	[key: string]: unknown
+}
+
+const { t } = useI18n()
+
+const activeTab = ref<LoginTab>('phone')
+const identifier = ref<string>('')
+const password = ref<string>('')
+const agree = ref<boolean>(true)
+const loading = ref<boolean>(false)
+
+const canSubmit = computed<boolean>(() => !!identifier.value && !!password.value && !!agree.value && !loading.value)
+
+const onAgreeChange = (e: { detail: { value: unknown } }) => {
+	agree.value = Array.isArray(e.detail.value) && (e.detail.value as string[]).includes('1')
+}
+
+const validateIdentifier = () => {
+	const v = String(identifier.value || '').trim()
+	if (!v) {
 		return {
-			activeTab: 'phone',
-			identifier: '',
-			password: '',
-			agree: true,
-			loading: false
+			ok: false as const,
+			msg: activeTab.value === 'phone' ? (t('auth.login.placeholderPhone') as string) : (t('auth.login.placeholderEmail') as string)
 		}
-	},
-	computed: {
-		canSubmit() {
-			return !!this.identifier && !!this.password && !!this.agree && !this.loading
+	}
+	if (activeTab.value === 'email') {
+		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+		if (!emailRegex.test(v)) return { ok: false as const, msg: t('auth.login.invalidEmail') as string }
+		return { ok: true as const }
+	}
+	const phoneRegex = /^1[3-9]\d{9}$/
+	if (!phoneRegex.test(v.replace(/\s+/g, ''))) return { ok: false as const, msg: t('auth.login.invalidPhone') as string }
+	return { ok: true as const }
+}
+
+const validatePassword = () => {
+	if (!String(password.value || '').trim()) return { ok: false as const, msg: t('auth.login.placeholderPassword') as string }
+	return { ok: true as const }
+}
+
+const openContent = (key: string) => {
+	uni.navigateTo({
+		url: '/pages/content/page?key=' + key
+	})
+}
+
+const goRegister = () => {
+	uni.navigateTo({
+		url: '/pages/login/register'
+	})
+}
+
+const goForgot = () => {
+	uni.navigateTo({
+		url: '/pages/login/forgot'
+	})
+}
+
+const afterLoginSuccess = async (token: string) => {
+	uni.setStorageSync('access_token', token)
+
+	// 获取并缓存租户ID（用于 APP 内容接口 X-TenantID Header）
+	api
+		.apiRequest('/api/v1/user/tenant/id', {}, 'GET')
+		.then((rsp: ApiResponse) => {
+			if (rsp && rsp.code === 200 && rsp.data) uni.setStorageSync('tenant_id', rsp.data)
+		})
+		.catch(() => {})
+
+	// #ifdef APP-PLUS
+	try {
+		uni.getPushClientId({
+			success: (res: PushClientIdResult) => {
+				const cid = res && res.cid ? res.cid : ''
+				if (!cid) return
+				api
+					.apiRequest('/api/v1/push-id', { push_id: cid }, 'POST')
+					.then(() => uni.setStorageSync('push_id', cid))
+					.catch(() => uni.setStorageSync('push_id', cid))
+			}
+		})
+	} catch (e) {}
+	// #endif
+
+	uni.switchTab({
+		url: '/pages/fishery-monitor/fishery-monitor'
+	})
+}
+
+const doLogin = async () => {
+	if (loading.value) return
+	if (!agree.value) {
+		uni.showToast({ title: t('auth.toast.pleaseAgree') as string, icon: 'none' })
+		return
+	}
+	const idRes = validateIdentifier()
+	if (!idRes.ok) {
+		uni.showToast({ title: idRes.msg, icon: 'none' })
+		return
+	}
+	const pwdRes = validatePassword()
+	if (!pwdRes.ok) {
+		uni.showToast({ title: pwdRes.msg, icon: 'none' })
+		return
+	}
+
+	loading.value = true
+	try {
+		const resp = (await loginByPassword(identifier.value, password.value)) as ApiResponse<{ token?: string }>
+		if (resp && resp.code === 200 && resp.data && resp.data.token) {
+			await afterLoginSuccess(resp.data.token)
+			uni.showToast({ title: t('auth.login.success') as string, icon: 'none' })
+		} else {
+			uni.showToast({ title: (resp && (resp.message as string)) || (t('auth.login.failed') as string), icon: 'none' })
 		}
-	},
-	methods: {
-		onAgreeChange(e) {
-			this.agree = Array.isArray(e.detail.value) && e.detail.value.includes('1')
-		},
-		validateIdentifier() {
-			const v = String(this.identifier || '').trim()
-			if (!v) return { ok: false, msg: this.activeTab === 'phone' ? this.$t('auth.login.placeholderPhone') : this.$t('auth.login.placeholderEmail') }
-			if (this.activeTab === 'email') {
-				const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-				if (!emailRegex.test(v)) return { ok: false, msg: this.$t('auth.login.invalidEmail') }
-				return { ok: true }
-			}
-			const phoneRegex = /^1[3-9]\d{9}$/
-			if (!phoneRegex.test(v.replace(/\s+/g, ''))) return { ok: false, msg: this.$t('auth.login.invalidPhone') }
-			return { ok: true }
-		},
-		validatePassword() {
-			if (!String(this.password || '').trim()) return { ok: false, msg: this.$t('auth.login.placeholderPassword') }
-			return { ok: true }
-		},
-		openContent(key) {
-			uni.navigateTo({
-				url: '/pages/content/page?key=' + key
-			})
-		},
-		goRegister() {
-			uni.navigateTo({
-				url: '/pages/login/register'
-			})
-		},
-		goForgot() {
-			uni.navigateTo({
-				url: '/pages/login/forgot'
-			})
-		},
-		async afterLoginSuccess(token) {
-			uni.setStorageSync('access_token', token)
-
-			// 获取并缓存租户ID（用于 APP 内容接口 X-TenantID Header）
-			this.API.apiRequest('/api/v1/user/tenant/id', {}, 'GET')
-				.then((rsp) => {
-					if (rsp && rsp.code === 200 && rsp.data) uni.setStorageSync('tenant_id', rsp.data)
-				})
-				.catch(() => {})
-
-			// #ifdef APP-PLUS
-			try {
-				uni.getPushClientId({
-					success: (res) => {
-						const cid = res && res.cid ? res.cid : ''
-						if (!cid) return
-						this.API.apiRequest('/api/v1/push-id', { push_id: cid }, 'POST')
-							.then(() => uni.setStorageSync('push_id', cid))
-							.catch(() => uni.setStorageSync('push_id', cid))
-					}
-				})
-			} catch (e) {}
-			// #endif
-
-			uni.switchTab({
-				url: '/pages/fishery-monitor/fishery-monitor'
-			})
-		},
-		async doLogin() {
-			if (this.loading) return
-			if (!this.agree) {
-				uni.showToast({ title: this.$t('auth.toast.pleaseAgree'), icon: 'none' })
-				return
-			}
-			const idRes = this.validateIdentifier()
-			if (!idRes.ok) {
-				uni.showToast({ title: idRes.msg, icon: 'none' })
-				return
-			}
-			const pwdRes = this.validatePassword()
-			if (!pwdRes.ok) {
-				uni.showToast({ title: pwdRes.msg, icon: 'none' })
-				return
-			}
-
-			this.loading = true
-			try {
-				const resp = await loginByPassword(this.identifier, this.password)
-				if (resp && resp.code === 200 && resp.data && resp.data.token) {
-					await this.afterLoginSuccess(resp.data.token)
-					uni.showToast({ title: this.$t('auth.login.success'), icon: 'none' })
-				} else {
-					uni.showToast({ title: (resp && resp.message) || this.$t('auth.login.failed'), icon: 'none' })
-				}
-			} catch (e) {
-				uni.showToast({ title: this.$t('auth.toast.networkError'), icon: 'none' })
-			} finally {
-				this.loading = false
-			}
-		},
-		// #ifdef MP-WEIXIN
-		async doWxmpLogin() {
-			if (this.loading) return
-			if (!this.agree) {
-				uni.showToast({ title: this.$t('auth.toast.pleaseAgree'), icon: 'none' })
-				return
-			}
-			this.loading = true
-			try {
-				const loginRes = await new Promise((resolve, reject) => {
-					uni.login({
-						provider: 'weixin',
-						success: resolve,
-						fail: reject
-					})
-				})
-				const resp = await wxmpLogin(loginRes.code)
-				if (resp && resp.code === 200 && resp.data && resp.data.token) {
-					await this.afterLoginSuccess(resp.data.token)
-					uni.showToast({ title: this.$t('auth.login.success'), icon: 'none' })
-				} else {
-					uni.showToast({ title: (resp && resp.message) || this.$t('auth.login.failed'), icon: 'none' })
-				}
-			} catch (e) {
-				uni.showToast({ title: this.$t('auth.login.failedRetry'), icon: 'none' })
-			} finally {
-				this.loading = false
-			}
-		}
-		// #endif
+	} catch (e) {
+		uni.showToast({ title: t('auth.toast.networkError') as string, icon: 'none' })
+	} finally {
+		loading.value = false
 	}
 }
+
+// #ifdef MP-WEIXIN
+const doWxmpLogin = async () => {
+	if (loading.value) return
+	if (!agree.value) {
+		uni.showToast({ title: t('auth.toast.pleaseAgree') as string, icon: 'none' })
+		return
+	}
+	loading.value = true
+	try {
+		// NOTE: 各平台 LoginRes 类型定义存在差异，这里避免过度约束导致 HBuilderX 编译报错
+		const loginRes = await new Promise<any>((resolve, reject) => {
+			uni.login({
+				provider: 'weixin',
+				success: resolve,
+				fail: reject
+			})
+		})
+		const resp = (await wxmpLogin(loginRes.code)) as ApiResponse<{ token?: string }>
+		if (resp && resp.code === 200 && resp.data && resp.data.token) {
+			await afterLoginSuccess(resp.data.token)
+			uni.showToast({ title: t('auth.login.success') as string, icon: 'none' })
+		} else {
+			uni.showToast({ title: (resp && (resp.message as string)) || (t('auth.login.failed') as string), icon: 'none' })
+		}
+	} catch (e) {
+		uni.showToast({ title: t('auth.login.failedRetry') as string, icon: 'none' })
+	} finally {
+		loading.value = false
+	}
+}
+// #endif
 </script>
 
 <style>

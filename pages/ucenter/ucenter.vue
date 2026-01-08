@@ -154,10 +154,7 @@
 
 <script>
 	//
-	import {
-		mapState
-	} from "vuex";
-	import { AVAILABLE_LANGUAGES, changeLanguage } from '@/lang/index.js'
+	import { AVAILABLE_LANGUAGES, changeLanguage } from '@/lang/index'
 	// 
 	export default {
 		// 
@@ -178,14 +175,6 @@
 					lang => lang.code === (uni.getStorageSync('language') || 'zh-CN')
 				)?.label || '中文',
 			}
-		},
-		//
-		computed: {
-			...mapState({
-				loginStatus: state => state.loginStatus,
-				token: state => state.token,
-				// userInfo: state => state.userInfo
-			})
 		},
 	onLoad() {
 	},

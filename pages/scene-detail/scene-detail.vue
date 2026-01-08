@@ -38,10 +38,10 @@
           <view class="section-header">
             <text class="section-title">{{ $t('pages.sceneDetail.actions') }}</text>
           </view>
-          <actions-edit
-            :actions.sync="formData.actions"
-            :isInSceneEdit="true"
-          ></actions-edit>
+	          <actions-edit
+	            v-model:actions="formData.actions"
+	            :isInSceneEdit="true"
+	          ></actions-edit>
         </view>
 
         <!-- Save Button -->

@@ -16,94 +16,71 @@
 	</view>
 </template>
 
-<script>
-	//
-	import { mapState } from "vuex";
-	//
-	export default {
-		data() {
-			return {
-				id:'',
-				loading:false,
-				disabled:true,
-				upwd:'',
-				rpwd:''
-			}
-		},
-		//
-		computed:{
-			...mapState({
-				userInfo:state=>state.userInfo
-			})
-		},
-		//
-		watch:{
-			upwd(){
-				this.onBtnChange();
-			},
-			rpwd(){
-				this.onBtnChange();
-			}
-		},
-		//
-		onShow() {
-      uni.setNavigationBarTitle({
-        title: this.$t('pages.modifyPassword')
-      })
-			this.getAccount();
-		},
-		methods: {
-			// 改变按钮状态
-			onBtnChange(){ 
-				// 
-				if( this.upwd && this.rpwd && (this.upwd === this.rpwd) ){ 
-					this.disabled = false; 
-					return;
-				}
-				// 
-				this.disabled = true;
-				// 
-			},
-			//
-			getAccount(){ 
-				// 
-				if(this.userInfo){
-					this.id				= this.userInfo.id;
-				}
-				// 
-			},
-			//
-			doUpdateSubmit(){
-				//
-				this.handleUpdate();
-				//
-			},
-			//
-			handleUpdate(){	
-				//
-				this.loading = true;
-				//
-				this.$H.post('/user/update',{id:this.id,password:this.upwd,password_confirmation:this.rpwd},{toke:true}).then(res=>{
-					// 
-					this.loading = this.disabled = false;
-					// 
-					return uni.showToast({
-						title: this.$t('pages.changePassword.successMsg'),
-						success:()=>{
-							uni.navigateBack({ delta:1 })
-						}
-					})
-					//
-				}).catch(err=>{
-					// 
-					this.loading = this.disabled = false;
-					// 
-				})
-				//
-			}
-			//
-		}
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
+import http from '@/common/request'
+import { useUserStore } from '@/store/user'
+
+const { t } = useI18n()
+const userStore = useUserStore()
+
+const id = ref<string | number>('')
+const loading = ref<boolean>(false)
+const disabled = ref<boolean>(true)
+const upwd = ref<string>('')
+const rpwd = ref<string>('')
+
+const onBtnChange = () => {
+	if (upwd.value && rpwd.value && upwd.value === rpwd.value) {
+		disabled.value = false
+		return
 	}
+	disabled.value = true
+}
+
+watch([upwd, rpwd], onBtnChange)
+
+const getAccount = () => {
+	const info = userStore.userInfo
+	if (info) {
+		id.value = info.id ?? ''
+	}
+}
+
+onShow(() => {
+	uni.setNavigationBarTitle({
+		title: t('pages.modifyPassword') as string
+	})
+	getAccount()
+	onBtnChange()
+})
+
+const handleUpdate = () => {
+	loading.value = true
+	http
+		.post('/user/update', { id: id.value, password: upwd.value, password_confirmation: rpwd.value }, { toke: true })
+		.then(() => {
+			loading.value = false
+			disabled.value = false
+			uni.showToast({
+				title: t('pages.changePassword.successMsg') as string,
+				success: () => {
+					uni.navigateBack({ delta: 1 })
+				}
+			})
+		})
+		.catch(() => {
+			loading.value = false
+			disabled.value = false
+		})
+}
+
+const doUpdateSubmit = () => {
+	handleUpdate()
+}
 </script>
 
 <style>

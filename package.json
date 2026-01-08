@@ -14,8 +14,16 @@
         ]
     },
     "dependencies": {
-        "dayjs": "^1.11.8",
-        "echarts": "^5.4.3",
-        "vue-i18n": "^8.28.2"
-    }
+    "dayjs": "^1.11.8",
+    "echarts": "^5.4.3",
+    "moment": "2.30.1",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13",
+    "vue-i18n": "^9.14.1"
+  },
+    "devDependencies": {
+        "@vue/runtime-core": "3.5.26",
+        "typescript": "^5.6.3"
+    },
+    "packageManager": "pnpm@10.8.0+sha512.0e82714d1b5b43c74610193cb20734897c1d00de89d0e18420aebc5977fa13d780a9cb05734624e81ebd81cc876cd464794850641c48b9544326b5622ca29971"
 }

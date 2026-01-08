@@ -1,6 +1,6 @@
 //
 import $C from '@/common/config.js';
-import $store from '@/store/index.js';
+import $store from '@/store';
 // 
 export default{
 	//

@@ -114,6 +114,6 @@
         "enable" : false
     },
     "fallbackLocale" : "zh-Hans",
-    "vueVersion" : "2",
+    "vueVersion" : "3",
     "locale" : "zh-Hans"
 }

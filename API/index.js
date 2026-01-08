@@ -1,4 +1,3 @@
-import login from '../store/login'
 import http from './interface'
 import i18n from '@/lang/index'
 import $C from '@/common/config'
@@ -31,8 +30,8 @@ export const apiRequest = (url, data, method) => {
 			const statusCode = response.data.code;
 			if (statusCode === 401 || statusCode === 403 || statusCode === 402) {
 				uni.showModal({
-					title: i18n.t('common.tip'),
-					content: i18n.t('auth.sessionExpired'),
+					title: i18n.global.t('common.tip'),
+					content: i18n.global.t('auth.sessionExpired'),
 					showCancel: false,
 					success: function(res) {
 						uni.clearStorageSync() //清空所有缓存

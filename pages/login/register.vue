@@ -48,104 +48,117 @@
 	</view>
 </template>
 
-<script>
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onUnload } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import { sendVerifyCode } from '@/service/app-auth'
+import type { ApiResponse } from '@/types/api'
 
-export default {
-	components: { uniIcons },
-	data() {
-		return {
-			identifier: '',
-			verifyCode: '',
-			countdown: 0,
-			timer: null,
-			loadingCode: false,
-			loadingNext: false
+const { t } = useI18n()
+
+const identifier = ref<string>('')
+const verifyCode = ref<string>('')
+
+const countdown = ref<number>(0)
+// uni-app 不同平台 setInterval 返回值类型不一致，这里用 number 做兼容
+const timer = ref<number | null>(null)
+
+const loadingCode = ref<boolean>(false)
+const loadingNext = ref<boolean>(false)
+
+const isIdentifierValid = computed<boolean>(() => {
+	const v = String(identifier.value || '').trim()
+	if (!v) return false
+	if (v.includes('@')) {
+		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+		return emailRegex.test(v)
+	}
+	const phoneRegex = /^1[3-9]\d{9}$/
+	return phoneRegex.test(v.replace(/\s+/g, ''))
+})
+
+const codeBtnText = computed<string>(() => {
+	if (loadingCode.value) return t('auth.register.sending') as string
+	if (countdown.value > 0) return `${countdown.value}s`
+	return t('auth.register.getCode') as string
+})
+
+const codeBtnDisabled = computed<boolean>(() => {
+	return loadingCode.value || countdown.value > 0 || !isIdentifierValid.value
+})
+
+const nextDisabled = computed<boolean>(() => {
+	return !isIdentifierValid.value || !String(verifyCode.value || '').trim() || loadingNext.value
+})
+
+const goBack = () => {
+	uni.navigateBack()
+}
+
+const goLogin = () => {
+	uni.navigateTo({ url: '/pages/login/login' })
+}
+
+const clearTimer = () => {
+	if (timer.value !== null) clearInterval(timer.value)
+	timer.value = null
+}
+
+const startCountdown = () => {
+	clearTimer()
+	countdown.value = 60
+	timer.value = setInterval(() => {
+		countdown.value -= 1
+		if (countdown.value <= 0) clearTimer()
+	}, 1000) as unknown as number
+}
+
+const sendCode = async () => {
+	if (codeBtnDisabled.value) return
+	if (!isIdentifierValid.value) {
+		uni.showToast({ title: t('auth.register.invalidIdentifier') as string, icon: 'none' })
+		return
+	}
+	loadingCode.value = true
+	try {
+		const resp = (await sendVerifyCode(identifier.value, 'REGISTER')) as ApiResponse
+		if (resp && resp.code === 200) {
+			uni.showToast({ title: t('auth.register.codeSent') as string, icon: 'none' })
+			startCountdown()
+		} else {
+			uni.showToast({
+				title: (resp && (resp.message as string)) || (t('auth.register.sendFailed') as string),
+				icon: 'none'
+			})
 		}
-	},
-	computed: {
-		codeBtnText() {
-			if (this.loadingCode) return this.$t('auth.register.sending')
-			if (this.countdown > 0) return `${this.countdown}s`
-			return this.$t('auth.register.getCode')
-		},
-		codeBtnDisabled() {
-			return this.loadingCode || this.countdown > 0 || !this.isIdentifierValid
-		},
-		isIdentifierValid() {
-			const v = String(this.identifier || '').trim()
-			if (!v) return false
-			if (v.includes('@')) {
-				const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-				return emailRegex.test(v)
-			}
-			const phoneRegex = /^1[3-9]\d{9}$/
-			return phoneRegex.test(v.replace(/\s+/g, ''))
-		},
-		nextDisabled() {
-			return !this.isIdentifierValid || !String(this.verifyCode || '').trim() || this.loadingNext
-		}
-	},
-	onUnload() {
-		this.clearTimer()
-	},
-	methods: {
-		goBack() {
-			uni.navigateBack()
-		},
-		goLogin() {
-			uni.navigateTo({ url: '/pages/login/login' })
-		},
-		clearTimer() {
-			if (this.timer) clearInterval(this.timer)
-			this.timer = null
-		},
-		startCountdown() {
-			this.clearTimer()
-			this.countdown = 60
-			this.timer = setInterval(() => {
-				this.countdown -= 1
-				if (this.countdown <= 0) this.clearTimer()
-			}, 1000)
-		},
-		async sendCode() {
-			if (this.codeBtnDisabled) return
-			if (!this.isIdentifierValid) {
-				uni.showToast({ title: this.$t('auth.register.invalidIdentifier'), icon: 'none' })
-				return
-			}
-			this.loadingCode = true
-			try {
-				const resp = await sendVerifyCode(this.identifier, 'REGISTER')
-				if (resp && resp.code === 200) {
-					uni.showToast({ title: this.$t('auth.register.codeSent'), icon: 'none' })
-					this.startCountdown()
-				} else {
-					uni.showToast({ title: (resp && resp.message) || this.$t('auth.register.sendFailed'), icon: 'none' })
-				}
-			} catch (e) {
-				uni.showToast({ title: this.$t('auth.toast.networkError'), icon: 'none' })
-			} finally {
-				this.loadingCode = false
-			}
-		},
-		async nextStep() {
-			if (this.nextDisabled) return
-			this.loadingNext = true
-			try {
-				const url =
-					'/pages/login/register-password?identifier=' +
-					encodeURIComponent(String(this.identifier || '').trim()) +
-					'&code=' +
-					encodeURIComponent(String(this.verifyCode || '').trim())
-				uni.navigateTo({ url })
-			} finally {
-				this.loadingNext = false
-			}
-		}
+	} catch (e) {
+		uni.showToast({ title: t('auth.toast.networkError') as string, icon: 'none' })
+	} finally {
+		loadingCode.value = false
 	}
 }
+
+const nextStep = async () => {
+	if (nextDisabled.value) return
+	loadingNext.value = true
+	try {
+		const url =
+			'/pages/login/register-password?identifier=' +
+			encodeURIComponent(String(identifier.value || '').trim()) +
+			'&code=' +
+			encodeURIComponent(String(verifyCode.value || '').trim())
+		uni.navigateTo({ url })
+	} finally {
+		loadingNext.value = false
+	}
+}
+
+onUnload(() => {
+	clearTimer()
+})
 </script>
 
 <style>

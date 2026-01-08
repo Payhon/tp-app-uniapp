@@ -42,75 +42,77 @@
 	</view>
 </template>
 
-<script>
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
+
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import { resetPasswordByCode } from '@/service/app-auth'
+import type { ApiResponse } from '@/types/api'
 
-export default {
-	components: { uniIcons },
-	data() {
-		return {
-			identifier: '',
-			verifyCode: '',
-			password: '',
-			confirmPassword: '',
-			loading: false
+const { t } = useI18n()
+
+const identifier = ref<string>('')
+const verifyCode = ref<string>('')
+const password = ref<string>('')
+const confirmPassword = ref<string>('')
+const loading = ref<boolean>(false)
+
+const submitDisabled = computed<boolean>(() => !password.value || !confirmPassword.value || loading.value)
+
+onLoad((query?: Record<string, string | undefined>) => {
+	identifier.value = query && query.identifier ? decodeURIComponent(query.identifier) : ''
+	verifyCode.value = query && query.code ? decodeURIComponent(query.code) : ''
+})
+
+const goBack = () => {
+	uni.navigateBack()
+}
+
+const validatePassword = (pwd: string) => {
+	const s = String(pwd || '')
+	if (!s.trim()) return { ok: false as const, msg: t('auth.password.pwdRequired') as string }
+	if (s.length < 8 || s.length > 16) return { ok: false as const, msg: t('auth.password.pwdLength') as string }
+	const hasLower = /[a-z]/.test(s)
+	const hasNumber = /\d/.test(s)
+	if (!hasLower || !hasNumber) return { ok: false as const, msg: t('auth.password.pwdRule') as string }
+	return { ok: true as const }
+}
+
+const submit = async () => {
+	if (loading.value) return
+	if (!identifier.value || !verifyCode.value) {
+		uni.showToast({ title: t('auth.toast.missingParams') as string, icon: 'none' })
+		return
+	}
+	const p1 = validatePassword(password.value)
+	if (!p1.ok) {
+		uni.showToast({ title: p1.msg, icon: 'none' })
+		return
+	}
+	if (password.value !== confirmPassword.value) {
+		uni.showToast({ title: t('auth.toast.passwordMismatch') as string, icon: 'none' })
+		return
+	}
+	loading.value = true
+	try {
+		const resp = (await resetPasswordByCode(identifier.value, verifyCode.value, password.value)) as ApiResponse
+		if (resp && resp.code === 200) {
+			uni.showToast({ title: t('auth.password.resetSuccess') as string, icon: 'none' })
+			setTimeout(() => {
+				uni.reLaunch({ url: '/pages/login/login' })
+			}, 400)
+		} else {
+			uni.showToast({
+				title: (resp && (resp.message as string)) || (t('auth.password.resetFailed') as string),
+				icon: 'none'
+			})
 		}
-	},
-	computed: {
-		submitDisabled() {
-			return !this.password || !this.confirmPassword || this.loading
-		}
-	},
-	onLoad(query) {
-		this.identifier = query && query.identifier ? decodeURIComponent(query.identifier) : ''
-		this.verifyCode = query && query.code ? decodeURIComponent(query.code) : ''
-	},
-	methods: {
-		goBack() {
-			uni.navigateBack()
-		},
-		validatePassword(pwd) {
-			const s = String(pwd || '')
-			if (!s.trim()) return { ok: false, msg: this.$t('auth.password.pwdRequired') }
-			if (s.length < 8 || s.length > 16) return { ok: false, msg: this.$t('auth.password.pwdLength') }
-			const hasLower = /[a-z]/.test(s)
-			const hasNumber = /\d/.test(s)
-			if (!hasLower || !hasNumber) return { ok: false, msg: this.$t('auth.password.pwdRule') }
-			return { ok: true }
-		},
-		async submit() {
-			if (this.loading) return
-			if (!this.identifier || !this.verifyCode) {
-				uni.showToast({ title: this.$t('auth.toast.missingParams'), icon: 'none' })
-				return
-			}
-			const p1 = this.validatePassword(this.password)
-			if (!p1.ok) {
-				uni.showToast({ title: p1.msg, icon: 'none' })
-				return
-			}
-			if (this.password !== this.confirmPassword) {
-				uni.showToast({ title: this.$t('auth.toast.passwordMismatch'), icon: 'none' })
-				return
-			}
-			this.loading = true
-			try {
-				const resp = await resetPasswordByCode(this.identifier, this.verifyCode, this.password)
-				if (resp && resp.code === 200) {
-					uni.showToast({ title: this.$t('auth.password.resetSuccess'), icon: 'none' })
-					setTimeout(() => {
-						uni.reLaunch({ url: '/pages/login/login' })
-					}, 400)
-				} else {
-					uni.showToast({ title: (resp && resp.message) || this.$t('auth.password.resetFailed'), icon: 'none' })
-				}
-			} catch (e) {
-				uni.showToast({ title: this.$t('auth.toast.networkError'), icon: 'none' })
-			} finally {
-				this.loading = false
-			}
-		}
+	} catch (e) {
+		uni.showToast({ title: t('auth.toast.networkError') as string, icon: 'none' })
+	} finally {
+		loading.value = false
 	}
 }
 </script>

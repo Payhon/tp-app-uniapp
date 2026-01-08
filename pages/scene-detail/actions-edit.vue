@@ -146,12 +146,12 @@
                   :placeholder="$t('pages.sceneDetail.actionsEdit.examplePrefix') + instructItem.placeholder"
                   class="w-full uni-input"
                   />
-                  <switch
-                  v-if="instructItem.actionParamData.data_type === 'boolean'"
-                  v-model="instructItem.actionValue"
-                  @change="() => actionValueChange(actionGroupIndex, instructIndex)"
-                  ></switch>
-              </view>
+	                  <switch
+	                  v-if="instructItem.actionParamData.data_type === 'boolean'"
+	                  :checked="!!instructItem.actionValue"
+	                  @change="(e) => { instructItem.actionValue = e.detail.value; actionValueChange(actionGroupIndex, instructIndex) }"
+	                  ></switch>
+	              </view>
 
               <view v-else class="w-60">
                   <input
