@@ -217,6 +217,11 @@ export const deleteDevice = (params: IdParams) => {
 export const setDeviceScriptEnable = (params: Params | null) => {
 	return apiRequest<unknown>('/api/v1/data_script/enable', params, 'PUT')
 }
+
+// 设备地图-遥测信息（用于首页电量等概览）
+export const deviceMapTelemetry = (id: string | number) => {
+	return apiRequest<unknown>(`/api/v1/device/map/telemetry/${id}`, null, 'GET')
+}
   
   // 获取数据处理列表
 export const getDataScriptList = (params: Params | null) => {

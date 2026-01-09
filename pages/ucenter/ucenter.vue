@@ -183,6 +183,11 @@
 		uni.setNavigationBarTitle({
 			title: this.$t('pages.userCenter')
 		})
+		// #ifdef MP-WEIXIN
+		try {
+			this.getTabBar && this.getTabBar().setData({ selected: 1 })
+		} catch (e) {}
+		// #endif
 	},
 		methods: {
 			ensureLogin() {

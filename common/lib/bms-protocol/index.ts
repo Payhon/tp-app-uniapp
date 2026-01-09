@@ -8,4 +8,5 @@ export * from './transport';
 export * from './uni-ble-transport';
 export * from './mqtt';
 export * from './uni-mqtt-ws-transport';
+export * from './uni-mqtt-socket-transport';
 export * from './client';

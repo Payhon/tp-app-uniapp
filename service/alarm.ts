@@ -45,6 +45,16 @@ export const infoList = (params: Params | null) => {
 export const alarmHistory = (params: Params | null) => {
 	return apiRequest<unknown>('/api/v1/alarm/info/history', params, 'GET')
 }
+
+/** 告警历史详情 */
+export const alarmHistoryDetail = (id: string) => {
+	return apiRequest<unknown>(`/api/v1/alarm/info/history/${encodeURIComponent(String(id || ''))}`, {}, 'GET')
+}
+
+/** 告警处理完成 */
+export const handleAlarmHistory = (params: Params | null) => {
+	return apiRequest<unknown>('/api/v1/alarm/info/history/handle', params, 'PUT')
+}
   
   /** 告警信息处理 */
 export const processingOperation = (params: Params | null) => {

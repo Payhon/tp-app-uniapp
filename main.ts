@@ -5,6 +5,8 @@ import i18n, { updateTabbarText } from './lang'
 import { pinia } from '@/store/pinia'
 import legacyStore from '@/store'
 
+import uviewPlus from '@/uni_modules/uview-next'
+
 import api from '@/API/'
 import http from '@/common/request'
 import { Login } from '@/types/auth'
@@ -20,6 +22,7 @@ export function createApp() {
 
 	app.use(pinia)
 	app.use(i18n)
+	app.use(uviewPlus)
 
 	// NOTE: 为兼容旧代码（Options API / this.xxx）挂载全局属性；类型增强放在 d.ts 中，避免 HBuilderX 解析差异导致编译失败
 	const gp = app.config.globalProperties as any

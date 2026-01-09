@@ -76,6 +76,7 @@ import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue
 import { loginByPassword, wxmpLogin } from '@/service/app-auth'
 import api from '@/API/'
 import type { ApiResponse } from '@/types/api'
+import { useUserStore } from '@/store/user'
 
 type LoginTab = 'phone' | 'email'
 
@@ -90,6 +91,7 @@ type PushClientIdResult = {
 }
 
 const { t } = useI18n()
+const userStore = useUserStore()
 
 const activeTab = ref<LoginTab>('phone')
 const identifier = ref<string>('')
@@ -155,6 +157,14 @@ const afterLoginSuccess = async (token: string) => {
 		})
 		.catch(() => { })
 
+	// 拉取用户信息（用于“我的”页显示）
+	api
+		.apiRequest('/api/v1/user/detail', {}, 'GET')
+		.then((rsp: ApiResponse<Record<string, unknown>>) => {
+			if (rsp && rsp.code === 200 && rsp.data) userStore.setUserInfo(rsp.data as any)
+		})
+		.catch(() => {})
+
 	// #ifdef APP-PLUS
 	try {
 		uni.getPushClientId({
@@ -171,7 +181,7 @@ const afterLoginSuccess = async (token: string) => {
 	// #endif
 
 	uni.switchTab({
-		url: '/pages/fishery-monitor/fishery-monitor'
+		url: '/pages/home/home'
 	})
 }
 

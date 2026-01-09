@@ -34,14 +34,10 @@ const i18n = createI18n({
 })
 
 // Keep in sync with pages.json tabBar order
-const TABBAR_I18N_KEYS = ['pages.deviceList', 'pages.intelligentControlTitle', 'pages.myAccount'] as const
+const TABBAR_I18N_KEYS = ['pages.home', 'pages.myAccount'] as const
 
 // Keep in sync with pages.json tabBar list
-const TABBAR_PAGE_PATHS = [
-	'pages/fishery-monitor/fishery-monitor',
-	'pages/intelligent-control/intelligent-control',
-	'pages/ucenter/ucenter'
-] as const
+const TABBAR_PAGE_PATHS = ['pages/home/home', 'pages/my/my'] as const
 
 const isCurrentTabbarPage = () => {
 	// MP-WEIXIN: wx.setTabBarItem 会在「非 tabBar 页面」调用时报错：setTabBarItem:fail not TabBar page

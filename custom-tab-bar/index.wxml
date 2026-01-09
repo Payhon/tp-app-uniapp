@@ -1,0 +1,22 @@
+<view class="ctb">
+  <view class="ctb__bar">
+    <view class="ctb__item" data-index="0" data-url="/pages/home/home" bindtap="onSwitchTab">
+      <image class="ctb__icon" src="{{selected === 0 ? '/static/image/navbar-home-on@2x.png' : '/static/image/navbar-home@2x.png'}}" mode="aspectFit" />
+      <text class="ctb__text {{selected === 0 ? 'ctb__text--active' : ''}}">{{textHome}}</text>
+    </view>
+
+    <view class="ctb__space"></view>
+
+    <view class="ctb__item" data-index="1" data-url="/pages/my/my" bindtap="onSwitchTab">
+      <image class="ctb__icon" src="{{selected === 1 ? '/static/image/navbar-me-on@2x.png' : '/static/image/navbar-me@2x.png'}}" mode="aspectFit" />
+      <text class="ctb__text {{selected === 1 ? 'ctb__text--active' : ''}}">{{textMe}}</text>
+    </view>
+
+    <view class="ctb__add" bindtap="onAdd">
+      <image class="ctb__add-icon" src="/static/image/navbar-add@2x.png" mode="aspectFit" />
+    </view>
+    <view class="ctb__add-text">{{textAddDevice}}</view>
+  </view>
+  <view class="ctb__safe"></view>
+</view>
+

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
+import { onHide, onLaunch, onShow, onTabBarMidButtonTap } from '@dcloudio/uni-app'
 
 import api from '@/API/'
 
@@ -85,6 +85,12 @@ onShow(() => {
 onHide(() => {
 	// no-op
 })
+
+// #ifdef APP-PLUS
+onTabBarMidButtonTap(() => {
+	uni.navigateTo({ url: '/pages/fishery-monitor/addMonitor' })
+})
+// #endif
 </script>
 
 <style>

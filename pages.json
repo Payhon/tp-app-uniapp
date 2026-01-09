@@ -1,6 +1,32 @@
 {
 	"pages": [
 		{
+			"path": "pages/home/home",
+			"style": {
+				"navigationBarTitleText": "%pages.home%",
+				"enablePullDownRefresh": true,
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/alarm/alarm",
+			"style": {
+				"navigationBarTitleText": "%pages.alarmDevices%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/alarm/detail",
+			"style": {
+				"navigationBarTitleText": "%alarm.detailTitle%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/login/login",
 			"style": {
 				"navigationBarTitleText": "%pages.loginTitle%",
@@ -73,14 +99,6 @@
 			}
 		},
 		{
-			"path": "pages/ucenter/ucenter",
-			"style": {
-				"navigationBarTitleText": "%pages.userCenter%",
-				"enablePullDownRefresh": false,
-				"navigationBarBackgroundColor": "#FFFFFF"
-			}
-		},
-		{
 			"path": "pages/accounts/accounts",
 			"style": {
 				"navigationBarTitleText": "%pages.basicInfo%",
@@ -93,6 +111,14 @@
 			"style": {
 				"navigationBarTitleText": "%pages.deviceDetailTitle%",
 				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/device-battery/detail",
+			"style": {
+				"navigationBarTitleText": "%pages.deviceDetailTitle%",
+				"enablePullDownRefresh": false,
+				"navigationStyle": "custom"
 			}
 		},
 		{
@@ -296,6 +322,63 @@
 				"enablePullDownRefresh": false,
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
+		},
+		{
+			"path": "pages/my/my",
+			"style": {
+				"navigationBarTitleText": "%pages.my.title%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationStyle": "custom"
+			}
+		},
+			{
+				"path": "pages/my/setting/index",
+				"style": {
+					"navigationBarTitleText": "%pages.my.settingTitle%",
+					"enablePullDownRefresh": false,
+					"navigationBarBackgroundColor": "#FFFFFF"
+				}
+			},
+			{
+				"path": "pages/my/setting/username",
+				"style": {
+					"navigationBarTitleText": "%pages.my.settingPage.usernameTitle%",
+					"enablePullDownRefresh": false,
+					"navigationBarBackgroundColor": "#FFFFFF"
+				}
+			},
+			{
+				"path": "pages/my/help-feedback/index",
+				"style": {
+					"navigationBarTitleText": "%pages.my.helpTitle%",
+					"enablePullDownRefresh": false,
+					"navigationBarBackgroundColor": "#FFFFFF"
+				}
+			},
+		{
+			"path": "pages/my/contact/index",
+			"style": {
+				"navigationBarTitleText": "%pages.my.contactTitle%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/my/about/index",
+			"style": {
+				"navigationBarTitleText": "%pages.my.aboutTitle%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/my/bluetooth/index",
+			"style": {
+				"navigationBarTitleText": "%pages.my.bluetoothTitle%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
 		}
 	],
 	"globalStyle": {
@@ -304,29 +387,41 @@
 		"navigationBarBackgroundColor": "#EEEEEE",
 		"backgroundColor": "#EEEEEE"
 	},
+	"easycom": {
+		"autoscan": true,
+		"custom": {
+			"^u-(.*)": "@/uni_modules/uview-next/components/u-$1/u-$1.vue"
+		}
+	},
 	"tabBar": {
 		"color": "#908F92",
 		"selectedColor": "#646cff",
 		"backgroundColor": "#FFFFFF",
 		"borderStyle": "white",
+		// #ifdef APP-PLUS
+		"midButton": {
+			"width": "70px",
+			"height": "55px",
+			"iconPath": "static/image/navbar-add@2x.png",
+			"iconWidth": "28px",
+			"text": "%pages.addDevice%"
+		},
+		// #endif
+		// #ifdef MP-WEIXIN
+		"custom": true,
+		// #endif
 		"list": [
 			{
-				"pagePath": "pages/fishery-monitor/fishery-monitor",
-				"text": "%pages.deviceList%",
-				"iconPath": "static/tabbar/eqp.png",
-				"selectedIconPath": "static/tabbar/eqp_on.png"
+				"pagePath": "pages/home/home",
+				"text": "%pages.home%",
+				"iconPath": "static/image/navbar-home@2x.png",
+				"selectedIconPath": "static/image/navbar-home-on@2x.png"
 			},
 			{
-				"pagePath": "pages/intelligent-control/intelligent-control",
-				"text": "%pages.intelligentControlTitle%",
-				"iconPath": "static/tabbar/intelligentControl.png",
-				"selectedIconPath": "static/tabbar/intelligentControlSel.png"
-			},
-			{
-				"pagePath": "pages/ucenter/ucenter",
+				"pagePath": "pages/my/my",
 				"text": "%pages.myAccount%",
-				"iconPath": "static/tabbar/ucenter.png",
-				"selectedIconPath": "static/tabbar/ucenterSel.png"
+				"iconPath": "static/image/navbar-me@2x.png",
+				"selectedIconPath": "static/image/navbar-me-on@2x.png"
 			}
 		]
 	}

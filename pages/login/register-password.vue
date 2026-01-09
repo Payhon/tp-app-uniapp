@@ -119,7 +119,7 @@ const afterRegisterSuccess = async (token: string) => {
 			if (rsp && rsp.code === 200 && rsp.data) uni.setStorageSync('tenant_id', rsp.data)
 		})
 		.catch(() => {})
-	uni.switchTab({ url: '/pages/fishery-monitor/fishery-monitor' })
+	uni.switchTab({ url: '/pages/home/home' })
 }
 
 const submit = async () => {
