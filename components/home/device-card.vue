@@ -1,5 +1,5 @@
 <template>
-	<view class="card" hover-class="card--hover" @tap="onTap">
+	<view class="card" hover-class="card--hover" @tap="onTap" @longpress="onLongPress">
 		<view class="card__top">
 			<view class="card__title-wrap">
 				<text class="card__title u-line-1">{{ device.name }}</text>
@@ -36,11 +36,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	(e: 'select', id: string): void
+	(e: 'longpress', device: HomeDeviceCardModel): void
 }>()
 
 const { t } = useI18n()
 
 const onTap = () => emit('select', String(props.device.id))
+const onLongPress = () => emit('longpress', props.device)
 
 const statusText = computed(() => {
 	if (props.device.connectType === 'bluetooth') return t('home.status.bluetooth') as string

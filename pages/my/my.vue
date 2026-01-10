@@ -52,6 +52,19 @@
 
 				<view class="menu-divider"></view>
 
+				<view class="menu-item" hover-class="menu-item--hover" @tap="openLangSheet">
+					<view class="menu-left">
+						<image class="menu-icon" src="/static/image/my/icon-lang@2x.png" mode="aspectFit" />
+						<text class="menu-title">{{ $t('ucenter.language') }}</text>
+					</view>
+					<view class="menu-right">
+						<text class="menu-right-text">{{ currentLangLabel }}</text>
+						<u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
+					</view>
+				</view>
+
+				<view class="menu-divider"></view>
+
 				<view class="menu-item" hover-class="menu-item--hover" @tap="goHelpFeedback">
 					<view class="menu-left">
 						<image class="menu-icon" src="/static/image/my/icon-help@2x.png" mode="aspectFit" />
@@ -99,9 +112,10 @@
 					</view>
 				</view>
 			</view>
+
+			</view>
 		</view>
-	</view>
-</template>
+	</template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
@@ -110,8 +124,9 @@ import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import { useInjected } from '@/common/composables/useInjected'
 import { deviceList } from '@/service/device'
+import { AVAILABLE_LANGUAGES, changeLanguage, type SupportedLocale } from '@/lang/index'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const userStore = useUserStore()
 const { apiRequest, login } = useInjected()
 
@@ -206,6 +221,12 @@ const registeredAtText = computed(() => {
 	return formatYmd(raw) || '--'
 })
 
+const currentLangLabel = computed(() => {
+	const cur = String(locale.value || '').trim() as SupportedLocale
+	const hit = AVAILABLE_LANGUAGES.find((x) => x.code === cur)
+	return hit?.label || AVAILABLE_LANGUAGES[0].label
+})
+
 const setMpTabSelected = () => {
 	// #ifdef MP-WEIXIN
 	try {
@@ -214,6 +235,18 @@ const setMpTabSelected = () => {
 		const current = pages && pages.length ? pages[pages.length - 1] : null
 		const tabBar = current?.getTabBar?.()
 		tabBar?.setSelected?.(1)
+	} catch (e) {}
+	// #endif
+}
+
+const refreshMpCustomTabbarTexts = () => {
+	// #ifdef MP-WEIXIN
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const pages = (globalThis as any).getCurrentPages?.() as any[] | undefined
+		const current = pages && pages.length ? pages[pages.length - 1] : null
+		const tabBar = current?.getTabBar?.()
+		tabBar?.updateTexts?.()
 	} catch (e) {}
 	// #endif
 }
@@ -326,6 +359,19 @@ const goAbout = () => {
 const onBluetoothAutoConnectChange = (val: boolean) => {
 	bluetoothAutoConnect.value = Boolean(val)
 	uni.setStorageSync(STORAGE_BT_AUTO_CONNECT, bluetoothAutoConnect.value ? 1 : 0)
+}
+
+const openLangSheet = () => {
+	uni.showActionSheet({
+		itemList: AVAILABLE_LANGUAGES.map((x) => x.label),
+		success: (res) => {
+			const selected = AVAILABLE_LANGUAGES[res.tapIndex]
+			if (!selected) return
+			changeLanguage(selected.code)
+			locale.value = selected.code
+			refreshMpCustomTabbarTexts()
+		}
+	})
 }
 
 const clearCache = () => {
@@ -509,7 +555,7 @@ const clearCache = () => {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 24rpx 24rpx;
+	padding: 40rpx 24rpx;
 	background-color: #ffffff;
 }
 

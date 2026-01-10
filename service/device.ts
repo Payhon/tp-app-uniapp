@@ -222,6 +222,16 @@ export const setDeviceScriptEnable = (params: Params | null) => {
 export const deviceMapTelemetry = (id: string | number) => {
 	return apiRequest<unknown>(`/api/v1/device/map/telemetry/${id}`, null, 'GET')
 }
+
+// APP 端设备解绑（解绑当前用户与设备的绑定关系）
+export const appUnbindDevice = (deviceId: string) => {
+	return apiRequest<unknown>('/api/v1/app/device/unbind', { device_id: deviceId }, 'POST')
+}
+
+// 更新设备信息（目前首页仅用于改名）
+export const updateDeviceName = (payload: { id: string; name: string }) => {
+	return apiRequest<unknown>('/api/v1/device', payload, 'PUT')
+}
   
   // 获取数据处理列表
 export const getDataScriptList = (params: Params | null) => {

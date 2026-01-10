@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onHide, onLaunch, onShow, onTabBarMidButtonTap } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
 
 import api from '@/API/'
+import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 
 type AlarmPayload = {
 	alarm_id?: string | number
@@ -18,6 +20,8 @@ type PushMessage = {
 	}
 	[key: string]: unknown
 }
+
+const { t } = useI18n()
 
 const fetchAlarmInfo = async (url: string, headers?: Record<string, string>) => {
 	// NOTE: 现有 apiRequest 额外入参会被忽略；这里保留形参以避免业务侧调用习惯变化
@@ -88,7 +92,38 @@ onHide(() => {
 
 // #ifdef APP-PLUS
 onTabBarMidButtonTap(() => {
-	uni.navigateTo({ url: '/pages/fishery-monitor/addMonitor' })
+	uni.showActionSheet({
+		itemList: [t('pages.deviceProvision.bleSearch'), t('pages.deviceProvision.cameraScan')],
+		success: (res) => {
+			const idx = (res as any)?.tapIndex
+			if (idx === 0) {
+				uni.navigateTo({ url: '/pages/device-provision/ble-scan' })
+				return
+			}
+			if (idx === 1) {
+				uni.scanCode({
+					success: (scanRes) => {
+						const parsed = parseAddDeviceScanCode(String((scanRes as any)?.result ?? ''))
+						if (!parsed) {
+							uni.showToast({ title: t('pages.deviceProvision.invalidCode'), icon: 'none' })
+							return
+						}
+						if (parsed.type === 'mac') {
+							uni.navigateTo({ url: `/pages/device-provision/ble-scan?mode=qr&mac=${parsed.value}` })
+							return
+						}
+						uni.navigateTo({ url: `/pages/device-provision/uuid-bind?uuid=${parsed.value}` })
+					},
+					fail: () => {
+						// 用户取消扫码，不提示
+					},
+				})
+			}
+		},
+		fail: () => {
+			// 用户取消，不提示
+		},
+	})
 })
 // #endif
 </script>

@@ -61,7 +61,44 @@ Component({
       wx.switchTab({ url })
     },
     onAdd() {
-      wx.navigateTo({ url: '/pages/fishery-monitor/addMonitor' })
+      const locale = normalizeLocale(wx.getStorageSync('language'))
+      const dict = I18N[locale] || I18N['en-US']
+
+      wx.showActionSheet({
+        itemList: [dict.bleSearch, dict.cameraScan],
+        success: (res) => {
+          const idx = Number(res.tapIndex)
+          if (idx === 0) {
+            wx.navigateTo({ url: '/pages/device-provision/ble-scan' })
+            return
+          }
+          if (idx === 1) {
+            wx.scanCode({
+              success: (scanRes) => {
+                const raw = String((scanRes && scanRes.result) || '')
+                const normalized = raw.replace(/^0x/i, '').replace(/[^0-9a-fA-F]/g, '').toUpperCase()
+                const isMac = /^[0-9A-F]{12}$/.test(normalized)
+                const isUuid = /^[0-9A-F]{32}$/.test(normalized)
+                if (!isMac && !isUuid) {
+                  wx.showToast({ title: dict.invalidCode, icon: 'none' })
+                  return
+                }
+                if (isMac) {
+                  wx.navigateTo({ url: `/pages/device-provision/ble-scan?mode=qr&mac=${normalized}` })
+                  return
+                }
+                wx.navigateTo({ url: `/pages/device-provision/uuid-bind?uuid=${normalized}` })
+              },
+              fail: () => {
+                // 用户取消扫码，不提示
+              }
+            })
+          }
+        },
+        fail: () => {
+          // 用户取消，不提示
+        }
+      })
     }
   }
 })

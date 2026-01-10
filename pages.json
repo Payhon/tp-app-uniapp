@@ -177,6 +177,30 @@
 			}
 		},
 		{
+			"path": "pages/device-provision/ble-scan",
+			"style": {
+				"navigationBarTitleText": "%pages.deviceProvision.bleSearchTitle%",
+				"enablePullDownRefresh": false,
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/device-provision/provision-wizard",
+			"style": {
+				"navigationBarTitleText": "%pages.deviceProvision.wizardTitle%",
+				"enablePullDownRefresh": false,
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/device-provision/uuid-bind",
+			"style": {
+				"navigationBarTitleText": "%pages.deviceProvision.uuidBindTitle%",
+				"enablePullDownRefresh": false,
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/accounts/realname",
 			"style": {
 				"navigationBarTitleText": "%pages.modifyName%",

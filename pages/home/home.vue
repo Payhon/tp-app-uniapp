@@ -24,19 +24,54 @@
 
 			<scroll-view v-else class="list" scroll-y>
 				<view class="list__inner">
-					<home-device-card v-for="item in deviceCards" :key="item.id" :device="item" @select="goDeviceDetail"></home-device-card>
+					<home-device-card
+						v-for="item in deviceCards"
+						:key="item.id"
+						:device="item"
+						@select="goDeviceDetail"
+						@longpress="onCardLongPress"
+					></home-device-card>
 				</view>
 			</scroll-view>
 		</view>
+
+		<u-action-sheet
+			:show="actionSheetShow"
+			:actions="actionSheetActions"
+			:cancelText="$t('common.cancel')"
+			@close="actionSheetShow = false"
+			@select="onActionSelect"
+		></u-action-sheet>
+
+		<u-popup :show="renamePopupShow" mode="center" :round="16" @close="renamePopupShow = false">
+			<view class="rename">
+				<view class="rename__title">{{ $t('home.deviceMenu.renameTitle') }}</view>
+				<view class="rename__input">
+					<u-input
+						v-model="renameValue"
+						:placeholder="$t('home.deviceMenu.renamePlaceholder')"
+						border="surround"
+						clearable
+					></u-input>
+				</view>
+				<view class="rename__actions">
+					<view class="rename__btn rename__btn--cancel" @tap="renamePopupShow = false">{{
+						$t('common.cancel')
+					}}</view>
+					<view class="rename__btn rename__btn--ok" @tap="doRename">{{ $t('common.confirm') }}</view>
+				</view>
+			</view>
+		</u-popup>
 	</view>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { useI18n } from 'vue-i18n'
 
 import HomeDeviceCard from '@/components/home/device-card.vue'
-import { deviceList, deviceMapTelemetry } from '@/service/device'
+import { appUnbindDevice, deviceList, deviceMapTelemetry, updateDeviceName } from '@/service/device'
 import type { HomeDeviceCardModel } from '@/types/home'
 
 type DeviceListItem = {
@@ -68,6 +103,19 @@ type TelemetryMapRsp = {
 const isLoggedIn = computed(() => Boolean(uni.getStorageSync('access_token')))
 const deviceCards = ref<HomeDeviceCardModel[]>([])
 const loading = ref(false)
+
+const { t } = useI18n()
+
+const selectedDevice = ref<HomeDeviceCardModel | null>(null)
+const actionSheetShow = ref(false)
+const renamePopupShow = ref(false)
+const renameValue = ref('')
+const submitting = ref(false)
+
+const actionSheetActions = computed(() => [
+	{ key: 'rename', name: t('home.deviceMenu.rename') as string },
+	{ key: 'unbind', name: t('home.deviceMenu.unbind') as string, color: '#ff4d3f' }
+])
 
 const parseBatteryPercent = (data: TelemetryMapRsp | null | undefined) => {
 	const list = Array.isArray(data?.telemetry_data) ? data?.telemetry_data : []
@@ -151,6 +199,88 @@ const goDeviceDetail = (id: string) => {
 	uni.navigateTo({ url: `/pages/device-battery/detail?device_id=${encodeURIComponent(String(id || ''))}` })
 }
 
+const onCardLongPress = (device: HomeDeviceCardModel) => {
+	if (!isLoggedIn.value) return
+	selectedDevice.value = device
+	actionSheetShow.value = true
+}
+
+const openRename = () => {
+	if (!selectedDevice.value) return
+	renameValue.value = String(selectedDevice.value.name || '').trim()
+	actionSheetShow.value = false
+	renamePopupShow.value = true
+}
+
+const doRename = async () => {
+	if (submitting.value) return
+	const d = selectedDevice.value
+	if (!d) return
+	const nextName = String(renameValue.value || '').trim()
+	if (!nextName) {
+		uni.showToast({ title: t('home.deviceMenu.renameEmpty') as string, icon: 'none' })
+		return
+	}
+
+	submitting.value = true
+	try {
+		const rsp = await updateDeviceName({ id: String(d.id), name: nextName })
+		if (rsp && (rsp as any).code === 200) {
+			deviceCards.value = deviceCards.value.map((x) => (x.id === d.id ? { ...x, name: nextName } : x))
+			renamePopupShow.value = false
+			uni.showToast({ title: t('home.deviceMenu.renameSuccess') as string, icon: 'none' })
+		} else {
+			uni.showToast({
+				title: (rsp as any)?.message || (t('home.deviceMenu.renameFailed') as string),
+				icon: 'none'
+			})
+		}
+	} catch (e) {
+		uni.showToast({ title: t('home.deviceMenu.renameFailed') as string, icon: 'none' })
+	} finally {
+		submitting.value = false
+	}
+}
+
+const confirmUnbind = () => {
+	const d = selectedDevice.value
+	if (!d) return
+	actionSheetShow.value = false
+	uni.showModal({
+		title: t('common.tip') as string,
+		content: t('home.deviceMenu.unbindConfirm') as string,
+		cancelText: t('common.cancel') as string,
+		confirmText: t('common.confirm') as string,
+		success: async (res: { confirm: boolean }) => {
+			if (!res.confirm) return
+			if (submitting.value) return
+			submitting.value = true
+			try {
+				const rsp = await appUnbindDevice(String(d.id))
+				if (rsp && (rsp as any).code === 200) {
+					deviceCards.value = deviceCards.value.filter((x) => x.id !== d.id)
+					uni.showToast({ title: t('home.deviceMenu.unbindSuccess') as string, icon: 'none' })
+				} else {
+					uni.showToast({
+						title: (rsp as any)?.message || (t('home.deviceMenu.unbindFailed') as string),
+						icon: 'none'
+					})
+				}
+			} catch (e) {
+				uni.showToast({ title: t('home.deviceMenu.unbindFailed') as string, icon: 'none' })
+			} finally {
+				submitting.value = false
+			}
+		}
+	})
+}
+
+const onActionSelect = (item: { key?: string } | null) => {
+	const key = item?.key || ''
+	if (key === 'rename') openRename()
+	else if (key === 'unbind') confirmUnbind()
+}
+
 const setMpTabSelected = () => {
 	// #ifdef MP-WEIXIN
 	try {
@@ -201,7 +331,7 @@ onPullDownRefresh(() => load())
 .alarm-btn {
 	position: absolute;
 	right: 24rpx;
-	top: 96rpx;
+	top: 310rpx;
 	height: 56rpx;
 	padding: 0 22rpx;
 	border-radius: 28rpx;
@@ -272,5 +402,52 @@ onPullDownRefresh(() => load())
 
 .list__inner {
 	padding-bottom: 40rpx;
+}
+
+.rename {
+	width: 640rpx;
+	background: #ffffff;
+	border-radius: 16rpx;
+	padding: 34rpx 28rpx 28rpx;
+	box-sizing: border-box;
+}
+
+.rename__title {
+	text-align: center;
+	font-size: 32rpx;
+	font-weight: 600;
+	color: #1d1d1d;
+	margin-bottom: 26rpx;
+}
+
+.rename__input {
+	border-radius: 12rpx;
+	overflow: hidden;
+}
+
+.rename__actions {
+	margin-top: 28rpx;
+	display: flex;
+	gap: 18rpx;
+}
+
+.rename__btn {
+	flex: 1;
+	height: 76rpx;
+	border-radius: 38rpx;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 30rpx;
+}
+
+.rename__btn--cancel {
+	background: #f2f2f2;
+	color: #9b9b9b;
+}
+
+.rename__btn--ok {
+	background: #0b2dff;
+	color: #ffffff;
 }
 </style>

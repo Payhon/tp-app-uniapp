@@ -11,27 +11,28 @@
   height: 120rpx;
   background: #ffffff;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   box-shadow: 0 -6rpx 30rpx rgba(0, 0, 0, 0.08);
-  padding: 18rpx 40rpx 14rpx;
+  padding: 0 40rpx 18rpx;
   box-sizing: border-box;
   border-top-left-radius: 40rpx;
   border-top-right-radius: 40rpx;
   overflow: visible;
 }
 
+/* 中间突出：仅“上半椭圆”，下半与 TabBar 融为一体（无阴影） */
 .ctb__bar::before {
   content: '';
   position: absolute;
   left: 50%;
-  top: -64rpx;
+  top: -54rpx;
   transform: translateX(-50%);
   width: 240rpx;
-  height: 240rpx;
-  border-radius: 999px;
+  height: 108rpx;
   background: #ffffff;
-  box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.06);
+  border-radius: 999px 999px 0 0;
+  z-index: 1;
 }
 
 .ctb__item {
@@ -39,13 +40,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  position: relative;
-  z-index: 1;
-}
-
-.ctb__space {
-  width: 180rpx;
+  justify-content: flex-end;
+  z-index: 2;
 }
 
 .ctb__icon {
@@ -63,38 +59,15 @@
   color: #2f6bff;
 }
 
-.ctb__add {
-  position: absolute;
-  left: 50%;
-  top: -52rpx;
-  transform: translateX(-50%);
-  width: 132rpx;
-  height: 132rpx;
-  border-radius-top-left: 999px;
-  background: transparent;
-  box-shadow: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
+.ctb__item--mid {
+  padding-bottom: 2rpx;
 }
 
-.ctb__add-icon {
-  width: 72rpx;
-  height: 72rpx;
-}
-
-.ctb__add-text {
-  position: absolute;
-  left: 50%;
-  bottom: 14rpx;
-  transform: translateX(-50%);
-  font-size: 22rpx;
-  color: #908f92;
-  width: 160rpx;
-  text-align: center;
-  pointer-events: none;
-  z-index: 2;
+.ctb__icon--mid {
+  width: 68rpx;
+  height: 68rpx;
+  margin-bottom: 6rpx;
+  margin-top: -42rpx;
 }
 
 .ctb__safe {
