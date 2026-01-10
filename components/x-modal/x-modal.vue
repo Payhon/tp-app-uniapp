@@ -7,8 +7,9 @@
 				</view>
 			</slot>
 			<slot name='text'>
-				<view class="modal-article" v-html="text" v-if="text">
+				<view class="modal-article" v-if="text">
 					<!-- text 文本信息 -->
+					{{ text }}
 				</view>
 			</slot>
 			<view class="modal-row">
