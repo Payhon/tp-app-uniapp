@@ -1,3 +1,4 @@
+import '@/common/i18n-feature-flags'
 import { createSSRApp } from 'vue'
 import App from './App.vue'
 

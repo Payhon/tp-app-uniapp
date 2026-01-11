@@ -294,11 +294,24 @@ const setMpTabSelected = () => {
 }
 
 onShow(() => {
+	uni.setStorageSync('__last_tab_url__', '/pages/home/home')
 	setMpTabSelected()
 	load()
 })
 
 onPullDownRefresh(() => load())
+</script>
+
+<script lang="ts">
+import { showAddDeviceActionSheet } from '@/common/composables/useAddDeviceActionSheet'
+
+export default {
+	// #ifdef APP-PLUS
+	onTabBarMidButtonTap() {
+		showAddDeviceActionSheet()
+	}
+	// #endif
+}
 </script>
 
 <style lang="scss" scoped>

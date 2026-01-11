@@ -322,6 +322,7 @@ onLoad(() => {
 })
 
 onShow(() => {
+	uni.setStorageSync('__last_tab_url__', '/pages/my/my')
 	refreshLoginState()
 	setMpTabSelected()
 	loadUserInfo()
@@ -403,6 +404,18 @@ const clearCache = () => {
 			uni.showToast({ title: t('pages.my.clearCacheSuccess'), icon: 'success' })
 		}
 	})
+}
+</script>
+
+<script lang="ts">
+import { showAddDeviceActionSheet } from '@/common/composables/useAddDeviceActionSheet'
+
+export default {
+	// #ifdef APP-PLUS
+	onTabBarMidButtonTap() {
+		showAddDeviceActionSheet()
+	}
+	// #endif
 }
 </script>
 

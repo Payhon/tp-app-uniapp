@@ -159,7 +159,19 @@ export default class Painter {
             });
             this.ctx.fill();
             // 在 ios 的 6.6.6 版本上 clip 有 bug，禁掉此类型上的 clip，也就意味着，在此版本微信的 ios 设备下无法使用 border 属性
-            if (!(getApp().globalData.systemInfo && getApp().globalData.systemInfo.version <= '6.6.6' && getApp().globalData.systemInfo.platform === 'ios')) {
+            // NOTE: 这里仅对小程序端做 getApp 判断，避免 App 端启动阶段触发 getApp() failed 警告
+            let shouldClip = true;
+            // #ifdef MP-WEIXIN
+            try {
+                const app = typeof getApp === 'function' ? getApp() : null;
+                const sys = app && app.globalData && app.globalData.systemInfo;
+                if (sys && sys.version <= '6.6.6' && sys.platform === 'ios') {
+                    shouldClip = false;
+                }
+            } catch (e) {
+            }
+            // #endif
+            if (shouldClip) {
                 this.ctx.clip();
             }
             this.ctx.globalAlpha = 1;

@@ -165,25 +165,35 @@
 		},
 		created() {
 			// #ifdef VUE3
-			let getbinddata = getApp().$vm.$.appContext.config.globalProperties.binddata
-			if (!getbinddata) {
-				getApp().$vm.$.appContext.config.globalProperties.binddata = function(name, value, formName) {
-					if (formName) {
-						this.$refs[formName].setValue(name, value);
-					} else {
-						let formVm;
-						for (let i in this.$refs) {
-							const vm = this.$refs[i];
-							if (vm && vm.$options && vm.$options.name === 'uniForms') {
-								formVm = vm;
-								break;
+			// NOTE: App 端在启动阶段 getApp() 可能未就绪，会触发 getApp() failed 警告；延迟初始化以避免无意义的警告
+			setTimeout(() => {
+				try {
+					const app = typeof getApp === 'function' ? getApp() : null
+					const gp = app && app.$vm && app.$vm.$ && app.$vm.$.appContext && app.$vm.$.appContext.config
+						? app.$vm.$.appContext.config.globalProperties
+						: null
+					if (!gp) return
+					let getbinddata = gp.binddata
+					if (!getbinddata) {
+						gp.binddata = function(name, value, formName) {
+							if (formName) {
+								this.$refs[formName].setValue(name, value);
+							} else {
+								let formVm;
+								for (let i in this.$refs) {
+									const vm = this.$refs[i];
+									if (vm && vm.$options && vm.$options.name === 'uniForms') {
+										formVm = vm;
+										break;
+									}
+								}
+								if (!formVm) return console.error('当前 uni-froms 组件缺少 ref 属性');
+								formVm.setValue(name, value);
 							}
 						}
-						if (!formVm) return console.error('当前 uni-froms 组件缺少 ref 属性');
-						formVm.setValue(name, value);
 					}
-				}
-			}
+				} catch (e) {}
+			}, 0)
 			// #endif
 
 			// 子组件实例数组

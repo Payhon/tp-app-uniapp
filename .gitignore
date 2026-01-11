@@ -2,3 +2,6 @@
 unpackage
 node_modules
 *.json
+!pages.json
+!manifest.json
+!locale/**/*.json

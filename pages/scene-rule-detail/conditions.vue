@@ -325,4 +325,3 @@
 <style scoped>
   @import '@/common/styles/alert-strategy.css';
 </style>
-

@@ -37,7 +37,7 @@
 		{
 			"path": "pages/login/register",
 			"style": {
-				"navigationBarTitleText": "%pages.register%",
+				"navigationBarTitleText": "%pages.register.title%",
 				"enablePullDownRefresh": false,
 				"navigationStyle": "custom"
 			}
@@ -69,7 +69,7 @@
 		{
 			"path": "pages/notify/notify",
 			"style": {
-				"navigationBarTitleText": "%pages.notify%",
+				"navigationBarTitleText": "%pages.notifyTitle%",
 				"enablePullDownRefresh": true,
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
@@ -77,7 +77,7 @@
 		{
 			"path": "pages/notify/detail",
 			"style": {
-				"navigationBarTitleText": "%pages.notifyDetail%",
+				"navigationBarTitleText": "%pages.notifyDetailTitle%",
 				"enablePullDownRefresh": false,
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
@@ -124,7 +124,7 @@
 		{
 			"path": "pages/webViewPage/webViewPage",
 			"style": {
-				"navigationBarTitleText": "%pages.deviceDetail%",
+				"navigationBarTitleText": "%pages.deviceDetailTitle%",
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
 		},
@@ -356,6 +356,14 @@
 				"navigationStyle": "custom"
 			}
 		},
+		{
+			"path": "pages/tabbar/mid",
+			"style": {
+				"navigationBarTitleText": "%pages.addDevice%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
 			{
 				"path": "pages/my/setting/index",
 				"style": {
@@ -422,15 +430,6 @@
 		"selectedColor": "#646cff",
 		"backgroundColor": "#FFFFFF",
 		"borderStyle": "white",
-		// #ifdef APP-PLUS
-		"midButton": {
-			"width": "70px",
-			"height": "55px",
-			"iconPath": "static/image/navbar-add@2x.png",
-			"iconWidth": "28px",
-			"text": "%pages.addDevice%"
-		},
-		// #endif
 		// #ifdef MP-WEIXIN
 		"custom": true,
 		// #endif
@@ -440,6 +439,12 @@
 				"text": "%pages.home%",
 				"iconPath": "static/image/navbar-home@2x.png",
 				"selectedIconPath": "static/image/navbar-home-on@2x.png"
+			},
+			{
+				"pagePath": "pages/tabbar/mid",
+				"text": "%pages.addDevice%",
+				"iconPath": "static/image/navbar-add@2x.png",
+				"selectedIconPath": "static/image/navbar-add@2x.png"
 			},
 			{
 				"pagePath": "pages/my/my",
