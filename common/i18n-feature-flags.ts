@@ -10,6 +10,7 @@ const g: any =
 
 g.__VUE_I18N_FULL_INSTALL__ = true
 g.__VUE_I18N_LEGACY_API__ = true
-g.__INTLIFY_JIT_COMPILATION__ = false
+// 需要开启 JIT 编译，否则 `{count}` / `{rssi}` 这类占位符不会被运行时替换
+g.__INTLIFY_JIT_COMPILATION__ = true
 g.__INTLIFY_DROP_MESSAGE_COMPILER__ = false
 g.__INTLIFY_PROD_DEVTOOLS__ = false

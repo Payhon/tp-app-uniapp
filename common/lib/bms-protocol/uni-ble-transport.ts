@@ -1,4 +1,5 @@
 import { BmsProtocolError, parseFrame } from './frame'
+import { BMS_BLE_NOTIFY_UUID, BMS_BLE_SERVICE_UUID, BMS_BLE_WRITE_UUID } from './ble-uuids'
 import type { LoggerLike } from './types'
 
 type UniBleBmsTransportOptions = {
@@ -189,9 +190,9 @@ export class UniBleBmsTransport {
 	private _queue: Promise<Uint8Array>
 
 	constructor({
-		serviceUUID = '0000ffc0-0000-1000-8000-00805f9b34fb',
-		writeCharUUID = '0000ff03-0000-1000-8000-00805f9b34fb',
-		notifyCharUUID = '0000ffc1-0000-1000-8000-00805f9b34fb',
+		serviceUUID = BMS_BLE_SERVICE_UUID,
+		writeCharUUID = BMS_BLE_WRITE_UUID,
+		notifyCharUUID = BMS_BLE_NOTIFY_UUID,
 		writeChunkSize = 20,
 		writeChunkIntervalMs = 20,
 		minFrameIntervalMs = 120,

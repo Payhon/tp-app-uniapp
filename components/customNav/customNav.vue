@@ -1,11 +1,11 @@
 <template>
-	<view>
-		<!-- <view class="topNav" :style="{ height: topHeight, lineHeight: topHeight, background:background }"> -->
-		<view class="topNav" :style="{ background:background }">
-			<view class="navIcon" @click="clickLeftBtn" :style="{ marginTop: imgTop }">
+	<view class="topNav" :style="{ background: background, height: topHeight }">
+		<view class="statusBar" :style="{ height: statusBarHeightPx }"></view>
+		<view class="navBar" :style="{ height: navBarHeightPx }">
+			<view class="navIcon" @click="clickLeftBtn">
 				<uni-icons type="back" size="30" :color="iconColor"></uni-icons>
 			</view>
-			<view class="title" :style="{ paddingTop: paddingTop, color:fontColor}">{{ pageTitle }}</view>
+			<view class="title" :style="{ color: fontColor }">{{ pageTitle }}</view>
 		</view>
 	</view>
 </template>
@@ -29,7 +29,7 @@
 	})
 	const { iconColor, pageTitle, background, fontColor } = toRefs(props)
 
-	const { topHeight, paddingTop, imgTop, init } = useNavBarMetrics()
+	const { topHeight, statusBarHeightPx, navBarHeightPx, init } = useNavBarMetrics()
 	const height = ref<number>(0)
 
 	const clickLeftBtn = () => {
