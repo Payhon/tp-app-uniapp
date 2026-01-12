@@ -17,7 +17,7 @@ import {
 import { RegisterView, decodeAscii, encodeAsciiFixed } from './register-view';
 import { parseStatusRegisters } from './status-parser';
 import type { BmsParsedFrame } from './frame'
-import type { BmsParamDef, BmsRequestTransport, BmsStatus } from './types'
+import type { BmsParamDef, BmsRequestTransport, BmsStatus, LoggerLike } from './types'
 
 type AddressRange = { startAddress: number; quantity: number }
 
@@ -55,6 +55,17 @@ function u16FromBytes(hi: number, lo: number): number {
 	return ((hi & 0xff) << 8) | (lo & 0xff);
 }
 
+function bytesToHex(bytes: Uint8Array): string {
+	let out = '';
+	for (let i = 0; i < bytes.length; i += 1) out += (bytes[i] & 0xff).toString(16).padStart(2, '0');
+	return out.toUpperCase();
+}
+
+function allSame(bytes: Uint8Array, v: number): boolean {
+	for (let i = 0; i < bytes.length; i += 1) if ((bytes[i] & 0xff) !== (v & 0xff)) return false;
+	return true;
+}
+
 type DecodableParamDef = Extract<BmsParamDef, { valueType: 'u8' | 'u16' | 'u32' | 'str' }>
 
 function decodeParam(def: DecodableParamDef, view: RegisterView): number | string | null {
@@ -79,13 +90,13 @@ function decodeParam(def: DecodableParamDef, view: RegisterView): number | strin
 		if (rawByte === 0xff) return null;
 		return rawByte * scale + offset;
 	}
-		if (def.valueType === 'str') {
-			const bytes = view.bytes(def.startAddress, def.byteLength);
-			return decodeAscii(bytes);
-		}
-		const _exhaustiveCheck: never = def;
-		throw new BmsProtocolError('Unsupported valueType', { def: _exhaustiveCheck });
+	if (def.valueType === 'str') {
+		const bytes = view.bytes(def.startAddress, def.byteLength);
+		return decodeAscii(bytes);
 	}
+	const _exhaustiveCheck: never = def;
+	throw new BmsProtocolError('Unsupported valueType', { def: _exhaustiveCheck });
+}
 
 function encodeStringToRegisterWrites(startAddress: number, byteLength: number, str: string) {
 	const bytes = encodeAsciiFixed(str, byteLength);
@@ -104,6 +115,7 @@ export class BmsClient {
 	private sourceAddress: number
 	private maxReadRegisters: number
 	private maxWriteRegisters: number
+	private logger?: LoggerLike
 
 	constructor({
 		transport,
@@ -111,12 +123,14 @@ export class BmsClient {
 		sourceAddress = BMS_FRAME.HOST_ADDR,
 		maxReadRegisters = 120,
 		maxWriteRegisters = 120,
+		logger,
 	}: {
 		transport: BmsRequestTransport
 		targetAddress?: number
 		sourceAddress?: number
 		maxReadRegisters?: number
 		maxWriteRegisters?: number
+		logger?: LoggerLike
 	}) {
 		if (!transport || typeof transport.request !== 'function') {
 			throw new BmsProtocolError('transport.request(frameBytes) is required');
@@ -126,11 +140,96 @@ export class BmsClient {
 		this.sourceAddress = sourceAddress & 0xff;
 		this.maxReadRegisters = maxReadRegisters;
 		this.maxWriteRegisters = maxWriteRegisters;
+		this.logger = logger;
+	}
+
+	private _debug(...args: unknown[]) {
+		if (this.logger && this.logger.debug) this.logger.debug(...args);
 	}
 
 	private async _request(frameBytes: Uint8Array): Promise<BmsParsedFrame> {
 		const respBytes = await this.transport.request(frameBytes);
 		return parseFrame(respBytes);
+	}
+
+	/**
+	 * 读取电池串数/电芯温度数量（0x100，高字节=S，低字节=N）
+	 */
+	async readSn(): Promise<{ s: number; n: number; word: number }> {
+		const head = await this.readRegisters(0x100, 1);
+		const word = head[0] & 0xffff;
+		const s = (word >> 8) & 0xff;
+		const n = word & 0xff;
+		this._debug('[bms]', '[bms] SN', { s, n, word: `0x${word.toString(16)}` });
+		return { s, n, word };
+	}
+
+	private _computeIdentityAddresses({ s, n }: { s: number; n: number }) {
+		const cellVoltagesStart = 0x141;
+		const cellTempsStart = cellVoltagesStart + s;
+		const hwModelStart = cellTempsStart + n;
+		const batteryGroupIdStart = hwModelStart + 16;
+		const boardCodeStart = batteryGroupIdStart + 16;
+		const bluetoothMacStart = boardCodeStart + 16;
+		return { cellVoltagesStart, cellTempsStart, hwModelStart, batteryGroupIdStart, boardCodeStart, bluetoothMacStart };
+	}
+
+	/**
+	 * 按协议“动态地址”读取设备身份信息（硬件型号/电池组编号/BMS板编码/蓝牙MAC）。
+	 *
+	 * 注意：这些字段位于状态寄存器的变长区，需要先读取 0x100 得到 S/N 后再计算地址。
+	 * 参考：doc/oriigin/device_comm_protocol_basic.md（补充说明）
+	 */
+	async readIdentityInfo(): Promise<{
+		s: number
+		n: number
+		hardwareModel: string | null
+		batteryGroupId: string | null
+		boardCode: string | null
+		bluetoothMacHex: string | null
+	}> {
+		const { s, n } = await this.readSn();
+		const { hwModelStart, batteryGroupIdStart, boardCodeStart, bluetoothMacStart } = this._computeIdentityAddresses({ s, n });
+		this._debug('[bms]', '[bms] identity address', {
+			s,
+			n,
+			hwModelStart: `0x${hwModelStart.toString(16)}`,
+			batteryGroupIdStart: `0x${batteryGroupIdStart.toString(16)}`,
+			boardCodeStart: `0x${boardCodeStart.toString(16)}`,
+			bluetoothMacStart: `0x${bluetoothMacStart.toString(16)}`,
+		});
+
+		// 32B + 32B + 32B + 10B = 53 regs
+		const quantity = 16 + 16 + 16 + 5;
+		const regs = await this.readRegisters(hwModelStart, quantity);
+		const view = new RegisterView(hwModelStart, regs);
+
+		const hwBytes = view.bytes(hwModelStart, 32);
+		const groupBytes = view.bytes(batteryGroupIdStart, 32);
+		const boardBytes = view.bytes(boardCodeStart, 32);
+		const macBytes10 = view.bytes(bluetoothMacStart, 10);
+
+		const hwRaw = decodeAscii(hwBytes).trim();
+		const groupRaw = decodeAscii(groupBytes).trim();
+		const boardRaw = decodeAscii(boardBytes).trim();
+
+		const hardwareModel = hwRaw ? hwRaw : null;
+		const batteryGroupId = groupRaw ? groupRaw : null;
+		const boardCode = boardRaw ? boardRaw : null;
+
+		let bluetoothMacHex: string | null = null;
+		if (!allSame(macBytes10, 0x00) && !allSame(macBytes10, 0xff)) {
+			const mac6 = macBytes10.slice(0, 6);
+			if (!allSame(mac6, 0x00) && !allSame(mac6, 0xff)) bluetoothMacHex = bytesToHex(mac6);
+		}
+
+		this._debug('[bms]', '[bms] identity raw', {
+			start: `0x${hwModelStart.toString(16)}`,
+			hex: bytesToHex(view.bytes(hwModelStart, quantity * 2)),
+		});
+		this._debug('[bms]', '[bms] identity parsed', { s, n, hardwareModel, batteryGroupId, boardCode, bluetoothMacHex });
+
+		return { s, n, hardwareModel, batteryGroupId, boardCode, bluetoothMacHex };
 	}
 
 	async readRegisters(
@@ -206,9 +305,7 @@ export class BmsClient {
 	}
 
 	async readAllStatus(): Promise<BmsStatus> {
-		const head = await this.readRegisters(0x100, 1);
-		const s = (head[0] >> 8) & 0xff;
-		const n = head[0] & 0xff;
+		const { s, n } = await this.readSn();
 		const cellVoltagesStart = 0x141;
 		const macStart = cellVoltagesStart + s + n + 16 + 16 + 16;
 		const macRegs = 5; // 10 bytes
@@ -216,6 +313,67 @@ export class BmsClient {
 		const totalRegs = lastAddr - 0x100 + 1;
 		const regs = await this.readRegisters(0x100, totalRegs);
 		return parseStatusRegisters({ startAddress: 0x100, registers: regs });
+	}
+
+	/**
+	 * 读取“蓝牙 MAC 地址”（状态区动态地址，10 bytes，通常前 6 bytes 有效）
+	 * 返回 12 位 HEX（不含分隔符），便于与页面/后端字段对齐。
+	 *
+	 * 用途：向导页不需要读取整段 status（大包易超时），只取 MAC 做展示/扫码校验即可。
+	 */
+	async readBluetoothMacHex(): Promise<string | null> {
+		const { s, n } = await this.readSn();
+		const { bluetoothMacStart } = this._computeIdentityAddresses({ s, n });
+		const regs = await this.readRegisters(bluetoothMacStart, 5);
+		const view = new RegisterView(bluetoothMacStart, regs);
+		const bytes10 = view.bytes(bluetoothMacStart, 10);
+		if (allSame(bytes10, 0x00) || allSame(bytes10, 0xff)) return null;
+		const mac6 = bytes10.slice(0, 6);
+		if (allSame(mac6, 0x00) || allSame(mac6, 0xff)) return null;
+		return bytesToHex(mac6);
+	}
+
+	/**
+	 * 读取任意寄存器范围，并按 PARAM_DEF_BY_KEY（PARAM_DEFS）语义化解析。
+	 *
+	 * 返回对象的 key 使用 param-registry.ts 中定义的变量名（SCREAMING_SNAKE_CASE -> camelCase）。
+	 * 只解析“完全落在请求范围内”的参数（避免半截 u32 / str 造成误读）。
+	 */
+	async readParamsByAddressRange(startAddress: number, quantity: number): Promise<Record<string, unknown>> {
+		const regs = await this.readRegisters(startAddress, quantity);
+		return this.decodeParamsByAddressRange(startAddress, regs);
+	}
+
+	decodeParamsByAddressRange(startAddress: number, registers: Uint16Array): Record<string, unknown> {
+		const quantity = registers.length;
+		const rangeStart = startAddress;
+		const rangeEnd = startAddress + quantity - 1;
+		const view = new RegisterView(startAddress, registers);
+		const out: Record<string, unknown> = {};
+
+		const defs = Object.values(PARAM_DEF_BY_KEY).filter((d) => d.valueType !== 'statusPath') as DecodableParamDef[];
+		for (const def of defs) {
+			if (def.valueType === 'str') {
+				const start = def.startAddress;
+				const end = def.startAddress + Math.ceil(def.byteLength / 2) - 1;
+				if (start < rangeStart || end > rangeEnd) continue;
+				out[constToCamel(def.key)] = decodeParam(def, view);
+				continue;
+			}
+			if (def.valueType === 'u32') {
+				const start = def.address;
+				const end = def.address + 1;
+				if (start < rangeStart || end > rangeEnd) continue;
+				out[constToCamel(def.key)] = decodeParam(def, view);
+				continue;
+			}
+			// u8 / u16
+			const addr = def.address;
+			if (addr < rangeStart || addr > rangeEnd) continue;
+			out[constToCamel(def.key)] = decodeParam(def, view);
+		}
+
+		return out;
 	}
 
 	async readRoParam(paramKey: string): Promise<unknown> {

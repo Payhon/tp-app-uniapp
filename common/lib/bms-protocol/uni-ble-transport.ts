@@ -42,6 +42,13 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function u8ToHex(bytes: Uint8Array | ArrayLike<number>): string {
+	const u8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+	let out = '';
+	for (let i = 0; i < u8.length; i += 1) out += (u8[i] & 0xff).toString(16).padStart(2, '0');
+	return out.toUpperCase();
+}
+
 function defer<T>() {
 	let resolve!: (value: T) => void
 	let reject!: (err: unknown) => void
@@ -100,10 +107,24 @@ class FrameCollector {
 		this._buf = merged;
 	}
 
+	snapshotHex({ headBytes = 24, tailBytes = 24 }: { headBytes?: number; tailBytes?: number } = {}) {
+		const len = this._buf.length;
+		const head = this._buf.slice(0, Math.min(headBytes, len));
+		const tail = this._buf.slice(Math.max(0, len - tailBytes), len);
+		return {
+			len,
+			headHex: u8ToHex(head),
+			tailHex: u8ToHex(tail),
+		};
+	}
+
 	/**
-	 * 尝试从缓冲区中提取一个“完整帧”：
+	 * 尝试从缓冲区中提取一个“完整帧”。
+	 *
+	 * 协议特征：
 	 * - 帧头：7F 55
 	 * - 帧尾：FD
+	 * - 读回复：第 6 字节为 byteCount，可推导完整帧长度（避免仅靠尾码误判）
 	 * - 使用 parseFrame 验证 CRC（不通过则继续向后找）
 	 */
 	tryShiftOneValidFrame(): Uint8Array | null {
@@ -124,21 +145,77 @@ class FrameCollector {
 		}
 		if (start > 0) this._buf = bytes.slice(start);
 
-		// 从头码之后寻找尾码
+		// 优先按协议长度提帧（更稳）：读回复可用 byteCount 推导总长度
+		if (this._buf.length >= 6) {
+			const functionCode = this._buf[4] & 0xff;
+			const isError = (functionCode & 0x80) !== 0;
+			if (isError) {
+				// error response fixed length = 9
+				const expectedLen = 9;
+				if (this._buf.length >= expectedLen) {
+					const candidate = this._buf.slice(0, expectedLen);
+					if (candidate[candidate.length - 1] === 0xfd) {
+						try {
+							parseFrame(candidate);
+							this._buf = this._buf.slice(expectedLen);
+							return candidate;
+						} catch (e) {
+							this._buf = this._buf.slice(1);
+							return null;
+						}
+					}
+				}
+			} else if (functionCode === 0x03 || functionCode === 0xff) {
+				// read response: 9 + byteCount
+				const byteCount = this._buf[5] & 0xff;
+				const expectedLen = 9 + byteCount;
+				if (this._buf.length >= expectedLen) {
+					const candidate = this._buf.slice(0, expectedLen);
+					if (candidate[candidate.length - 1] === 0xfd) {
+						try {
+							parseFrame(candidate);
+							this._buf = this._buf.slice(expectedLen);
+							return candidate;
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e);
+							if (this._logger && this._logger.debug) this._logger.debug('[ble] drop invalid frame:', msg);
+							this._buf = this._buf.slice(1);
+							return null;
+						}
+					}
+				}
+			} else if (functionCode === 0x10 || functionCode === 0x11) {
+				// write response fixed length = 12
+				const expectedLen = 12;
+				if (this._buf.length >= expectedLen) {
+					const candidate = this._buf.slice(0, expectedLen);
+					if (candidate[candidate.length - 1] === 0xfd) {
+						try {
+							parseFrame(candidate);
+							this._buf = this._buf.slice(expectedLen);
+							return candidate;
+						} catch (e) {
+							this._buf = this._buf.slice(1);
+							return null;
+						}
+					}
+				}
+			}
+		}
+
+		// 兜底：从头码之后寻找尾码（可能存在未知功能码 / 噪声）
 		for (let j = 2; j < this._buf.length; j += 1) {
 			if (this._buf[j] !== 0xfd) continue;
 			const candidate = this._buf.slice(0, j + 1);
 			try {
-				// 验证 CRC / 帧合法性
 				parseFrame(candidate);
 				this._buf = this._buf.slice(j + 1);
 				return candidate;
-				} catch (e) {
-					// CRC 不通过时，继续找下一个尾码
-					const msg = e instanceof Error ? e.message : String(e);
-					if (this._logger && this._logger.debug) this._logger.debug('[ble] drop invalid frame:', msg);
-				}
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e);
+				if (this._logger && this._logger.debug) this._logger.debug('[ble] drop invalid frame:', msg);
 			}
+		}
 
 		// 没有完整帧，保留缓冲
 		return null;
@@ -188,6 +265,7 @@ export class UniBleBmsTransport {
 	private _lastTxAt: number
 	private _pending: PendingReq | null
 	private _queue: Promise<Uint8Array>
+	private _rxLogCount: number
 
 	constructor({
 		serviceUUID = BMS_BLE_SERVICE_UUID,
@@ -196,7 +274,7 @@ export class UniBleBmsTransport {
 		writeChunkSize = 20,
 		writeChunkIntervalMs = 20,
 		minFrameIntervalMs = 120,
-		requestTimeoutMs = 1500,
+		requestTimeoutMs = 5000,
 		logger = console,
 	}: UniBleBmsTransportOptions = {}) {
 		this.serviceUUID = normalizeUuid(serviceUUID);
@@ -220,6 +298,7 @@ export class UniBleBmsTransport {
 
 		this._pending = null; // { resolve, reject, expect, timer }
 		this._queue = Promise.resolve(new Uint8Array(0)); // 串行化 request，避免并发导致“回复帧串包”
+		this._rxLogCount = 0;
 	}
 
 	async init() {
@@ -280,31 +359,55 @@ export class UniBleBmsTransport {
 			await this.init();
 			this.deviceId = deviceId;
 
+		// 连接前停止扫描（部分平台扫描中会影响连接/发现服务）
+		try {
+			await uniAsync('stopBluetoothDevicesDiscovery', {});
+		} catch (e) {}
+
+		if (this.logger?.info) {
+			this.logger.info('[ble] connect()', { deviceId, serviceUUID: this.serviceUUID, writeCharUUID: this.writeCharUUID, notifyCharUUID: this.notifyCharUUID });
+		}
 		await uniAsync('createBLEConnection', { deviceId });
 			this._connected = true;
 
-			// 获取服务
-			const srvRes = await uniAsync<{ services?: UniBleService[] }>('getBLEDeviceServices', { deviceId });
-			const services = srvRes.services || [];
-			const service = services.find((s: UniBleService) => normalizeUuid(s.uuid) === this.serviceUUID) || services[0];
-			if (!service) throw new BmsProtocolError('No BLE services found on device');
+			// 获取服务（部分平台刚连上时会返回空，做重试）
+			const tryGetServices = async (): Promise<UniBleService[]> => {
+				const srvRes = await uniAsync<{ services?: UniBleService[] }>('getBLEDeviceServices', { deviceId });
+				return srvRes.services || [];
+			};
+			let services: UniBleService[] = [];
+			for (let i = 0; i < 3; i += 1) {
+				services = await tryGetServices();
+				if (services.length) break;
+				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceServices empty, retry...', i + 1);
+				await sleep(200);
+			}
+			if (!services.length) throw new BmsProtocolError('No BLE services found on device');
+			const service = services.find((s: UniBleService) => normalizeUuid(s.uuid) === this.serviceUUID) || null;
+			if (!service) throw new BmsProtocolError('Target BLE service not found', { expect: this.serviceUUID, services: services.map((s) => s.uuid) });
 			this.serviceId = service.uuid;
 
-			// 获取特征值
-			const chRes = await uniAsync<{ characteristics?: UniBleCharacteristic[] }>('getBLEDeviceCharacteristics', {
-				deviceId,
-				serviceId: this.serviceId,
-			});
-			const chars = chRes.characteristics || [];
-			const writeChar =
-				chars.find((c: UniBleCharacteristic) => normalizeUuid(c.uuid) === this.writeCharUUID) ||
-				chars.find((c: UniBleCharacteristic) => c.properties && (c.properties.write || c.properties.writeNoResponse));
-			const notifyChar =
-				chars.find((c: UniBleCharacteristic) => normalizeUuid(c.uuid) === this.notifyCharUUID) ||
-				chars.find((c: UniBleCharacteristic) => c.properties && c.properties.notify);
+			// 获取特征值（重试），并强制匹配固定 UUID（不做猜测）
+			const tryGetChars = async (): Promise<UniBleCharacteristic[]> => {
+				const chRes = await uniAsync<{ characteristics?: UniBleCharacteristic[] }>('getBLEDeviceCharacteristics', {
+					deviceId,
+					serviceId: this.serviceId,
+				});
+				return chRes.characteristics || [];
+			};
+			let chars: UniBleCharacteristic[] = [];
+			for (let i = 0; i < 3; i += 1) {
+				chars = await tryGetChars();
+				if (chars.length) break;
+				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceCharacteristics empty, retry...', i + 1);
+				await sleep(200);
+			}
+			if (!chars.length) throw new BmsProtocolError('No BLE characteristics found on service', { serviceId: this.serviceId });
 
-			if (!writeChar) throw new BmsProtocolError('Write characteristic not found');
-			if (!notifyChar) throw new BmsProtocolError('Notify characteristic not found');
+			const writeChar = chars.find((c: UniBleCharacteristic) => normalizeUuid(c.uuid) === this.writeCharUUID) || null;
+			const notifyChar = chars.find((c: UniBleCharacteristic) => normalizeUuid(c.uuid) === this.notifyCharUUID) || null;
+			if (!writeChar) throw new BmsProtocolError('Write characteristic not found', { expect: this.writeCharUUID });
+			if (!notifyChar) throw new BmsProtocolError('Notify characteristic not found', { expect: this.notifyCharUUID });
 
 		this.writeCharId = writeChar.uuid;
 		this.notifyCharId = notifyChar.uuid;
@@ -320,6 +423,10 @@ export class UniBleBmsTransport {
 		// 注册 notify 回调
 		const key = mkNotifyKey(deviceId, this.serviceId, this.notifyCharId);
 		notifyCallbacks.set(key, (ab) => this._onNotify(ab));
+
+		this._rxLogCount = 0;
+		// 部分设备在打开 notify 后需要短暂准备时间
+		await sleep(220);
 
 		this.logger && this.logger.info && this.logger.info('[ble] connected:', { deviceId, serviceId: this.serviceId });
 	}
@@ -348,11 +455,23 @@ export class UniBleBmsTransport {
 		}
 
 		_onNotify(arrayBuffer: ArrayBuffer) {
+			try {
+				if (this.logger?.debug && this._rxLogCount < 10) {
+					this._rxLogCount += 1;
+					const u8 = new Uint8Array(arrayBuffer);
+					this.logger.debug(`[ble] rx chunk len=${u8.length} head=${u8ToHex(u8.slice(0, Math.min(24, u8.length)))}`);
+				}
+			} catch (e) {}
 			this._collector.push(arrayBuffer);
 
 			while (true) {
 				const frame = this._collector.tryShiftOneValidFrame();
 			if (!frame) break;
+			try {
+				if (this.logger?.debug) {
+					this.logger.debug(`[ble] rx frame len=${frame.length} hex=${u8ToHex(frame)}`);
+				}
+			} catch (e) {}
 			this._tryResolvePending(frame);
 			}
 		}
@@ -389,14 +508,29 @@ export class UniBleBmsTransport {
 
 		for (let offset = 0; offset < bytes.length; offset += chunkSize) {
 			const chunk = bytes.slice(offset, Math.min(bytes.length, offset + chunkSize));
-			await uniAsync('writeBLECharacteristicValue', {
-				deviceId: this.deviceId,
-				serviceId: this.serviceId,
-				characteristicId: this.writeCharId,
-				// 部分平台支持 writeType: 'writeNoResponse'
-				writeType: 'writeNoResponse',
-				value: toArrayBuffer(chunk),
-			});
+			try {
+				await uniAsync('writeBLECharacteristicValue', {
+					deviceId: this.deviceId,
+					serviceId: this.serviceId,
+					characteristicId: this.writeCharId,
+					// 目标特征值为 write without response，但部分运行时不支持 writeType 入参；失败时降级重试一次
+					writeType: 'writeNoResponse',
+					value: toArrayBuffer(chunk),
+				});
+			} catch (e: any) {
+				const code = e?.code
+				const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
+				if (code === 10007 || msg.includes('property not support') || msg.includes('not support')) {
+					await uniAsync('writeBLECharacteristicValue', {
+						deviceId: this.deviceId,
+						serviceId: this.serviceId,
+						characteristicId: this.writeCharId,
+						value: toArrayBuffer(chunk),
+					});
+				} else {
+					throw e;
+				}
+			}
 			if (chunkIntervalMs > 0 && offset + chunkSize < bytes.length) await sleep(chunkIntervalMs);
 		}
 	}
@@ -434,15 +568,43 @@ export class UniBleBmsTransport {
 				const deferred = defer<Uint8Array>();
 				const timer = setTimeout(() => {
 					if (this._pending && this._pending.reject === deferred.reject) this._pending = null;
+					try {
+						if (this.logger?.warn) {
+							this.logger.warn('[ble] request timeout snapshot', { expect, ...this._collector.snapshotHex() });
+						}
+					} catch (e) {}
 					deferred.reject(new BmsProtocolError(`BLE request timeout after ${timeoutMs}ms`, { expect }));
 				}, timeoutMs);
 				this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer };
 				const respPromise = deferred.promise;
 
 				try {
+					if (this.logger?.debug) this.logger.debug(`[ble] tx frame len=${req.length} hex=${u8ToHex(req)}`);
 					await this._writeFrameBytes(req);
 					this._lastTxAt = Date.now();
-				return await respPromise;
+
+					// 某些设备/运行时不会主动推送 notify，需要通过 read 触发 value change（特征值含 Read 属性时）
+					const pendingRef = this._pending;
+					void (async () => {
+						const delays = [220, 520];
+						for (const ms of delays) {
+							await sleep(ms);
+							if (!this._pending || this._pending !== pendingRef) return;
+							if (!this.deviceId || !this.serviceId || !this.notifyCharId) return;
+							try {
+								if (this.logger?.debug) this.logger.debug('[ble] probe read notify', { ms });
+								await uniAsync('readBLECharacteristicValue', {
+									deviceId: this.deviceId,
+									serviceId: this.serviceId,
+									characteristicId: this.notifyCharId,
+								});
+							} catch (e) {
+								// ignore probe errors
+							}
+						}
+					})();
+
+					return await respPromise;
 			} catch (e) {
 				const pending = this._pending;
 				if (pending) clearTimeout(pending.timer);

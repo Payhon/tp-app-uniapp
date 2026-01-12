@@ -72,8 +72,9 @@ function pushU16be(out: number[], value: number): void {
 }
 
 function calcCrcForFrame(frameWithoutCrcAndTail: number[]): number {
-	// CRC covers bytes from source address to last data byte (i.e. excludes 0x7F,0x55)
-	const crcRegion = frameWithoutCrcAndTail.slice(2);
+	// CRC16-Modbus covers bytes from **target address** to last data byte (i.e. excludes 0x7F,0x55 and excludes source address)
+	// Ref: doc/oriigin/device_comm_protocol_basic.md - "CRC值...从目标地址到CRC前面所有字节"
+	const crcRegion = frameWithoutCrcAndTail.slice(3);
 	return crc16Modbus(crcRegion);
 }
 
