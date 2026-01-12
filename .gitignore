@@ -5,3 +5,7 @@ node_modules
 !pages.json
 !manifest.json
 !locale/**/*.json
+
+# macOS
+.DS_Store
+.DS_Store?
