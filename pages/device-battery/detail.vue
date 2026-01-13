@@ -17,7 +17,7 @@
 			</view>
 		</view>
 
-		<view class="content" :style="{ paddingTop: navHeight + 'px' }">
+		<view class="content" :style="{ paddingTop: navHeight + 'px', paddingBottom: contentBottomPadPx + 'px' }">
 			<dashboard-tab
 				v-if="activeTab === 0"
 				:battery="battery"
@@ -77,6 +77,8 @@ const connecting = ref(false)
 const statusBarHeight = getWindowInfo().statusBarHeight || 0
 const safeBottom = getWindowInfo().safeAreaInsets?.bottom || 0
 const navHeight = 44 + statusBarHeight
+const rpx2px = Number(getWindowInfo().windowWidth || getWindowInfo().screenWidth || 375) / 750
+const contentBottomPadPx = Math.round(160 * rpx2px + safeBottom)
 
 const titleText = computed(() => {
 	const name = String(battery.value?.device_name || '').trim()
@@ -332,7 +334,6 @@ onUnload(() => {
 .content {
 	position: relative;
 	z-index: 1;
-	padding-bottom: 160rpx;
 	box-sizing: border-box;
 }
 

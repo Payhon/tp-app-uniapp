@@ -1,20 +1,16 @@
 <template>
 	<view class="wrap">
 		<view class="top">
-			<image class="top-bg" src="/static/image/device/device-top@2x.png" mode="widthFix" />
-
-			<view class="gauge-layer">
-				<view class="gauge gauge--left">
-					<side-gauge :value="socPct" label="SOC" direction="left" />
-				</view>
-				<view class="gauge gauge--right">
-					<side-gauge :value="sohPct" label="SOH" direction="right" />
-				</view>
-
-				<view class="center">
-					<text class="center__state">{{ stateText }}</text>
-					<text class="center__mac">{{ macText }}</text>
-				</view>
+			<image class="top-bg" src="/static/image/device/device-top@2x.png" mode="aspectFill" />
+			<view class="top__inner">
+				<dashboard-gauge class="gauge" :soc="socPct" :soh="sohPct">
+					<template #footer>
+						<view class="gauge-footer">
+							<text class="state-pill">{{ stateText }}</text>
+							<text class="mac">{{ macText }}</text>
+						</view>
+					</template>
+				</dashboard-gauge>
 			</view>
 		</view>
 
@@ -116,7 +112,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import SideGauge from '@/components/device/side-gauge.vue'
+import DashboardGauge from '@/components/dashboard-gauge/dashboard-gauge.vue'
 import type { AppBatteryDetail } from '@/service/app-battery'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 
@@ -224,62 +220,53 @@ const t2Text = computed(() => cToFText(props.status?.temperature?.heatingFilmC))
 
 .top {
 	position: relative;
+	height: 600rpx;
+	border-radius: 40rpx;
+	overflow: hidden;
 }
 
 .top-bg {
-	width: 100%;
-	display: block;
-}
-
-.gauge-layer {
 	position: absolute;
+	top: 0;
 	left: 0;
 	right: 0;
-	top: 0;
 	bottom: 0;
+	width: 100%;
+	height: 100%;
+}
+
+.top__inner {
+	position: relative;
+	z-index: 1;
+	height: 100%;
+	padding: 24rpx;
+	box-sizing: border-box;
 	display: flex;
 	align-items: center;
-	justify-content: center;
 }
 
 .gauge {
-	position: absolute;
-	top: 64rpx;
-	width: 250rpx;
-	height: 250rpx;
+	width: 100%;
 }
 
-.gauge--left {
-	left: 56rpx;
-}
-
-.gauge--right {
-	right: 56rpx;
-}
-
-.center {
-	position: absolute;
-	top: 150rpx;
-	left: 0;
-	right: 0;
+.gauge-footer {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	justify-content: center;
-	gap: 10rpx;
+	gap: 14rpx;
 }
 
-.center__state {
-	font-size: 22rpx;
+.state-pill {
+	font-size: 26rpx;
 	color: #f6a545;
-	padding: 6rpx 18rpx;
+	padding: 10rpx 22rpx;
 	background: rgba(246, 165, 69, 0.16);
 	border-radius: 999px;
 }
 
-.center__mac {
-	font-size: 24rpx;
-	color: #9aa0a6;
+.mac {
+	font-size: 28rpx;
+	color: #333333;
 }
 
 .remain {
