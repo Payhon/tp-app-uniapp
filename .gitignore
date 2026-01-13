@@ -4,6 +4,7 @@ node_modules
 *.json
 !pages.json
 !manifest.json
+!project.config.json
 !locale/**/*.json
 
 # macOS

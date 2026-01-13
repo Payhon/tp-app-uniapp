@@ -1,7 +1,7 @@
 <template>
 	<view class="wrap">
 		<view class="top">
-			<image class="top-bg" src="/static/image/device/device-top@2x.png" mode="aspectFill" />
+			<image class="top-bg" :src="$img('device/device-top@2x.png')" mode="aspectFill" />
 			<view class="top__inner">
 				<dashboard-gauge class="gauge" :soc="socPct" :soh="sohPct">
 					<template #footer>

@@ -1,9 +1,9 @@
 <template>
 	<view class="home-page">
-		<image class="home-bg" src="/static/image/bg@2x.png" mode="aspectFill" />
+		<image class="home-bg" :src="$img('bg@2x.png')" mode="aspectFill" />
 
 		<view class="home-top">
-			<image class="home-top-bg" src="/static/image/home/home-top@2x.png" mode="widthFix" />
+			<image class="home-top-bg" :src="$img('home/home-top@2x.png')" mode="widthFix" />
 
 			<view class="alarm-btn" @tap="goAlarm">
 				<u-icon name="bell" size="14" color="#FFFFFF"></u-icon>

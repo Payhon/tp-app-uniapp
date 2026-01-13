@@ -5,6 +5,11 @@ export interface AppConfig {
 	webUrl: string
 	tenantId: string
 	apiBaseUrl: string
+	/**
+	 * 静态资源 CDN 前缀（建议配置为 https://cdn.example.com，不要以 / 结尾）
+	 * 仅在需要将大图等静态资源改为线上加载时使用。
+	 */
+	imageCdnPrefix: string
 }
 
 // 配置信息
@@ -16,6 +21,7 @@ const config: AppConfig = {
 	webUrl : API_BSE_URL,
 	tenantId : 'd616bcbb', 
 	apiBaseUrl : API_BSE_URL,
+	imageCdnPrefix: 'https://fjcdn.yz6688.cn',
 	// webUrl : 'http://cc.jszjcc.com',
 	// websocket链接 ws://47.99.103.220:8282 
 	// websocketUrl : 'wss://xxx/wss',

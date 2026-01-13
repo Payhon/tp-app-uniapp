@@ -1,8 +1,8 @@
 <template>
 	<view class="my-page">
 		<view class="top-bg">
-			<image class="bg-layer-1" src="/static/image/my/my-top-1@2x.png" mode="aspectFill" />
-			<image class="bg-layer-2" src="/static/image/my/my-top-2@2x.png" mode="aspectFill" />
+			<image class="bg-layer-1" :src="$img('my/my-top-1@2x.png')" mode="aspectFill" />
+			<image class="bg-layer-2" :src="$img('my/my-top-2@2x.png')" mode="aspectFill" />
 		</view>
 
 		<view class="content">

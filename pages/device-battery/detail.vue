@@ -1,6 +1,6 @@
 <template>
 	<view class="page">
-		<image class="bg" src="/static/image/bg@2x.png" mode="aspectFill" />
+		<image class="bg" :src="$img('bg@2x.png')" mode="aspectFill" />
 
 		<view class="nav" :style="{ paddingTop: statusBarHeight + 'px' }">
 			<view class="nav__inner">

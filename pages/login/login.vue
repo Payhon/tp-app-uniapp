@@ -1,6 +1,6 @@
 <template>
 	<view class="auth-page">
-		<image class="page-bg" src="/static/image/bg@2x.png" mode="aspectFill" />
+		<image class="page-bg" :src="$img('bg@2x.png')" mode="aspectFill" />
 		<view class="brand">
 			<image class="brand-logo" src="/static/image/logo@2x.png" mode="heightFix" />
 		</view>

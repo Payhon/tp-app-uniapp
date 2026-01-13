@@ -1,0 +1,42 @@
+{
+  "description": "项目配置文件（uni-app -> 微信小程序）。",
+  "packOptions": {
+    "ignore": [
+      { "type": "file", "value": "static/image/bg@2x.png" },
+      { "type": "file", "value": "static/image/device/device-top@2x.png" },
+      { "type": "file", "value": "static/image/home/home-top@2x.png" },
+      { "type": "file", "value": "static/image/my/my-top-1@2x.png" },
+      { "type": "file", "value": "static/image/my/my-top-2@2x.png" }
+    ]
+  },
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": false,
+    "minified": false,
+    "newFeature": true,
+    "bigPackageSizeSupport": true
+  },
+  "compileType": "miniprogram",
+  "libVersion": "",
+  "appid": "wx40d17175f91bdbf0",
+  "projectname": "FJiaBMS",
+  "condition": {
+    "search": {
+      "current": -1,
+      "list": []
+    },
+    "conversation": {
+      "current": -1,
+      "list": []
+    },
+    "game": {
+      "current": -1,
+      "list": []
+    },
+    "miniprogram": {
+      "current": -1,
+      "list": []
+    }
+  }
+}

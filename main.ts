@@ -12,6 +12,7 @@ import api from '@/API/'
 import http from '@/common/request'
 import { Login } from '@/types/auth'
 import { isLoginType } from '@/store/login'
+import { imageUrl } from '@/common/assets/images'
 
 import needLogin from '@/components/login/needLogin.vue'
 import authorize from '@/components/login/authorize.vue'
@@ -32,6 +33,7 @@ export function createApp() {
 	gp.$login = { isLoginType } as Login
 	gp.$store = legacyStore
 	gp.$H = http
+	gp.$img = imageUrl
 
 	app.component('needLogin', needLogin)
 	app.component('authorize', authorize)
