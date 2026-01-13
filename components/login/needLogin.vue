@@ -106,7 +106,7 @@ const doLoginSubmit = async () => {
 		legacyStore.commit('login', res)
 		legacyStore.dispatch('getUserInfo')
 		uni.switchTab({
-			url: '../fishery-monitor/fishery-monitor'
+			url: '/pages/home/home'
 		})
 		uni.showToast({
 			title: t('components.login.loginSuccess') as string,
