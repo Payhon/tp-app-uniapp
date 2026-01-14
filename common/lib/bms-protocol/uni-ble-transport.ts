@@ -2,6 +2,9 @@ import { BmsProtocolError, parseFrame } from './frame'
 import { BMS_BLE_NOTIFY_UUID, BMS_BLE_SERVICE_UUID, BMS_BLE_WRITE_UUID } from './ble-uuids'
 import type { LoggerLike } from './types'
 
+// eslint-disable-next-line @typescript-eslint/naming-convention
+declare const wx: any
+
 type UniBleBmsTransportOptions = {
 	serviceUUID?: string
 	writeCharUUID?: string
@@ -303,7 +306,29 @@ export class UniBleBmsTransport {
 
 	async init() {
 		// 初始化蓝牙模块（必须调用）
-		await uniAsync('openBluetoothAdapter', {});
+		// 微信小程序：显式 central 模式，且在提示隐私未授权时尝试触发授权
+		try {
+			// #ifdef MP-WEIXIN
+			await uniAsync('openBluetoothAdapter', { mode: 'central' });
+			// #endif
+			// #ifndef MP-WEIXIN
+			await uniAsync('openBluetoothAdapter', {});
+			// #endif
+		} catch (e) {
+			// #ifdef MP-WEIXIN
+			const msg = String((e as any)?.errMsg || '').toLowerCase();
+			const requirePrivacyAuthorize = wx && wx.requirePrivacyAuthorize;
+			if (msg.includes('privacy') && typeof requirePrivacyAuthorize === 'function') {
+				await new Promise((resolve) => requirePrivacyAuthorize({ complete: resolve }));
+				await uniAsync('openBluetoothAdapter', { mode: 'central' });
+			} else {
+				throw e;
+			}
+			// #endif
+			// #ifndef MP-WEIXIN
+			throw e;
+			// #endif
+		}
 		ensureNotifyListener();
 	}
 

@@ -186,6 +186,7 @@ export default {
       scanning: '正在扫描附近设备...',
       scanStopped: '已停止扫描',
       discoveredCount: '已发现 {count} 台设备',
+      enableBluetoothTip: '请先在系统设置中打开蓝牙后重试',
       unknownDevice: '未知设备',
       advMac: '广播MAC：{mac}',
       rssi: '信号 {rssi}',

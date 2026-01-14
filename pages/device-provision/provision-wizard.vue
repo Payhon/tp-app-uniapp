@@ -56,12 +56,22 @@ import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { BmsClient, BMS_PARAM, createUniBleBmsTransport } from '@/common/lib/bms-protocol'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
+import { formatUniError } from '@/common/device-provision/error'
 import { getDeviceProvisionConfig, postDeviceProvisionBind } from '@/service/deviceProvision'
 
 type StepStatus = 'pending' | 'doing' | 'done' | 'error'
 type Step = { key: string; title: string; status: StepStatus }
 
 const { t } = useI18n()
+
+function format(template: string, params: Record<string, string | number | null | undefined>): string {
+	let out = String(template || '')
+	for (const [k, v] of Object.entries(params)) {
+		const val = v == null ? '' : String(v)
+		out = out.replace(new RegExp(`\\{${k}\\}`, 'g'), val)
+	}
+	return out
+}
 
 const pageHeight = ref<string | number>(0)
 const marginTopHeight = ref<string | number>(0)
@@ -121,21 +131,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function stringifyError(e: unknown): string {
-	if (!e) return ''
-	if (e instanceof Error) {
-		const anyErr = e as any
-		const code = anyErr?.code
-		const errMsg = anyErr?.errMsg
-		const msg = e.message || String(e)
-		if (code != null || errMsg) return `${msg}${code != null ? ` (code=${code})` : ''}${errMsg ? ` (${errMsg})` : ''}`
-		return msg
-	}
-	if (typeof e === 'string') return e
-	try {
-		return JSON.stringify(e)
-	} catch (err) {
-		return String(e)
-	}
+	return formatUniError(e)
 }
 
 function setStep(key: string, status: StepStatus) {
@@ -203,7 +199,7 @@ async function runProvision() {
 
 			// 扫码模式：校验连接到的设备 MAC 是否一致（避免连错设备）
 			if (qrMac.value && bleMac && qrMac.value !== bleMac) {
-				throw new Error(t('pages.deviceProvision.qrMacMismatch', { qr: mac12ToColon(qrMac.value), ble: mac12ToColon(bleMac) }))
+				throw new Error(format(t('pages.deviceProvision.qrMacMismatch') as string, { qr: mac12ToColon(qrMac.value), ble: mac12ToColon(bleMac) }))
 			}
 		setStep('readUuid', 'done')
 

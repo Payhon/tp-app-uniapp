@@ -108,7 +108,12 @@
         "setting" : {
             "urlCheck" : false
         },
-        "usingComponents" : true
+        "usingComponents" : true,
+        "permission" : {
+            "scope.userLocation" : {
+                "desc" : "用于蓝牙搜索附近设备"
+            }
+        }
     },
     "mp-alipay" : {
         "usingComponents" : true

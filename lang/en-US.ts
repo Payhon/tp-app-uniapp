@@ -188,6 +188,7 @@ export default {
       scanning: 'Scanning nearby devices...',
       scanStopped: 'Scan stopped',
       discoveredCount: '{count} device(s) found',
+      enableBluetoothTip: 'Please enable Bluetooth in system settings and try again',
       unknownDevice: 'Unknown Device',
       advMac: 'Adv MAC: {mac}',
       rssi: 'RSSI {rssi}',
