@@ -22,12 +22,12 @@ export const apiRequest = (url, data, method) => {
 		let server = $C.apiBaseUrl
 		// console.log("server",server);
 		config.baseUrl = server
-		
+		console.log("config========",config);
 		return config;
 	}
 	//设置请求结束后拦截器
 		http.interceptor.response = async (response) => {
-			const statusCode = response.data.code;
+			const statusCode = response.statusCode;
 			if (statusCode === 401 || statusCode === 403 || statusCode === 402) {
 				uni.showModal({
 					title: i18n.global.t('common.tip'),

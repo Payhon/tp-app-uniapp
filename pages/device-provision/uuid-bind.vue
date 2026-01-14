@@ -74,15 +74,21 @@ async function run() {
 	try {
 		status.value = 'checking'
 		const info = await getDeviceProvisionInfo(uuid.value)
+		if ((info as any)?.code === 100404) {
+			throw new Error(t('pages.deviceProvision.deviceNotFound') as string)
+		}
 		if ((info as any)?.code !== 200) {
-			throw new Error(String((info as any)?.message || t('pages.deviceProvision.deviceNotFound')))
+			throw new Error(String((info as any)?.message || t('pages.deviceProvision.unknownError')))
 		}
 
 		// 按需求：UUID（item_uuid）查询到设备后，直接绑定到当前用户账号下（不走 BLE 写入流程）
 		status.value = 'binding'
 		const bindRes = await postDeviceProvisionBind({ item_uuid: uuid.value })
 		if ((bindRes as any)?.code !== 200) {
-			throw new Error(String((bindRes as any)?.message || t('pages.deviceProvision.bindFailed')))
+			console.error('[uuid-bind] bind failed', bindRes)
+			const sqlErr = String((bindRes as any)?.data?.sql_error || '').trim()
+			const msg = String((bindRes as any)?.message || t('pages.deviceProvision.bindFailed'))
+			throw new Error(sqlErr ? `${msg} (${sqlErr})` : msg)
 		}
 
 		status.value = 'success'

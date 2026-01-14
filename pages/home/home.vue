@@ -71,16 +71,13 @@ import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 
 import HomeDeviceCard from '@/components/home/device-card.vue'
-import { appUnbindDevice, deviceList, deviceMapTelemetry, updateDeviceName } from '@/service/device'
+import { appBoundDeviceList, appUnbindDevice, deviceMapTelemetry, updateDeviceName } from '@/service/device'
 import type { HomeDeviceCardModel } from '@/types/home'
 
-type DeviceListItem = {
-	id: string
-	name?: string
-	device_config_name?: string
-	is_online?: number
-	protocol_type?: string
-	access_way?: string
+type BoundDeviceItem = {
+	device_id: string
+	device_number: string
+	device_name?: string
 	[key: string]: unknown
 }
 
@@ -131,29 +128,24 @@ const parseBatteryPercent = (data: TelemetryMapRsp | null | undefined) => {
 	return 0
 }
 
-const guessConnectType = (d: DeviceListItem): HomeDeviceCardModel['connectType'] => {
-	if (Number(d?.is_online || 0) !== 1) return 'offline'
-	const p = String(d?.protocol_type || '').toLowerCase()
-	const a = String(d?.access_way || '').toLowerCase()
-	if (p.includes('bluetooth') || a.includes('bluetooth')) return 'bluetooth'
-	return 'mqtt'
-}
-
-const toHomeModel = async (d: DeviceListItem): Promise<HomeDeviceCardModel> => {
+const toHomeModel = async (d: BoundDeviceItem): Promise<HomeDeviceCardModel> => {
 	let batteryPercent = 0
+	let isOnline = false
 	try {
-		const rsp = await deviceMapTelemetry(d.id)
+		const rsp = await deviceMapTelemetry(d.device_id)
 		if (rsp && (rsp as any).code === 200) {
-			batteryPercent = parseBatteryPercent((rsp as any).data as TelemetryMapRsp)
+			const data = (rsp as any).data as TelemetryMapRsp
+			batteryPercent = parseBatteryPercent(data)
+			isOnline = Number(data?.is_online || 0) === 1
 		}
 	} catch (e) {}
 
 	return {
-		id: d.id,
-		name: String(d?.name || '').trim() || '-',
-		model: String(d?.device_config_name || '').trim() || '-',
-		isOnline: Number(d?.is_online || 0) === 1,
-		connectType: guessConnectType(d),
+		id: d.device_id,
+		name: String(d?.device_name || '').trim() || String(d?.device_number || '').trim() || '-',
+		model: String(d?.device_number || '').trim() || '-',
+		isOnline,
+		connectType: isOnline ? 'mqtt' : 'offline',
 		batteryPercent
 	}
 }
@@ -167,18 +159,18 @@ const load = async () => {
 			return
 		}
 
-		const rsp = await deviceList({ page: 1, page_size: 50 })
+		const rsp = await appBoundDeviceList({ page: 1, page_size: 50 })
 		if (!rsp || (rsp as any).code !== 200) {
 			deviceCards.value = []
 			return
 		}
 
 		const rawList = (rsp as any).data?.list as unknown
-		const list = Array.isArray(rawList) ? (rawList as DeviceListItem[]) : []
+		const list = Array.isArray(rawList) ? (rawList as BoundDeviceItem[]) : []
 
 		const out: HomeDeviceCardModel[] = []
 		for (const item of list) {
-			if (!item || !item.id) continue
+			if (!item || !item.device_id) continue
 			// eslint-disable-next-line no-await-in-loop
 			out.push(await toHomeModel(item))
 		}

@@ -39,7 +39,7 @@
 			</view>
 
 			<view class="actions">
-				<u-button type="primary" :loading="running" @click="retry" v-if="!running">
+				<u-button type="primary" :loading="running" @click="retry" v-if="!running && !done">
 					{{ errorMsg ? $t('pages.deviceProvision.retry') : $t('pages.deviceProvision.reRun') }}
 				</u-button>
 				<u-button type="success" @click="goHome" v-if="done">
@@ -57,9 +57,9 @@ import { useI18n } from 'vue-i18n'
 import { BmsClient, BMS_PARAM, createUniBleBmsTransport } from '@/common/lib/bms-protocol'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { formatUniError } from '@/common/device-provision/error'
-import { getDeviceProvisionConfig, postDeviceProvisionBind } from '@/service/deviceProvision'
+import { getDeviceProvisionConfig, getDeviceProvisionInfo, postDeviceProvisionBind } from '@/service/deviceProvision'
 
-type StepStatus = 'pending' | 'doing' | 'done' | 'error'
+type StepStatus = 'pending' | 'doing' | 'done' | 'skipped' | 'error'
 type Step = { key: string; title: string; status: StepStatus }
 
 const { t } = useI18n()
@@ -106,7 +106,7 @@ const currentStepIndex = computed(() => {
 	if (errIdx >= 0) return errIdx
 	let lastDone = -1
 	steps.value.forEach((s, idx) => {
-		if (s.status === 'done') lastDone = idx
+		if (s.status === 'done' || s.status === 'skipped') lastDone = idx
 	})
 	return Math.max(0, lastDone)
 })
@@ -115,6 +115,7 @@ const statusText = (s: StepStatus) => {
 	if (s === 'pending') return t('pages.deviceProvision.statusPending')
 	if (s === 'doing') return t('pages.deviceProvision.statusDoing')
 	if (s === 'done') return t('pages.deviceProvision.statusDone')
+	if (s === 'skipped') return t('pages.deviceProvision.statusSkipped')
 	return t('pages.deviceProvision.statusError')
 }
 
@@ -162,9 +163,9 @@ async function runProvision() {
 	reset()
 	running.value = true
 
-	// TODO(4G判定): 当前默认所有设备都包含 4G，必写 DTU_DOMAIN_PORT；后续按实际硬件能力做分支。
-	const transport = createUniBleBmsTransport({ logger: console as any, requestTimeoutMs: 8000 })
-	const client = new BmsClient({ transport, logger: console as any })
+	const transport = createUniBleBmsTransport({ logger: console as any, requestTimeoutMs: 12000 })
+	// NOTE: 部分设备对单帧写入长度更敏感，这里把 maxWriteRegisters 降到 20（字符串写入会自动分包多次写入）。
+	const client = new BmsClient({ transport, logger: console as any, maxWriteRegisters: 20 })
 	try {
 		console.log('[provision] start', { rawDeviceIdParam: rawDeviceIdParam.value, deviceId: deviceId.value, qrMac: qrMac.value })
 		// 部分平台要求连接前停止扫描，否则连接/发现服务可能失败
@@ -185,38 +186,60 @@ async function runProvision() {
 		console.log('[provision] readUuid start')
 		const uuid = await client.readUuid()
 		summary.uuid = uuid
-			console.log('[provision] readUuid done', { uuid })
+		console.log('[provision] readUuid done', { uuid })
 
-			// 读取身份信息（按 S/N 动态地址）：硬件型号/电池组编号/BMS板编码/蓝牙MAC
-			console.log('[provision] readIdentity start')
-			const identity = await client.readIdentityInfo()
-			if (identity.hardwareModel) summary.hardwareModel = identity.hardwareModel
-			if (identity.batteryGroupId) summary.batteryGroupId = identity.batteryGroupId
-			if (identity.boardCode) summary.boardCode = identity.boardCode
-			const bleMac = identity.bluetoothMacHex ? normalizeMac(identity.bluetoothMacHex) : null
-			if (bleMac) summary.bleMac = mac12ToColon(bleMac)
-			console.log('[provision] readIdentity done', { ...identity, bluetoothMacHex: identity.bluetoothMacHex ? mac12ToColon(identity.bluetoothMacHex) : null })
+		// 读取身份信息（按 S/N 动态地址）：硬件型号/电池组编号/BMS板编码/蓝牙MAC
+		console.log('[provision] readIdentity start')
+		const identity = await client.readIdentityInfo()
+		if (identity.hardwareModel) summary.hardwareModel = identity.hardwareModel
+		if (identity.batteryGroupId) summary.batteryGroupId = identity.batteryGroupId
+		if (identity.boardCode) summary.boardCode = identity.boardCode
+		const bleMac = identity.bluetoothMacHex ? normalizeMac(identity.bluetoothMacHex) : null
+		if (bleMac) summary.bleMac = mac12ToColon(bleMac)
+		console.log('[provision] readIdentity done', { ...identity, bluetoothMacHex: identity.bluetoothMacHex ? mac12ToColon(identity.bluetoothMacHex) : null })
 
-			// 扫码模式：校验连接到的设备 MAC 是否一致（避免连错设备）
-			if (qrMac.value && bleMac && qrMac.value !== bleMac) {
-				throw new Error(format(t('pages.deviceProvision.qrMacMismatch') as string, { qr: mac12ToColon(qrMac.value), ble: mac12ToColon(bleMac) }))
-			}
+		// 扫码模式：校验连接到的设备 MAC 是否一致（避免连错设备）
+		if (qrMac.value && bleMac && qrMac.value !== bleMac) {
+			throw new Error(format(t('pages.deviceProvision.qrMacMismatch') as string, { qr: mac12ToColon(qrMac.value), ble: mac12ToColon(bleMac) }))
+		}
+
+		// 先查云端是否存在该设备（设备未注册则不继续写入/绑定）
+		const infoRsp = await getDeviceProvisionInfo(uuid)
+		if ((infoRsp as any)?.code === 100404) {
+			throw new Error(t('pages.deviceProvision.deviceNotFound') as string)
+		}
+		if ((infoRsp as any)?.code !== 200) {
+			throw new Error(String((infoRsp as any)?.message || t('pages.deviceProvision.unknownError')))
+		}
+
+		// 根据 bms_comm_type 判断是否需要写 DTU；只有 2/3 代表带 4G 通讯。
+		// TODO: 若后续规则变化（例如 null 也代表 4G），在这里调整默认值。
+		const commType = Number((infoRsp as any)?.data?.bms_comm_type || 0)
+		const needWriteDtu = commType === 2 || commType === 3
 		setStep('readUuid', 'done')
 
-		setStep('writeDtu', 'doing')
-		const cfg = await getDeviceProvisionConfig()
-		const dtuDomainPort = String((cfg as any)?.data?.dtu_domain_port || '').trim()
-		if (!dtuDomainPort) {
-			throw new Error(t('pages.deviceProvision.dtuNotConfigured'))
+		if (!needWriteDtu) {
+			setStep('writeDtu', 'skipped')
+		} else {
+			setStep('writeDtu', 'doing')
+			const cfg = await getDeviceProvisionConfig()
+			const dtuDomainPort = String((cfg as any)?.data?.dtu_domain_port || '').trim()
+			if (!dtuDomainPort) {
+				throw new Error(t('pages.deviceProvision.dtuNotConfigured'))
+			}
+			await client.writeParam(BMS_PARAM.DTU_DOMAIN_PORT, dtuDomainPort)
+			setStep('writeDtu', 'done')
 		}
-		await client.writeParam(BMS_PARAM.DTU_DOMAIN_PORT, dtuDomainPort)
-		setStep('writeDtu', 'done')
 
 		setStep('bind', 'doing')
 		const macForBind = bleMac || qrMac.value || undefined
 		const bindRes = await postDeviceProvisionBind({ item_uuid: uuid, ble_mac: macForBind })
 		if ((bindRes as any)?.code !== 200) {
-			throw new Error(String((bindRes as any)?.message || t('pages.deviceProvision.bindFailed')))
+			// NOTE: 后端 CodeDBError 会把 sql_error 放在 data 里；这里输出到控制台便于定位迁移/表缺失等问题。
+			console.error('[provision] bind failed', bindRes)
+			const sqlErr = String((bindRes as any)?.data?.sql_error || '').trim()
+			const msg = String((bindRes as any)?.message || t('pages.deviceProvision.bindFailed'))
+			throw new Error(sqlErr ? `${msg} (${sqlErr})` : msg)
 		}
 		setStep('bind', 'done')
 

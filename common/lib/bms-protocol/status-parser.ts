@@ -1,4 +1,4 @@
-import { RegisterView, decodeAscii } from './register-view'
+import { RegisterView, decodeAscii, swapWordBytes } from './register-view'
 import type { BmsStatus } from './types'
 
 function decodeTempCFromOffset(rawByte: number, offset = -40): number | null {
@@ -167,9 +167,10 @@ export function parseStatusRegisters({
 		const cellTempsC: Array<number | null> = [];
 		for (let i = 0; i < n; i += 1) cellTempsC.push(decodeBmsCellTempCFromKelvin10(view.u16(cellTempsStart + i)));
 
-	const hwModel = decodeAscii(view.bytes(hwModelStart, 32));
-	const batteryGroupId = decodeAscii(view.bytes(batteryGroupIdStart, 32));
-	const boardCode = decodeAscii(view.bytes(boardCodeStart, 32));
+	// NOTE: 某些固件把 ASCII 字符串按“低字节在前”的方式存入 16bit 寄存器，需要交换每个 word 的高低字节才能得到正确字符串。
+	const hwModel = decodeAscii(swapWordBytes(view.bytes(hwModelStart, 32)));
+	const batteryGroupId = decodeAscii(swapWordBytes(view.bytes(batteryGroupIdStart, 32)));
+	const boardCode = decodeAscii(swapWordBytes(view.bytes(boardCodeStart, 32)));
 
 	const macBytes = view.bytes(macStart, 10);
 	const bluetoothMac = allSame(macBytes, 0x00) || allSame(macBytes, 0xff) ? null : bytesToHex(macBytes, ':');

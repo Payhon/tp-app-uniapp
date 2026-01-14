@@ -69,6 +69,17 @@ export function decodeAscii(bytes: Uint8Array): string {
 	return s;
 }
 
+export function swapWordBytes(bytes: Uint8Array): Uint8Array {
+	const out = new Uint8Array(bytes.length);
+	for (let i = 0; i < bytes.length; i += 2) {
+		const a = bytes[i] ?? 0x00;
+		const b = bytes[i + 1] ?? 0x00;
+		out[i] = b;
+		if (i + 1 < out.length) out[i + 1] = a;
+	}
+	return out;
+}
+
 export function encodeAsciiFixed(str: string, byteLength: number): Uint8Array {
 	const out = new Uint8Array(byteLength);
 	for (let i = 0; i < byteLength; i += 1) out[i] = 0x00;

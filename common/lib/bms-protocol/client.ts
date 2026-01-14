@@ -14,7 +14,7 @@ import {
 	normalizeParamKey,
 	type ParamCategory,
 } from './param-registry';
-import { RegisterView, decodeAscii, encodeAsciiFixed } from './register-view';
+import { RegisterView, decodeAscii, encodeAsciiFixed, swapWordBytes } from './register-view';
 import { parseStatusRegisters } from './status-parser';
 import type { BmsParsedFrame } from './frame'
 import type { BmsParamDef, BmsRequestTransport, BmsStatus, LoggerLike } from './types'
@@ -209,9 +209,11 @@ export class BmsClient {
 		const boardBytes = view.bytes(boardCodeStart, 32);
 		const macBytes10 = view.bytes(bluetoothMacStart, 10);
 
-		const hwRaw = decodeAscii(hwBytes).trim();
-		const groupRaw = decodeAscii(groupBytes).trim();
-		const boardRaw = decodeAscii(boardBytes).trim();
+		// NOTE: 某些固件把 ASCII 字符串按“低字节在前”的方式存入 16bit 寄存器，需要交换每个 word 的高低字节才能得到正确字符串。
+		// 现象：FJ24... 会读成 JF42...
+		const hwRaw = decodeAscii(swapWordBytes(hwBytes)).trim();
+		const groupRaw = decodeAscii(swapWordBytes(groupBytes)).trim();
+		const boardRaw = decodeAscii(swapWordBytes(boardBytes)).trim();
 
 		const hardwareModel = hwRaw ? hwRaw : null;
 		const batteryGroupId = groupRaw ? groupRaw : null;

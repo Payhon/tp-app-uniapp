@@ -16,6 +16,7 @@ export type DeviceProvisionInfo = {
 	device_name?: string
 	ble_mac?: string
 	comm_chip_id?: string
+	bms_comm_type?: number
 	is_bound?: boolean
 }
 
@@ -30,4 +31,3 @@ export const getDeviceProvisionInfo = (itemUuid: string) => {
 export const postDeviceProvisionBind = (params: { item_uuid: string; ble_mac?: string }) => {
 	return apiRequest<unknown>('/api/v1/app/device/provision/bind', params, 'POST')
 }
-

@@ -228,6 +228,11 @@ export const appUnbindDevice = (deviceId: string) => {
 	return apiRequest<unknown>('/api/v1/app/device/unbind', { device_id: deviceId }, 'POST')
 }
 
+// APP 端：获取当前用户绑定设备列表（用于“我的设备”）
+export const appBoundDeviceList = (params: { page: number; page_size: number; user_id?: string; device_number?: string }) => {
+	return apiRequest<unknown>('/api/v1/app/device/list', params, 'GET')
+}
+
 // 更新设备信息（目前首页仅用于改名）
 export const updateDeviceName = (payload: { id: string; name: string }) => {
 	return apiRequest<unknown>('/api/v1/device', payload, 'PUT')
