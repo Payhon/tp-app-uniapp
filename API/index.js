@@ -27,6 +27,7 @@ export const apiRequest = (url, data, method) => {
 	}
 	//设置请求结束后拦截器
 		http.interceptor.response = async (response) => {
+			console.log("response========",response);
 			const statusCode = response.statusCode;
 			if (statusCode === 401 || statusCode === 403 || statusCode === 402) {
 				uni.showModal({

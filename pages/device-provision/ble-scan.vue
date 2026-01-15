@@ -69,6 +69,7 @@ import { useI18n } from 'vue-i18n'
 import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/device-provision/ble'
 import { formatUniError } from '@/common/device-provision/error'
 import { BMS_BLE_SERVICE_UUID } from '@/common/lib/bms-protocol'
+import { useBoundDevicesStore } from '@/store/bound-devices'
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 declare const wx: any
@@ -114,6 +115,8 @@ const mode = ref<'manual' | 'qr'>('manual')
 const targetMac = ref<string | null>(null)
 const targetMacDisplay = computed(() => (targetMac.value ? mac12ToColon(targetMac.value) : ''))
 
+const boundDevicesStore = useBoundDevicesStore()
+
 const rows = ref<Map<string, DeviceRow>>(new Map())
 const navigated = ref(false)
 const debugLogFoundCount = ref(0)
@@ -123,14 +126,22 @@ let fallbackTimer: ReturnType<typeof setTimeout> | null = null
 
 const visibleDevices = computed(() => {
 	const list = Array.from(rows.value.values())
-	list.sort((a, b) => {
+	// 过滤：不展示已经添加到“我的设备”的设备（按 ble_mac 匹配）
+	const boundSet = boundDevicesStore.boundBleMacSet
+	const filtered = list.filter((x) => {
+		if (!x.advMac) return true
+		const mac = normalizeMac(x.advMac)
+		if (!mac) return true
+		return !boundSet.has(mac)
+	})
+	filtered.sort((a, b) => {
 		if (!targetMac.value) return (b.RSSI ?? -999) - (a.RSSI ?? -999)
 		const am = a.advMac === targetMac.value ? 0 : 1
 		const bm = b.advMac === targetMac.value ? 0 : 1
 		if (am !== bm) return am - bm
 		return (b.RSSI ?? -999) - (a.RSSI ?? -999)
 	})
-	return list
+	return filtered
 })
 
 function clearList() {
@@ -210,6 +221,9 @@ function upsertDevice(d: FoundDevice) {
 	}
 
 	const advMac = parseMacFromAdvertisement((d as any).advertisData || (d as any).advertisingData || null)
+	if (advMac && boundDevicesStore.hasBleMac(advMac)) {
+		return
+	}
 	const existing = rows.value.get(d.deviceId)
 	const displayName = String(d.name || d.localName || t('pages.deviceProvision.unknownDevice'))
 	rows.value.set(d.deviceId, {
@@ -436,8 +450,24 @@ onLoad((option) => {
 onShow(() => {
 	marginTopHeight.value = uni.getStorageSync('contentPaddingTop')
 	pageHeight.value = uni.getStorageSync('pageHeight')
-	// 默认进入即开始扫描
-	startScan()
+	;(async () => {
+		// 确保“我的设备”列表已加载（用于过滤已绑定设备）
+		try {
+			await boundDevicesStore.refresh({ force: true })
+		} catch (e) {}
+
+		// 扫码模式：若目标设备已绑定，则不再进入扫描页
+		if (mode.value === 'qr' && targetMac.value && boundDevicesStore.hasBleMac(targetMac.value)) {
+			try {
+				uni.showToast({ title: t('pages.deviceProvision.deviceAlreadyAdded') as string, icon: 'none' })
+			} catch (e) {}
+			uni.switchTab({ url: '/pages/home/home' })
+			return
+		}
+
+		// 默认进入即开始扫描
+		startScan()
+	})()
 })
 
 onHide(() => {

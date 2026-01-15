@@ -61,6 +61,7 @@ import $C from '@/common/config'
 import { BmsClient, createUniBleBmsTransport, createUniMqttSocketBmsTransport, type UniBleBmsTransport, type UniMqttSocketBmsTransport } from '@/common/lib/bms-protocol'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import { getWindowInfo } from '@/common/platform'
+import { parseMacFromAdvertisement } from '@/common/device-provision/ble'
 
 const { t } = useI18n()
 
@@ -102,12 +103,46 @@ const goBack = () => uni.navigateBack()
 let pollTimer: number | null = null
 let bleTransport: UniBleBmsTransport | null = null
 let mqttTransport: UniMqttSocketBmsTransport | null = null
+let pollErrLogged = 0
+
+const log = (event: string, data?: Record<string, unknown>) => {
+	try {
+		const ts = new Date().toISOString().slice(11, 23)
+		console.log(`[device-detail ${ts}] ${event}`, data || {})
+	} catch (e) {}
+}
 
 const normalizeMac = (s: unknown) =>
 	String(s || '')
 		.trim()
 		.toUpperCase()
 		.replace(/[^0-9A-F]/g, '')
+
+const extractMacHex = (s: unknown) => {
+	const hex = normalizeMac(s)
+	if (hex.length === 12) return hex
+	// 兜底：从字符串中抽取连续 12 位 HEX（部分设备会把 MAC 拼进 name/localName）
+	const raw = String(s || '').toUpperCase()
+	const m = raw.match(/[0-9A-F]{12}/g)
+	if (m && m.length) return m[m.length - 1]
+	return ''
+}
+
+const mac12ToColon = (mac12: string) => {
+	const hex = normalizeMac(mac12)
+	if (hex.length !== 12) return String(mac12 || '')
+	const parts: string[] = []
+	for (let i = 0; i < 12; i += 2) parts.push(hex.slice(i, i + 2))
+	return parts.join(':')
+}
+
+const bytesToHexUpper = (ab: ArrayBuffer | Uint8Array | null | undefined): string => {
+	if (!ab) return ''
+	const u8 = ab instanceof Uint8Array ? ab : new Uint8Array(ab)
+	let out = ''
+	for (let i = 0; i < u8.length; i += 1) out += (u8[i] & 0xff).toString(16).padStart(2, '0')
+	return out.toUpperCase()
+}
 
 const buildWsUrl = () => {
 	const stored = String(uni.getStorageSync('serverAddress') || '').trim()
@@ -131,8 +166,13 @@ const startPolling = (c: BmsClient) => {
 	const run = async () => {
 		try {
 			status.value = await c.readAllStatus()
+			pollErrLogged = 0
 		} catch (e) {
 			// ignore polling error; connection may recover
+			if (pollErrLogged < 3) {
+				pollErrLogged += 1
+				log('poll failed', { err: e instanceof Error ? e.message : String(e || '') })
+			}
 		}
 	}
 	run()
@@ -151,6 +191,48 @@ const disconnectAll = async () => {
 	} catch (e) {}
 	bleTransport = null
 	mqttTransport = null
+	log('disconnectAll done')
+}
+
+type FoundBleDevice = {
+	deviceId: string
+	name?: string
+	localName?: string
+	RSSI?: number
+	advertisData?: ArrayBuffer
+	advertisingData?: ArrayBuffer
+}
+
+const discoverWithAdv = async ({ durationMs }: { durationMs: number }): Promise<FoundBleDevice[]> => {
+	const found = new Map<string, FoundBleDevice>()
+
+	const onFound = (res: { devices?: FoundBleDevice[] }) => {
+		const list = (res && res.devices) || []
+		for (const d of list) {
+			if (!d?.deviceId) continue
+			found.set(String(d.deviceId), d)
+		}
+	}
+
+	const offFn = (uni as any).offBluetoothDeviceFound
+	if (typeof offFn === 'function') offFn(onFound)
+	uni.onBluetoothDeviceFound(onFound as any)
+
+	try {
+		await new Promise((resolve, reject) => {
+			uni.startBluetoothDevicesDiscovery({
+				allowDuplicatesKey: true,
+				success: resolve,
+				fail: reject,
+			})
+		})
+		await new Promise((r) => setTimeout(r, durationMs))
+	} finally {
+		try {
+			await new Promise((resolve) => uni.stopBluetoothDevicesDiscovery({ complete: resolve }))
+		} catch (e) {}
+	}
+	return Array.from(found.values())
 }
 
 const connectBleFirst = async (): Promise<boolean> => {
@@ -158,25 +240,98 @@ const connectBleFirst = async (): Promise<boolean> => {
 	if (!targetMac) return false
 
 	try {
+		const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
+		const platform = String((sys as any)?.platform || '').toLowerCase()
+		const isAndroid = platform === 'android'
+		log('ble target', { targetMac, targetMacColon: mac12ToColon(targetMac), platform })
+
+		log('ble discover start', { targetMac })
 		bleTransport = createUniBleBmsTransport({})
-		const list = await bleTransport.discover({ durationMs: 2500 })
-		const hit = list.find((d: any) => {
-			const idNorm = normalizeMac(d?.deviceId)
-			const nameNorm = normalizeMac(d?.name || d?.localName)
-			if (idNorm && idNorm === targetMac) return true
-			if (nameNorm && nameNorm.includes(targetMac)) return true
-			if (nameNorm && targetMac.length >= 6 && nameNorm.includes(targetMac.slice(-6))) return true
-			return false
-		})
+
+		// Android：部分机型允许直接用 MAC 作为 deviceId 连接（无需依赖扫描回传的 advertisData）
+		// NOTE: 仍建议先 openBluetoothAdapter（transport.init 内会处理）
+		if (isAndroid) {
+			const directCandidates = [
+				mac12ToColon(targetMac),
+				mac12ToColon(targetMac).toLowerCase(),
+				targetMac,
+				targetMac.toLowerCase(),
+			].filter(Boolean)
+			for (const cand of directCandidates) {
+				try {
+					log('ble direct connect try', { deviceId: cand })
+					await bleTransport.connect({ deviceId: cand })
+					const c = new BmsClient({ transport: bleTransport })
+					client.value = c
+					connType.value = 'bluetooth'
+					startPolling(c)
+					log('ble direct connect ok', { deviceId: cand })
+					return true
+				} catch (e) {
+					log('ble direct connect failed', { deviceId: cand, err: e instanceof Error ? e.message : String(e || '') })
+					try {
+						await bleTransport.disconnect()
+					} catch (e2) {}
+				}
+			}
+		}
+
+		// 通用：扫描并打印广播厂家信息 + 解析到的 MAC（用于排查“找不到设备”）
+		const list = await discoverWithAdv({ durationMs: 5000 })
+		log('ble discover done', { found: Array.isArray(list) ? list.length : 0 })
+		if (Array.isArray(list) && list.length) {
+			const sample = list.slice(0, 30)
+			for (const d of sample) {
+				const adv = (d as any).advertisData || (d as any).advertisingData || null
+				const advHex = bytesToHexUpper(adv)
+				const parsedMac = parseMacFromAdvertisement(adv) || ''
+				const idHex = extractMacHex(d?.deviceId)
+				const nameHex = extractMacHex(d?.name || d?.localName)
+				log('ble device', {
+					deviceId: d.deviceId,
+					name: d.name || d.localName || '',
+					rssi: d.RSSI ?? null,
+					advHexHead: advHex ? advHex.slice(0, 64) : '',
+					advHexLen: advHex ? advHex.length / 2 : 0,
+					parsedMac,
+					idHex,
+					nameHex,
+					match: parsedMac === targetMac || idHex === targetMac || nameHex === targetMac,
+				})
+			}
+			if (list.length > sample.length) {
+				log('ble device list truncated', { shown: sample.length, total: list.length })
+			}
+		}
+
+		const candidates = (list || [])
+			.map((d: any) => {
+				const adv = (d as any).advertisData || (d as any).advertisingData || null
+				const advMac = parseMacFromAdvertisement(adv)
+				const idHex = extractMacHex(d?.deviceId)
+				const nameHex = extractMacHex(d?.name || d?.localName)
+				const ok =
+					(advMac && advMac === targetMac) ||
+					(idHex && idHex === targetMac) ||
+					(nameHex && nameHex === targetMac) ||
+					(String(d?.name || d?.localName || '').toUpperCase().includes(targetMac))
+				return { d, ok, rssi: Number(d?.RSSI ?? -9999), advMac }
+			})
+			.filter((x) => x.ok)
+			.sort((a, b) => b.rssi - a.rssi)
+		const hit = candidates[0]?.d
 		if (!hit?.deviceId) return false
 
+		log('ble connect start', { deviceId: hit.deviceId })
 		await bleTransport.connect({ deviceId: hit.deviceId })
 		const c = new BmsClient({ transport: bleTransport })
 		client.value = c
 		connType.value = 'bluetooth'
 		startPolling(c)
+		log('ble connect ok', { deviceId: hit.deviceId })
 		return true
 	} catch (e) {
+		log('ble connect failed', { err: e instanceof Error ? e.message : String(e || '') })
 		try {
 			await bleTransport?.disconnect()
 		} catch (e2) {}
@@ -189,14 +344,25 @@ const connectMqttSocket = async (): Promise<boolean> => {
 	try {
 		const token = String(uni.getStorageSync('access_token') || '').trim()
 		if (!token) throw new Error('token missing')
-		mqttTransport = createUniMqttSocketBmsTransport({ wsUrl: buildWsUrl(), deviceId: deviceId.value, token })
+		const wsUrl = buildWsUrl()
+		log('mqtt(ws) connect start', { wsUrl, deviceId: deviceId.value })
+		mqttTransport = createUniMqttSocketBmsTransport({ wsUrl, deviceId: deviceId.value, token, logger: console as any })
 		await mqttTransport.connect()
 		const c = new BmsClient({ transport: mqttTransport })
+		// 仅 WebSocket 连接成功不代表设备能透传成功；这里做一次短探测再切换图标。
+		try {
+			await c.readUuid()
+		} catch (e) {
+			throw e
+		}
+
 		client.value = c
 		connType.value = 'mqtt'
 		startPolling(c)
+		log('mqtt(ws) connect ok', { wsUrl })
 		return true
 	} catch (e) {
+		log('mqtt(ws) connect failed', { err: e instanceof Error ? e.message : String(e || '') })
 		try {
 			await mqttTransport?.disconnect()
 		} catch (e2) {}
@@ -210,7 +376,26 @@ const connectAuto = async () => {
 	connecting.value = true
 	try {
 		await disconnectAll()
+		const commType = Number(battery.value?.bms_comm_type || 0)
+		const chipId = String(battery.value?.comm_chip_id || '').trim()
+		const hasBleMac = Boolean(normalizeMac(battery.value?.ble_mac))
+		const treatBleOnly = commType === 1 || ((commType === 0 || !Number.isFinite(commType)) && hasBleMac && !chipId)
+		log('connectAuto', {
+			deviceId: deviceId.value,
+			bms_comm_type: battery.value?.bms_comm_type ?? null,
+			ble_mac: battery.value?.ble_mac ?? null,
+			comm_chip_id: battery.value?.comm_chip_id ?? null,
+		})
+		// 1 = 仅蓝牙（无 4G / MQTT 透传），只尝试 BLE
+		// TODO: bms_comm_type 为空时的兜底策略：若有 ble_mac 且无 comm_chip_id，则按“仅蓝牙”处理
+		if (treatBleOnly) {
+			log('connectAuto choose BLE-only')
+			if (await connectBleFirst()) return
+			connType.value = 'offline'
+			return
+		}
 		if (await connectBleFirst()) return
+		log('connectAuto BLE not available, try MQTT socket')
 		if (await connectMqttSocket()) return
 		connType.value = 'offline'
 	} finally {
@@ -220,15 +405,26 @@ const connectAuto = async () => {
 
 const load = async () => {
 	if (!deviceId.value) return
+	log('load battery detail start', { deviceId: deviceId.value })
 	const rsp = await appBatteryDetail(deviceId.value)
 	if (rsp && (rsp as any).code === 200) {
 		battery.value = (rsp as any).data as AppBatteryDetail
+		log('load battery detail ok', {
+			device_number: (battery.value as any)?.device_number,
+			bms_comm_type: (battery.value as any)?.bms_comm_type,
+			ble_mac: (battery.value as any)?.ble_mac,
+			comm_chip_id: (battery.value as any)?.comm_chip_id,
+			is_online: (battery.value as any)?.is_online,
+		})
 		connectAuto()
+	} else {
+		log('load battery detail failed', { rsp })
 	}
 }
 
 onLoad((query) => {
 	deviceId.value = String((query as any)?.device_id || (query as any)?.id || '').trim()
+	log('onLoad', { deviceId: deviceId.value })
 	load()
 })
 

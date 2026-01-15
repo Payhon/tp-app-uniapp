@@ -1,14 +1,14 @@
 <template>
 	<view class="card" hover-class="card--hover" @tap="onTap" @longpress="onLongPress">
+		<view class="status" :class="`status--${device.connectType}`">
+			<image class="status__icon" :src="statusIcon" mode="aspectFit" />
+			<text class="status__text">{{ statusText }}</text>
+		</view>
+
 		<view class="card__top">
 			<view class="card__title-wrap">
 				<text class="card__title u-line-1">{{ device.name }}</text>
 				<text class="card__sub u-line-1">{{ device.model }}</text>
-			</view>
-
-			<view class="status" :class="`status--${device.connectType}`">
-				<image class="status__icon" :src="statusIcon" mode="aspectFit" />
-				<text class="status__text">{{ statusText }}</text>
 			</view>
 		</view>
 
@@ -61,6 +61,7 @@ const barWidth = computed(() => `${Math.max(0, Math.min(100, Number(props.device
 
 <style lang="scss" scoped>
 .card {
+	position: relative;
 	background: #ffffff;
 	border-radius: 22rpx;
 	padding: 24rpx;
@@ -83,24 +84,31 @@ const barWidth = computed(() => `${Math.max(0, Math.min(100, Number(props.device
 .card__title-wrap {
 	flex: 1;
 	min-width: 0;
+	padding-right: 170rpx; // avoid overlap with status corner tag
 }
 
 .card__title {
+	display: block;
 	font-size: 30rpx;
 	font-weight: 600;
 	color: #333333;
 }
 
 .card__sub {
+	display: block;
 	margin-top: 8rpx;
 	font-size: 24rpx;
 	color: #9aa0a6;
 }
 
 .status {
-	height: 38rpx;
-	padding: 0 14rpx;
-	border-radius: 19rpx;
+	position: absolute;
+	top: 0;
+	right: 0;
+	height: 56rpx;
+	padding: 0 18rpx 0 16rpx;
+	border-top-right-radius: 22rpx;
+	border-bottom-left-radius: 22rpx;
 	display: flex;
 	align-items: center;
 	gap: 8rpx;
@@ -132,7 +140,7 @@ const barWidth = computed(() => `${Math.max(0, Math.min(100, Number(props.device
 }
 
 .battery {
-	margin-top: 18rpx;
+	margin-top: 28rpx;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;

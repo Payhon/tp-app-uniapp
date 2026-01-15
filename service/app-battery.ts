@@ -9,6 +9,7 @@ export type AppBatteryDetail = {
 	device_id: string
 	device_number: string
 	device_name?: string | null
+	bms_comm_type?: number | null
 	battery_model_id?: string | null
 	battery_model_name?: string | null
 	item_uuid?: string | null
@@ -26,4 +27,3 @@ export type AppBatteryDetail = {
 export const appBatteryDetail = (deviceId: string) => {
 	return apiRequest<AppBatteryDetail>(`/api/v1/app/battery/detail/${deviceId}`, null, 'GET')
 }
-

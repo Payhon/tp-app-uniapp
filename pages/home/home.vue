@@ -71,8 +71,9 @@ import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 
 import HomeDeviceCard from '@/components/home/device-card.vue'
-import { appBoundDeviceList, appUnbindDevice, deviceMapTelemetry, updateDeviceName } from '@/service/device'
+import { appUnbindDevice, deviceMapTelemetry, updateDeviceName } from '@/service/device'
 import type { HomeDeviceCardModel } from '@/types/home'
+import { useBoundDevicesStore } from '@/store/bound-devices'
 
 type BoundDeviceItem = {
 	device_id: string
@@ -102,6 +103,8 @@ const deviceCards = ref<HomeDeviceCardModel[]>([])
 const loading = ref(false)
 
 const { t } = useI18n()
+
+const boundDevicesStore = useBoundDevicesStore()
 
 const selectedDevice = ref<HomeDeviceCardModel | null>(null)
 const actionSheetShow = ref(false)
@@ -156,17 +159,16 @@ const load = async () => {
 	try {
 		if (!isLoggedIn.value) {
 			deviceCards.value = []
+			boundDevicesStore.clear()
 			return
 		}
 
-		const rsp = await appBoundDeviceList({ page: 1, page_size: 50 })
-		if (!rsp || (rsp as any).code !== 200) {
+		await boundDevicesStore.refresh({ force: true })
+		const list = boundDevicesStore.list
+		if (!Array.isArray(list) || !list.length) {
 			deviceCards.value = []
 			return
 		}
-
-		const rawList = (rsp as any).data?.list as unknown
-		const list = Array.isArray(rawList) ? (rawList as BoundDeviceItem[]) : []
 
 		const out: HomeDeviceCardModel[] = []
 		for (const item of list) {
@@ -251,6 +253,7 @@ const confirmUnbind = () => {
 				const rsp = await appUnbindDevice(String(d.id))
 				if (rsp && (rsp as any).code === 200) {
 					deviceCards.value = deviceCards.value.filter((x) => x.id !== d.id)
+					boundDevicesStore.removeByDeviceId(String(d.id))
 					uni.showToast({ title: t('home.deviceMenu.unbindSuccess') as string, icon: 'none' })
 				} else {
 					uni.showToast({

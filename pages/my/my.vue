@@ -123,7 +123,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import { useInjected } from '@/common/composables/useInjected'
-import { deviceList } from '@/service/device'
+import { appBoundDeviceList } from '@/service/device'
 import { AVAILABLE_LANGUAGES, changeLanguage, type SupportedLocale } from '@/lang/index'
 
 const { t, locale } = useI18n()
@@ -259,7 +259,7 @@ const loadDeviceCount = async () => {
 	}
 	loadingDeviceCount.value = true
 	try {
-		const rsp = await deviceList({ page: 1, page_size: 1 })
+		const rsp = await appBoundDeviceList({ page: 1, page_size: 1 })
 		if (!rsp || (rsp as any).code !== 200) {
 			deviceCount.value = 0
 			return

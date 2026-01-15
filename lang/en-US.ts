@@ -217,6 +217,7 @@ export default {
       goHome: 'Go Home',
       invalidCode: 'Invalid code',
       deviceNotFound: 'Device is not registered on cloud platform, please contact your dealer.',
+      deviceAlreadyAdded: 'Device is already in My Devices',
       deviceIdMissing: 'Missing BLE deviceId',
       bindSuccess: 'Added',
       bindFailed: 'Add failed',

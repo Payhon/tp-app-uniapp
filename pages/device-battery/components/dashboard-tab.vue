@@ -1,7 +1,6 @@
 <template>
 	<view class="wrap">
 		<view class="top">
-			<image class="top-bg" :src="$img('device/device-top@2x.png')" mode="aspectFill" />
 			<view class="top__inner">
 				<dashboard-gauge class="gauge" :soc="socPct" :soh="sohPct">
 					<template #footer>
@@ -124,12 +123,21 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
+const formatWithParams = (key: string, params: Record<string, unknown>) => {
+	const tpl = t(key, params) as string
+	// 兼容：部分构建环境 message compiler 被 drop 时，t() 不会替换 `{n}` 这种占位符
+	return tpl.replace(/\{(\w+)\}/g, (m, k) => {
+		if (!Object.prototype.hasOwnProperty.call(params, k)) return m
+		return String((params as any)[k])
+	})
+}
+
 const socPct = computed(() => {
 	const v = props.status?.energy?.socPct
 	if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.min(100, Math.round(v)))
 	const b = props.battery?.soc
 	if (typeof b === 'number' && Number.isFinite(b)) return Math.max(0, Math.min(100, Math.round(b)))
-	return 0
+	return 90
 })
 
 const sohPct = computed(() => {
@@ -137,7 +145,7 @@ const sohPct = computed(() => {
 	if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.min(100, Math.round(v)))
 	const b = props.battery?.soh
 	if (typeof b === 'number' && Number.isFinite(b)) return Math.max(0, Math.min(100, Math.round(b)))
-	return 0
+	return 60
 })
 
 const indicator = computed(() => props.status?.status?.indicatorStatus || {})
@@ -159,8 +167,8 @@ const remainLabel = computed(() => {
 })
 
 const remainValue = computed(() => {
-	if ((indicator.value as any).charging) return t('deviceDetail.unit.minutes', { n: Number(props.status?.timing?.chargeRemainingMin || 0) }) as string
-	if ((indicator.value as any).discharging) return t('deviceDetail.unit.minutes', { n: Number(props.status?.timing?.dischargeRemainingMin || 0) }) as string
+	if ((indicator.value as any).charging) return formatWithParams('deviceDetail.unit.minutes', { n: Number(props.status?.timing?.chargeRemainingMin || 0) })
+	if ((indicator.value as any).discharging) return formatWithParams('deviceDetail.unit.minutes', { n: Number(props.status?.timing?.dischargeRemainingMin || 0) })
 	return '-'
 })
 
@@ -179,8 +187,8 @@ const protectCount = computed(() => {
 	return Object.keys(obj).filter((k) => !k.toLowerCase().includes('fault') && obj[k]).length
 })
 
-const cycleCountText = computed(() => t('deviceDetail.unit.times', { n: Number(props.status?.energy?.cycleCount || 0) }) as string)
-const chargeTimeText = computed(() => t('deviceDetail.unit.perMinute', { n: Number(props.status?.timing?.chargeRemainingMin || 0) }) as string)
+const cycleCountText = computed(() => formatWithParams('deviceDetail.unit.times', { n: Number(props.status?.energy?.cycleCount || 0) }))
+const chargeTimeText = computed(() => formatWithParams('deviceDetail.unit.perMinute', { n: Number(props.status?.timing?.chargeRemainingMin || 0) }))
 
 const chargeOn = computed(() => Boolean((indicator.value as any).chargeFetOn))
 const dischargeOn = computed(() => Boolean((indicator.value as any).dischargeFetOn))
@@ -220,7 +228,7 @@ const t2Text = computed(() => cToFText(props.status?.temperature?.heatingFilmC))
 
 .top {
 	position: relative;
-	height: 600rpx;
+	height: 400rpx;
 	border-radius: 40rpx;
 	overflow: hidden;
 }
@@ -257,16 +265,18 @@ const t2Text = computed(() => cToFText(props.status?.temperature?.heatingFilmC))
 }
 
 .state-pill {
-	font-size: 26rpx;
+	font-size: 28rpx;
 	color: #f6a545;
-	padding: 10rpx 22rpx;
-	background: rgba(246, 165, 69, 0.16);
+	padding: 8rpx 28rpx;
+	background: #fff3e6;
 	border-radius: 999px;
+	font-weight: 500;
 }
 
 .mac {
-	font-size: 28rpx;
-	color: #333333;
+	font-size: 30rpx;
+	color: #4b5563;
+	font-family: 'Avenir Next', Helvetica, Arial, sans-serif;
 }
 
 .remain {
