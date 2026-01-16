@@ -2,7 +2,7 @@
 	<view class="wrap">
 		<view class="sum-card">
 			<text class="sum-card__v">{{ totalVText }}</text>
-			<text class="sum-card__n">{{ $t('deviceDetail.cells.cellCount', { n: cellCount }) }}</text>
+			<text class="sum-card__n">{{ cellCountText }}</text>
 		</view>
 
 		<view class="grid">
@@ -12,7 +12,7 @@
 				class="cell"
 				:class="{ 'cell--hi': idx + 1 === highestIdx }"
 			>
-				<text class="cell__name">{{ $t('deviceDetail.cells.cellNo', { n: idx + 1 }) }}</text>
+				<text class="cell__name">{{ cellNoText(idx + 1) }}</text>
 				<text class="cell__v">{{ v }}</text>
 			</view>
 		</view>
@@ -21,6 +21,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 
@@ -28,13 +29,26 @@ const props = defineProps<{
 	status: BmsStatus | null
 }>()
 
+const { t } = useI18n()
+
 const cellCount = computed(() => Number(props.status?.meta?.seriesCount || 0))
 
 const totalVText = computed(() => {
 	const v = props.status?.electrical?.vPackV
 	if (typeof v !== 'number' || !Number.isFinite(v)) return '-'
+	if (v >= 1000 || v >= 0xffff) return '-'
 	return `${v.toFixed(1)}V`
 })
+
+const cellCountText = computed(() => {
+	const raw = t('deviceDetail.cells.cellCount', { n: cellCount.value }) as string
+	return raw.includes('{n}') ? raw.replace('{n}', String(cellCount.value)) : raw
+})
+
+const cellNoText = (n: number) => {
+	const raw = t('deviceDetail.cells.cellNo', { n }) as string
+	return raw.includes('{n}') ? raw.replace('{n}', String(n)) : raw
+}
 
 const highestIdx = computed(() => Number(props.status?.electrical?.cellVoltageIndex?.highest || 0))
 
@@ -105,4 +119,3 @@ const cellVoltages = computed(() => {
 	color: #ff4d4f;
 }
 </style>
-

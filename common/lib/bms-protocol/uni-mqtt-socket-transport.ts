@@ -1,4 +1,5 @@
 import { BmsProtocolError, parseFrame } from './frame'
+import { parseBootFrame } from './boot-frame'
 
 type LoggerLike = {
 	debug?: (...args: any[]) => void
@@ -82,6 +83,38 @@ class FrameCollector {
 		}
 		return null
 	}
+
+	tryShiftOneBootFrame(): Uint8Array | null {
+		const bytes = this._buf
+		if (bytes.length < 5) return null
+
+		let start = -1
+		for (let i = 0; i < bytes.length; i += 1) {
+			if (bytes[i] === 0x55) {
+				start = i
+				break
+			}
+		}
+		if (start < 0) {
+			this._buf = bytes.slice(Math.max(0, bytes.length - 1))
+			return null
+		}
+		if (start > 0) this._buf = bytes.slice(start)
+
+		for (let j = 1; j < this._buf.length; j += 1) {
+			if (this._buf[j] !== 0xfd) continue
+			const candidate = this._buf.slice(0, j + 1)
+			try {
+				parseBootFrame(candidate)
+				this._buf = this._buf.slice(j + 1)
+				return candidate
+			} catch (e) {
+				this._buf = this._buf.slice(1)
+				return null
+			}
+		}
+		return null
+	}
 }
 
 function defer<T>() {
@@ -125,6 +158,7 @@ export class UniMqttSocketBmsTransport {
 				reject: (err: unknown) => void
 				expect: ReqExpect
 				timer: ReturnType<typeof setTimeout>
+				expectBoot?: boolean
 		  }
 
 	private _lastTxAt: number
@@ -207,8 +241,9 @@ export class UniMqttSocketBmsTransport {
 				if (!payloadHex) return
 				const bytes = hexToBytes(payloadHex)
 				this._collector.push(bytes)
+				const expectBoot = !!this._pending?.expectBoot
 				for (;;) {
-					const frame = this._collector.tryShiftOneValidFrame()
+					const frame = expectBoot ? this._collector.tryShiftOneBootFrame() : this._collector.tryShiftOneValidFrame()
 					if (!frame) break
 					this._handleFrame(frame)
 				}
@@ -244,24 +279,32 @@ export class UniMqttSocketBmsTransport {
 		if (this._pending) throw new BmsProtocolError('Previous request still pending')
 
 		const req = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes)
-		if (req.length < 6) throw new BmsProtocolError('Invalid request frame bytes')
+		const expectBoot = req[0] === 0x55 && req[1] !== 0x7f
+		if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes')
+		if (expectBoot && req.length < 4) throw new BmsProtocolError('Invalid boot request frame bytes')
 
 		const now = Date.now()
 		const delta = now - this._lastTxAt
 		if (delta < this.minFrameIntervalMs) await sleep(this.minFrameIntervalMs - delta)
 
-		const expect: ReqExpect = {
-			functionCode: req[4] & 0xff,
-			targetAddress: req[2] & 0xff,
-			sourceAddress: req[3] & 0xff,
-		}
+		const expect: ReqExpect = expectBoot
+			? {
+					functionCode: req[3] & 0xff,
+					targetAddress: req[1] & 0xff,
+					sourceAddress: req[2] & 0xff,
+				}
+			: {
+					functionCode: req[4] & 0xff,
+					targetAddress: req[2] & 0xff,
+					sourceAddress: req[3] & 0xff,
+				}
 
 		const deferred = defer<Uint8Array>()
 		const timer = setTimeout(() => {
 			if (this._pending && this._pending.reject === deferred.reject) this._pending = null
 			deferred.reject(new BmsProtocolError(`Socket request timeout after ${timeoutMs}ms`, { expect }))
 		}, timeoutMs)
-		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer }
+		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot }
 
 		try {
 			const hex = bytesToHexUpper(req)
@@ -278,15 +321,19 @@ export class UniMqttSocketBmsTransport {
 
 	private _handleFrame(frameBytes: Uint8Array) {
 		if (!this._pending) return
-		const { expect, resolve, timer } = this._pending
-		if (!this._isExpectedResponse(frameBytes, expect)) return
+		const { expect, resolve, timer, expectBoot } = this._pending
+		if (!this._isExpectedResponse(frameBytes, expect, expectBoot)) return
 		clearTimeout(timer)
 		this._pending = null
 		resolve(frameBytes)
 	}
 
-	private _isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect): boolean {
+	private _isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect, expectBoot?: boolean): boolean {
 		try {
+			if (expectBoot) {
+				const parsed = parseBootFrame(frameBytes)
+				return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.command === expect.functionCode
+			}
 			const parsed = parseFrame(frameBytes)
 			if (parsed.type === 'error') {
 				return (

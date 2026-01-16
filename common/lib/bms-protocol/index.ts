@@ -6,6 +6,8 @@ export * from './param-registry';
 export * from './register-view';
 export * from './status-parser';
 export * from './transport';
+export * from './boot-frame';
+export * from './boot-ota';
 export * from './uni-ble-transport';
 export * from './mqtt';
 export * from './uni-mqtt-ws-transport';

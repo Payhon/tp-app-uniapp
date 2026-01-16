@@ -77,7 +77,7 @@
 		</view>
 
 		<view class="panel panel--actions">
-			<view class="action" hover-class="action--hover" @tap="goAdvanced">
+			<view class="action" hover-class="action--hover" @tap="openAdvanced">
 				<view class="action__left">
 					<image class="action__icon" src="/static/image/device/icon-advance-setting@2x.png" mode="aspectFit" />
 					<text class="action__title">{{ $t('deviceDetail.params.advanced') }}</text>
@@ -99,45 +99,118 @@
 			</view>
 		</view>
 
-		<u-popup :show="editPopup.show" mode="center" @close="editPopup.show = false">
+		<u-popup :show="editPopup.show" mode="center" @close="closeEditPopup">
 			<view class="edit">
 				<text class="edit__title">{{ editPopup.title }}</text>
 				<view class="edit__input">
-					<u-input v-model="editPopup.input" :placeholder="$t('deviceDetail.params.inputPlaceholder')" border="none"></u-input>
+					<u-input
+						v-model="editPopup.input"
+						:placeholder="$t('deviceDetail.params.inputPlaceholder')"
+						:type="editPopup.valueType === 'str' ? 'text' : 'number'"
+						border="none"
+					></u-input>
 					<text class="edit__unit">{{ editPopup.unit }}</text>
 				</view>
 				<view class="edit__btns">
-					<view class="btn btn--cancel" hover-class="btn--hover" @tap="editPopup.show = false">{{ $t('common.cancel') }}</view>
+					<view class="btn btn--cancel" hover-class="btn--hover" @tap="closeEditPopup">{{ $t('common.cancel') }}</view>
 					<view class="btn btn--ok" hover-class="btn--hover" @tap="confirmEdit">{{ $t('common.confirm') }}</view>
 				</view>
 			</view>
 		</u-popup>
 
-		<u-popup :show="otaPopup" mode="center" @close="otaPopup = false">
+		<u-popup :show="otaState.show" mode="center" @close="closeOtaPopup">
 			<view class="ota">
 				<text class="ota__title">{{ $t('deviceDetail.params.otaUpgrade') }}</text>
 				<view class="ota__bar">
-					<u-line-progress :percentage="50" activeColor="#0B3BFF"></u-line-progress>
+					<u-line-progress :percentage="otaState.progress" activeColor="#0B3BFF"></u-line-progress>
 				</view>
-				<text class="ota__text">{{ $t('deviceDetail.params.otaProgress', { p: 50 }) }}</text>
+				<text class="ota__text">{{ otaMessageText }}</text>
+			</view>
+		</u-popup>
+
+		<u-popup :show="advancedPopup.show" mode="bottom" @close="closeAdvanced">
+			<view class="advanced" :style="{ paddingBottom: safeBottom + 'px' }">
+				<view class="advanced__header">
+					<text class="advanced__title">{{ $t('deviceDetail.params.advanced') }}</text>
+					<view class="advanced__close" hover-class="advanced__close--hover" @tap="closeAdvanced">
+						<u-icon name="close" size="18" color="#8E95A2"></u-icon>
+					</view>
+				</view>
+
+				<scroll-view class="advanced__body" scroll-y>
+					<view class="advanced__section">
+						<text class="advanced__section-title">{{ $t('deviceDetail.params.advancedConfig') }}</text>
+						<view class="list list--popup">
+							<view v-for="item in otherItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
+								<text class="item__label">{{ item.label }}</text>
+								<view class="item__right">
+									<text class="item__value">{{ item.valueText }}</text>
+									<u-icon name="arrow-right" size="14" color="#C0C4CC"></u-icon>
+								</view>
+							</view>
+						</view>
+					</view>
+
+					<view class="advanced__section">
+						<text class="advanced__section-title">{{ $t('deviceDetail.params.numberingConfig') }}</text>
+						<view class="list list--popup">
+							<view v-for="item in numberingItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
+								<text class="item__label">{{ item.label }}</text>
+								<view class="item__right">
+									<text class="item__value">{{ item.valueText }}</text>
+									<u-icon name="arrow-right" size="14" color="#C0C4CC"></u-icon>
+								</view>
+							</view>
+						</view>
+					</view>
+
+					<view class="advanced__section">
+						<text class="advanced__section-title">{{ $t('deviceDetail.params.systemConfig') }}</text>
+						<view class="list list--popup">
+							<view v-for="item in systemItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
+								<text class="item__label">{{ item.label }}</text>
+								<view class="item__right">
+									<text class="item__value">{{ item.valueText }}</text>
+									<u-icon name="arrow-right" size="14" color="#C0C4CC"></u-icon>
+								</view>
+							</view>
+						</view>
+					</view>
+
+					<view class="advanced__section">
+						<text class="advanced__section-title">{{ $t('deviceDetail.params.factoryConfig') }}</text>
+						<view class="list list--popup">
+							<view v-for="item in factoryItems" :key="item.key" class="item" hover-class="item--hover" @tap="runFactory(item)">
+								<text class="item__label">{{ item.label }}</text>
+								<view class="item__right">
+									<text class="item__value">{{ $t('deviceDetail.params.execute') }}</text>
+									<u-icon name="arrow-right" size="14" color="#C0C4CC"></u-icon>
+								</view>
+							</view>
+						</view>
+					</view>
+				</scroll-view>
 			</view>
 		</u-popup>
 	</view>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AppBatteryDetail } from '@/service/app-battery'
+import { appBatteryOtaCheck, type AppBatteryDetail } from '@/service/app-battery'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import type { BmsClient } from '@/common/lib/bms-protocol'
-import { PARAM_DEF_BY_KEY } from '@/common/lib/bms-protocol/param-registry'
+import { bootOtaUpgrade } from '@/common/lib/bms-protocol'
+import { PARAM_CATEGORIES, PARAM_DEF_BY_KEY, listParamsByCategory } from '@/common/lib/bms-protocol/param-registry'
 
 type ParamItem = {
 	key: string
+	actualKey?: string
 	label: string
 	valueText: string
 	unit: string
+	valueType: string
 }
 
 const props = defineProps<{
@@ -145,6 +218,9 @@ const props = defineProps<{
 	status: BmsStatus | null
 	client: BmsClient | null
 	connType: 'bluetooth' | 'mqtt' | 'offline'
+	active?: boolean
+	onPausePolling?: () => void
+	onResumePolling?: () => void
 }>()
 
 const { t, te } = useI18n()
@@ -156,9 +232,28 @@ const opened = reactive({
 	temperature: false,
 })
 
+const loaded = reactive({
+	single: false,
+	voltage: false,
+	current: false,
+	temperature: false,
+	other: false,
+	numbering: false,
+	system: false,
+})
+
+const applyPollingState = () => {
+	if (props.active) {
+		props.onPausePolling && props.onPausePolling()
+		return
+	}
+	props.onResumePolling && props.onResumePolling()
+}
+
 const toggle = (k: keyof typeof opened) => {
 	opened[k] = !opened[k]
 	if (opened[k]) loadSection(k)
+	applyPollingState()
 }
 
 const fwVersionText = computed(() => String(props.battery?.fw_version || props.status?.meta?.softwareVersion || '-'))
@@ -186,13 +281,20 @@ const formatValue = (v: unknown, unit: string) => {
 	return `${n}${unit}`
 }
 
-const mkItems = (keys: string[]) =>
-	keys.map((key) => ({
-		key,
-		label: labelOf(key),
-		unit: unitOf(key),
-		valueText: formatValue(paramValues[key], unitOf(key)),
-	}))
+const mkItems = (keys: Array<string | { displayKey: string; actualKey: string }>) =>
+	keys.map((entry) => {
+		const key = typeof entry === 'string' ? entry : entry.displayKey
+		const actualKey = typeof entry === 'string' ? entry : entry.actualKey
+		const unit = unitOf(actualKey)
+		return {
+			key,
+			actualKey,
+			label: labelOf(key),
+			unit,
+			valueText: formatValue(paramValues[actualKey], unit),
+			valueType: PARAM_DEF_BY_KEY[actualKey]?.valueType || 'u16',
+		}
+	})
 
 const SINGLE_KEYS = [
 	'CELL_OV_ALARM_V',
@@ -211,12 +313,47 @@ const SINGLE_KEYS = [
 
 const VOLTAGE_KEYS = ['PACK_OV_ALARM_V', 'PACK_OV_PROTECT_V', 'PACK_OV_ALARM_DELAY_S', 'PACK_OV_PROTECT_DELAY_S', 'PACK_UV_ALARM_DELAY_S', 'PACK_UV_PROTECT_DELAY_S']
 const CURRENT_KEYS = ['CHARGE_OC_PROTECT_SMALL_A', 'CHARGE_OC_PROTECT_LARGE_A', 'CHARGE_OC_ALARM_DELAY_S', 'DISCHARGE_OC_ALARM_A', 'DISCHARGE_OC_PROTECT_SMALL_A', 'DISCHARGE_OC_PROTECT_LARGE_A']
-const TEMP_KEYS = ['CELL_OVER_TEMP_PROTECT_C', 'CELL_OVER_TEMP_RELEASE_C', 'CELL_UNDER_TEMP_PROTECT_C', 'CELL_UNDER_TEMP_RELEASE_C']
+const TEMP_KEYS = [
+	{ displayKey: 'CELL_OVER_TEMP_PROTECT_C', actualKey: 'MOS_OT_PROTECT_C' },
+	{ displayKey: 'CELL_OVER_TEMP_RELEASE_C', actualKey: 'MOS_OT_PROTECT_RELEASE_C' },
+	{ displayKey: 'CELL_UNDER_TEMP_PROTECT_C', actualKey: 'CHARGE_UT_PROTECT_C' },
+	{ displayKey: 'CELL_UNDER_TEMP_RELEASE_C', actualKey: 'CHARGE_UT_PROTECT_RELEASE_C' },
+]
 
 const singleItems = computed(() => mkItems(SINGLE_KEYS))
 const voltageItems = computed(() => mkItems(VOLTAGE_KEYS))
 const currentItems = computed(() => mkItems(CURRENT_KEYS))
 const temperatureItems = computed(() => mkItems(TEMP_KEYS))
+
+const OTHER_KEYS = listParamsByCategory(PARAM_CATEGORIES.OTHER)
+const NUMBERING_KEYS = listParamsByCategory(PARAM_CATEGORIES.STRING)
+const SYSTEM_KEYS = listParamsByCategory(PARAM_CATEGORIES.SYSTEM)
+
+const otherItems = computed(() => mkItems(OTHER_KEYS))
+const numberingItems = computed(() => mkItems(NUMBERING_KEYS))
+const systemItems = computed(() => mkItems(SYSTEM_KEYS))
+
+const FACTORY_ACTIONS = [
+	// 以下 raw 值按协议示例帧整理（0x57A~0x57B，共 32bit），确保与设备端一致
+	{ key: 'enterTestMode', raw: 0x00000400, confirm: true },
+	{ key: 'exitTestMode', raw: 0x00000800, confirm: true },
+	{ key: 'balanceAllOn', raw: 0x00001000, confirm: true },
+	{ key: 'balanceAllOff', raw: 0x00002000, confirm: true },
+	{ key: 'sleep', raw: 0x00000004, confirm: true },
+	{ key: 'powerOff', raw: 0x00000001, confirm: true },
+	// 下面按文档 bit 位定义补充（如设备端不支持，可按需移除）
+	{ key: 'restoreDefaults', raw: 0x00010000, confirm: true },
+	{ key: 'clearHistory', raw: 0x00020000, confirm: true },
+	{ key: 'clearCycles', raw: 0x00040000, confirm: true },
+	{ key: 'clearProtection', raw: 0x00080000, confirm: true },
+]
+
+const factoryItems = computed(() =>
+	FACTORY_ACTIONS.map((item) => ({
+		...item,
+		label: (t(`deviceDetail.params.factory.${item.key}`) as string) || item.key,
+	}))
+)
 
 const editPopup = reactive({
 	show: false,
@@ -224,9 +361,59 @@ const editPopup = reactive({
 	key: '',
 	unit: '',
 	input: '',
+	valueType: 'u16',
 })
 
-const otaPopup = ref(false)
+const otaState = reactive({
+	show: false,
+	progress: 0,
+	message: '',
+	running: false,
+})
+
+const advancedPopup = reactive({
+	show: false,
+})
+
+const safeBottom = (() => {
+	try {
+		const info = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
+		return info?.safeAreaInsets?.bottom || 0
+	} catch (e) {
+		return 0
+	}
+})()
+
+const otaMessageText = computed(
+	() => otaState.message || (t('deviceDetail.params.otaProgress', { p: otaState.progress }) as string)
+)
+
+const closeOtaPopup = () => {
+	if (otaState.running) {
+		uni.showToast({ title: t('deviceDetail.toast.otaRunning') as string, icon: 'none' })
+		otaState.show = true
+		return
+	}
+	otaState.show = false
+}
+
+const closeEditPopup = () => {
+	editPopup.show = false
+	applyPollingState()
+}
+
+const closeAdvanced = () => {
+	advancedPopup.show = false
+	applyPollingState()
+}
+
+watch(
+	() => props.active,
+	() => {
+		applyPollingState()
+	},
+	{ immediate: true }
+)
 
 const openEdit = (item: ParamItem) => {
 	if (!props.client || props.connType === 'offline') {
@@ -234,39 +421,192 @@ const openEdit = (item: ParamItem) => {
 		return
 	}
 	editPopup.title = item.label
-	editPopup.key = item.key
+	editPopup.key = item.actualKey || item.key
 	editPopup.unit = item.unit || ''
-	const current = paramValues[item.key]
-	editPopup.input = typeof current === 'number' ? String(current) : typeof current === 'string' ? current : ''
+	editPopup.valueType = item.valueType || 'u16'
+	const current = paramValues[item.actualKey || item.key]
+	editPopup.input = current == null ? '' : String(current)
 	editPopup.show = true
+	applyPollingState()
 }
 
 const confirmEdit = async () => {
 	const c = props.client
 	if (!c) return
 	const raw = String(editPopup.input || '').trim()
-	const num = Number(raw)
-	if (!raw || !Number.isFinite(num)) {
-		uni.showToast({ title: t('deviceDetail.toast.invalidInput') as string, icon: 'none' })
-		return
-	}
 	try {
-		await c.writeParam(editPopup.key, num)
-		paramValues[editPopup.key] = await c.readParam(editPopup.key)
+		if (editPopup.valueType === 'str') {
+			await c.writeParam(editPopup.key, raw)
+			paramValues[editPopup.key] = await c.readParam(editPopup.key)
+		} else {
+			const num = Number(raw)
+			if (!raw || !Number.isFinite(num)) {
+				uni.showToast({ title: t('deviceDetail.toast.invalidInput') as string, icon: 'none' })
+				return
+			}
+			await c.writeParam(editPopup.key, num)
+			paramValues[editPopup.key] = await c.readParam(editPopup.key)
+		}
 		editPopup.show = false
 		uni.showToast({ title: t('deviceDetail.toast.saved') as string, icon: 'none' })
+		applyPollingState()
 	} catch (e) {
 		editPopup.show = false
 		uni.showToast({ title: t('deviceDetail.toast.saveFailed') as string, icon: 'none' })
+		try {
+			console.error('[params] save failed', e)
+		} catch (err) {}
+		applyPollingState()
 	}
 }
 
-const goAdvanced = () => {
-	uni.showToast({ title: t('deviceDetail.todo') as string, icon: 'none' })
+const confirmModal = (content: string) =>
+	new Promise<boolean>((resolve) => {
+		uni.showModal({
+			title: (t('common.tip') as string) || '',
+			content,
+			confirmText: (t('common.confirm') as string) || '',
+			cancelText: (t('common.cancel') as string) || '',
+			success: (res) => resolve(!!res.confirm),
+			fail: () => resolve(false),
+		})
+	})
+
+const runFactory = async (item: { key: string; raw: number; confirm?: boolean }) => {
+	if (!props.client || props.connType === 'offline') {
+		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	if (item.confirm) {
+		const ok = await confirmModal((t('deviceDetail.params.factoryConfirm') as string) || '')
+		if (!ok) return
+	}
+	try {
+		const hi = (item.raw >>> 16) & 0xffff
+		const lo = item.raw & 0xffff
+		await props.client.writeRegisters(0x57a, new Uint16Array([hi, lo]))
+		uni.showToast({ title: t('deviceDetail.toast.commandSent') as string, icon: 'none' })
+	} catch (e) {
+		uni.showToast({ title: t('deviceDetail.toast.commandFailed') as string, icon: 'none' })
+	}
+}
+
+const downloadFirmware = (url: string): Promise<Uint8Array> =>
+	new Promise((resolve, reject) => {
+		uni.request({
+			url,
+			method: 'GET',
+			responseType: 'arraybuffer',
+			success: (res) => {
+				const data = res?.data as ArrayBuffer | Uint8Array | string | undefined
+				if (!data) return reject(new Error('empty firmware response'))
+				if (data instanceof Uint8Array) return resolve(data)
+				if (data instanceof ArrayBuffer) return resolve(new Uint8Array(data))
+				const text = String(data || '')
+				if (!text) return reject(new Error('empty firmware response'))
+				const bytes = new Uint8Array(text.length)
+				for (let i = 0; i < text.length; i += 1) bytes[i] = text.charCodeAt(i) & 0xff
+				return resolve(bytes)
+			},
+			fail: (err) => reject(err),
+		})
+	})
+
+const updateOtaStage = (stage: string, progress: number) => {
+	otaState.progress = Math.min(100, Math.max(0, Math.round(progress)))
+	const msgKey = `deviceDetail.params.otaStage.${stage}`
+	otaState.message = (te(msgKey) ? t(msgKey) : t('deviceDetail.params.otaProgress', { p: otaState.progress })) as string
+}
+
+const startOta = async () => {
+	if (!props.client || props.connType === 'offline') {
+		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	const deviceId = String(props.battery?.device_id || '').trim()
+	if (!deviceId) return
+
+	otaState.show = true
+	otaState.running = true
+	updateOtaStage('checking', 0)
+
+	try {
+		const rsp = await appBatteryOtaCheck(deviceId)
+		if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
+		const data = rsp.data || {}
+		if (!data.need_upgrade) {
+			otaState.show = false
+			uni.showToast({ title: t('deviceDetail.toast.otaLatest') as string, icon: 'none' })
+			return
+		}
+
+		const versionText = String(data.target_version || data.version || '').trim()
+		const confirmText = (t('deviceDetail.params.otaConfirm', { v: versionText || '-' }) as string) || ''
+		const ok = await confirmModal(confirmText)
+		if (!ok) {
+			otaState.show = false
+			return
+		}
+
+		const firmwareUrl = String(data.firmware_url || data.package_url || '').trim()
+		if (!firmwareUrl) throw new Error('firmware url missing')
+
+		updateOtaStage('downloading', 5)
+		const firmware = await downloadFirmware(firmwareUrl)
+		updateOtaStage('prepare', 10)
+
+		const { targetAddress, sourceAddress } = props.client.getAddresses()
+		await bootOtaUpgrade({
+			transport: props.client.getTransport(),
+			firmware,
+			targetAddress,
+			sourceAddress,
+			onProgress: (p) => {
+				if (p.stage === 'transfer' && p.packetTotal) {
+					const rate = Math.min(1, Math.max(0, ((p.packetIndex ?? 0) + 1) / p.packetTotal))
+					updateOtaStage('transfer', 10 + Math.round(rate * 85))
+					return
+				}
+				if (p.stage === 'finalize') {
+					updateOtaStage('finalize', 100)
+					return
+				}
+				if (p.stage === 'enter') updateOtaStage('enter', 6)
+				if (p.stage === 'prepare') updateOtaStage('prepare', 10)
+				if (p.stage === 'query') updateOtaStage('checking', 2)
+			},
+		})
+
+		updateOtaStage('success', 100)
+		uni.showToast({ title: t('deviceDetail.toast.otaSuccess') as string, icon: 'none' })
+	} catch (e) {
+		updateOtaStage('failed', otaState.progress || 0)
+		uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
+	} finally {
+		otaState.running = false
+	}
 }
 
 const openOta = () => {
-	otaPopup.value = true
+	if (otaState.running) {
+		otaState.show = true
+		return
+	}
+	startOta()
+}
+
+const openAdvanced = () => {
+	try {
+		advancedPopup.show = true
+		setTimeout(() => {
+			loadKeysCached('other', OTHER_KEYS)
+			loadKeysCached('numbering', NUMBERING_KEYS)
+			loadKeysCached('system', SYSTEM_KEYS)
+		}, 50)
+		applyPollingState()
+	} catch (e) {
+		uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
+	}
 }
 
 const loadKeys = async (keys: string[]) => {
@@ -282,12 +622,18 @@ const loadKeys = async (keys: string[]) => {
 	}
 }
 
+const loadKeysCached = async (section: keyof typeof loaded, keys: string[]) => {
+	if (loaded[section]) return
+	await loadKeys(keys)
+	loaded[section] = true
+}
+
 const loadSection = (k: keyof typeof opened) => {
 	if (!props.client || props.connType === 'offline') return
-	if (k === 'single') return loadKeys(SINGLE_KEYS)
-	if (k === 'voltage') return loadKeys(VOLTAGE_KEYS)
-	if (k === 'current') return loadKeys(CURRENT_KEYS)
-	if (k === 'temperature') return loadKeys(TEMP_KEYS)
+	if (k === 'single') return loadKeysCached('single', SINGLE_KEYS)
+	if (k === 'voltage') return loadKeysCached('voltage', VOLTAGE_KEYS)
+	if (k === 'current') return loadKeysCached('current', CURRENT_KEYS)
+	if (k === 'temperature') return loadKeysCached('temperature', TEMP_KEYS.map((x) => x.actualKey))
 }
 </script>
 
@@ -354,6 +700,10 @@ const loadSection = (k: keyof typeof opened) => {
 
 .list {
 	padding-bottom: 10rpx;
+}
+
+.list--popup {
+	padding-bottom: 0;
 }
 
 .item {
@@ -473,6 +823,60 @@ const loadSection = (k: keyof typeof opened) => {
 	margin-top: 18rpx;
 	text-align: center;
 	font-size: 26rpx;
+	color: #8e95a2;
+}
+
+.advanced {
+	background: #ffffff;
+	border-top-left-radius: 28rpx;
+	border-top-right-radius: 28rpx;
+	padding: 24rpx 24rpx 8rpx;
+	box-sizing: border-box;
+	max-height: 75vh;
+}
+
+.advanced__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.advanced__title {
+	font-size: 30rpx;
+	font-weight: 700;
+	color: #333333;
+}
+
+.advanced__close {
+	width: 56rpx;
+	height: 56rpx;
+	border-radius: 28rpx;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #f2f3f5;
+}
+
+.advanced__close--hover {
+	opacity: 0.85;
+}
+
+.advanced__body {
+	margin-top: 12rpx;
+	max-height: 62vh;
+}
+
+.advanced__section {
+	margin-top: 18rpx;
+	background: #f7f8fa;
+	border-radius: 18rpx;
+	padding: 6rpx 0;
+}
+
+.advanced__section-title {
+	display: block;
+	padding: 12rpx 24rpx 6rpx;
+	font-size: 24rpx;
 	color: #8e95a2;
 }
 </style>

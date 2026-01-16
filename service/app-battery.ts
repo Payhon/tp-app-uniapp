@@ -34,10 +34,30 @@ export type AppBatteryMqttCredential = {
 	[key: string]: unknown
 }
 
+export type AppBatteryOtaCheck = {
+	device_id: string
+	need_upgrade: boolean
+	current_version?: string | null
+	version?: string | null
+	target_version?: string | null
+	firmware_url?: string | null
+	package_id?: string | null
+	package_type?: number | null
+	signature_type?: string | null
+	signature?: string | null
+	module?: string | null
+	additional_info?: string | null
+	[key: string]: unknown
+}
+
 export const appBatteryDetail = (deviceId: string) => {
 	return apiRequest<AppBatteryDetail>(`/api/v1/app/battery/detail/${deviceId}`, null, 'GET')
 }
 
 export const appBatteryMqttCredential = (deviceId: string) => {
 	return apiRequest<AppBatteryMqttCredential>(`/api/v1/app/battery/mqtt-credential/${deviceId}`, null, 'GET')
+}
+
+export const appBatteryOtaCheck = (deviceId: string) => {
+	return apiRequest<AppBatteryOtaCheck>(`/api/v1/app/battery/ota/check/${deviceId}`, null, 'GET')
 }

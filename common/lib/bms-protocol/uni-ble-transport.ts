@@ -1,4 +1,5 @@
 import { BmsProtocolError, parseFrame } from './frame'
+import { parseBootFrame } from './boot-frame'
 import { BMS_BLE_NOTIFY_UUID, BMS_BLE_SERVICE_UUID, BMS_BLE_WRITE_UUID } from './ble-uuids'
 import type { LoggerLike } from './types'
 
@@ -28,6 +29,7 @@ type PendingReq = {
 	resolve: (frameBytes: Uint8Array) => void
 	reject: (err: unknown) => void
 	expect: ReqExpect
+	expectBoot?: boolean
 	timer: ReturnType<typeof setTimeout>
 }
 
@@ -220,7 +222,39 @@ class FrameCollector {
 			}
 		}
 
-		// 没有完整帧，保留缓冲
+	// 没有完整帧，保留缓冲
+	return null;
+	}
+
+	tryShiftOneBootFrame(): Uint8Array | null {
+		const bytes = this._buf;
+		if (bytes.length < 5) return null;
+
+		let start = -1;
+		for (let i = 0; i < bytes.length; i += 1) {
+			if (bytes[i] === 0x55) {
+				start = i;
+				break;
+			}
+		}
+		if (start < 0) {
+			this._buf = bytes.slice(Math.max(0, bytes.length - 1));
+			return null;
+		}
+		if (start > 0) this._buf = bytes.slice(start);
+
+		for (let j = 1; j < this._buf.length; j += 1) {
+			if (this._buf[j] !== 0xfd) continue;
+			const candidate = this._buf.slice(0, j + 1);
+			try {
+				parseBootFrame(candidate);
+				this._buf = this._buf.slice(j + 1);
+				return candidate;
+			} catch (e) {
+				this._buf = this._buf.slice(1);
+				return null;
+			}
+		}
 		return null;
 	}
 }
@@ -489,34 +523,47 @@ export class UniBleBmsTransport {
 			} catch (e) {}
 			this._collector.push(arrayBuffer);
 
+			const expectBoot = !!this._pending?.expectBoot;
 			while (true) {
-				const frame = this._collector.tryShiftOneValidFrame();
-			if (!frame) break;
-			try {
-				if (this.logger?.debug) {
-					this.logger.debug(`[ble] rx frame len=${frame.length} hex=${u8ToHex(frame)}`);
-				}
-			} catch (e) {}
-			this._tryResolvePending(frame);
+				const frame = expectBoot ? this._collector.tryShiftOneBootFrame() : this._collector.tryShiftOneValidFrame();
+				if (!frame) break;
+				try {
+					if (this.logger?.debug) {
+						this.logger.debug(`[ble] rx frame len=${frame.length} hex=${u8ToHex(frame)}`);
+					}
+				} catch (e) {}
+				this._tryResolvePending(frame);
 			}
 		}
 
 		_tryResolvePending(frameBytes: Uint8Array) {
 			if (!this._pending) return;
-			const { expect, resolve, timer } = this._pending;
-			if (!this._isExpectedResponse(frameBytes, expect)) return;
+			const { expect, resolve, timer, expectBoot } = this._pending;
+			if (!this._isExpectedResponse(frameBytes, expect, expectBoot)) return;
 			clearTimeout(timer);
 			this._pending = null;
 			resolve(frameBytes);
 		}
 
-		_isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect): boolean {
+		_isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect, expectBoot?: boolean): boolean {
 			try {
+				if (expectBoot) {
+					const parsed = parseBootFrame(frameBytes);
+					return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.command === expect.functionCode;
+				}
 				const parsed = parseFrame(frameBytes);
 				if (parsed.type === 'error') {
-					return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.functionCode === (expect.functionCode | 0x80);
+					return (
+						parsed.targetAddress === expect.targetAddress &&
+						parsed.sourceAddress === expect.sourceAddress &&
+						parsed.functionCode === (expect.functionCode | 0x80)
+					);
 				}
-			return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.functionCode === expect.functionCode;
+				return (
+					parsed.targetAddress === expect.targetAddress &&
+					parsed.sourceAddress === expect.sourceAddress &&
+					parsed.functionCode === expect.functionCode
+				);
 		} catch (e) {
 			return false;
 			}
@@ -561,82 +608,90 @@ export class UniBleBmsTransport {
 	}
 
 	/**
-		 * 通讯层核心方法：发送请求帧，等待一帧有效回复。
-		 * - 为避免“串包”，内部默认强制串行
-		 */
-		request(
-			frameBytes: Uint8Array | ArrayLike<number>,
-			{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
-		): Promise<Uint8Array> {
-			this._queue = this._queue.then(() => this._requestSerial(frameBytes, { timeoutMs }));
-			return this._queue;
-		}
+	 * 通讯层核心方法：发送请求帧，等待一帧有效回复。
+	 * - 为避免“串包”，内部默认强制串行
+	 */
+	request(
+		frameBytes: Uint8Array | ArrayLike<number>,
+		{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
+	): Promise<Uint8Array> {
+		this._queue = this._queue.then(() => this._requestSerial(frameBytes, { timeoutMs }));
+		return this._queue;
+	}
 
-		async _requestSerial(frameBytes: Uint8Array | ArrayLike<number>, { timeoutMs }: { timeoutMs: number }): Promise<Uint8Array> {
-			if (this._pending) throw new BmsProtocolError('Previous request still pending');
+	async _requestSerial(frameBytes: Uint8Array | ArrayLike<number>, { timeoutMs }: { timeoutMs: number }): Promise<Uint8Array> {
+		if (this._pending) throw new BmsProtocolError('Previous request still pending');
 
-			const req = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
-		if (req.length < 6) throw new BmsProtocolError('Invalid request frame bytes');
+		const req = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
+		const expectBoot = req[0] === 0x55 && req[1] !== 0x7f;
+		if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes');
+		if (expectBoot && req.length < 4) throw new BmsProtocolError('Invalid boot request frame bytes');
 
 		// 协议要求帧间隔 >100ms，这里做一个最小间隔保护
 		const now = Date.now();
 		const delta = now - this._lastTxAt;
 		if (delta < this.minFrameIntervalMs) await sleep(this.minFrameIntervalMs - delta);
 
-		const expect = {
-			functionCode: req[4] & 0xff,
-			// 目标地址/来源地址：回复时应互换
-			targetAddress: req[2] & 0xff, // host addr
-				sourceAddress: req[3] & 0xff, // slave addr
+		const expect = expectBoot
+			? {
+					functionCode: req[3] & 0xff,
+					targetAddress: req[1] & 0xff, // host addr
+					sourceAddress: req[2] & 0xff, // slave addr
+				}
+			: {
+					functionCode: req[4] & 0xff,
+					// 目标地址/来源地址：回复时应互换
+					targetAddress: req[2] & 0xff, // host addr
+					sourceAddress: req[3] & 0xff, // slave addr
 				};
 
-				const deferred = defer<Uint8Array>();
-				const timer = setTimeout(() => {
-					if (this._pending && this._pending.reject === deferred.reject) this._pending = null;
+		const deferred = defer<Uint8Array>();
+		const timer = setTimeout(() => {
+			if (this._pending && this._pending.reject === deferred.reject) this._pending = null;
+			try {
+				if (this.logger?.warn) {
+					this.logger.warn('[ble] request timeout snapshot', { expect, ...this._collector.snapshotHex() });
+				}
+			} catch (e) {}
+			deferred.reject(new BmsProtocolError(`BLE request timeout after ${timeoutMs}ms`, { expect }));
+		}, timeoutMs);
+		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot };
+		const respPromise = deferred.promise;
+
+		try {
+			if (this.logger?.debug) this.logger.debug(`[ble] tx frame len=${req.length} hex=${u8ToHex(req)}`);
+			await this._writeFrameBytes(req);
+			this._lastTxAt = Date.now();
+
+			// 某些设备/运行时不会主动推送 notify，需要通过 read 触发 value change（特征值含 Read 属性时）
+			const pendingRef = this._pending;
+			void (async () => {
+				const delays = [220, 520];
+				for (const ms of delays) {
+					await sleep(ms);
+					if (!this._pending || this._pending !== pendingRef) return;
+					if (!this.deviceId || !this.serviceId || !this.notifyCharId) return;
 					try {
-						if (this.logger?.warn) {
-							this.logger.warn('[ble] request timeout snapshot', { expect, ...this._collector.snapshotHex() });
-						}
-					} catch (e) {}
-					deferred.reject(new BmsProtocolError(`BLE request timeout after ${timeoutMs}ms`, { expect }));
-				}, timeoutMs);
-				this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer };
-				const respPromise = deferred.promise;
+						if (this.logger?.debug) this.logger.debug('[ble] probe read notify', { ms });
+						await uniAsync('readBLECharacteristicValue', {
+							deviceId: this.deviceId,
+							serviceId: this.serviceId,
+							characteristicId: this.notifyCharId,
+						});
+					} catch (e) {
+						// ignore probe errors
+					}
+				}
+			})();
 
-				try {
-					if (this.logger?.debug) this.logger.debug(`[ble] tx frame len=${req.length} hex=${u8ToHex(req)}`);
-					await this._writeFrameBytes(req);
-					this._lastTxAt = Date.now();
-
-					// 某些设备/运行时不会主动推送 notify，需要通过 read 触发 value change（特征值含 Read 属性时）
-					const pendingRef = this._pending;
-					void (async () => {
-						const delays = [220, 520];
-						for (const ms of delays) {
-							await sleep(ms);
-							if (!this._pending || this._pending !== pendingRef) return;
-							if (!this.deviceId || !this.serviceId || !this.notifyCharId) return;
-							try {
-								if (this.logger?.debug) this.logger.debug('[ble] probe read notify', { ms });
-								await uniAsync('readBLECharacteristicValue', {
-									deviceId: this.deviceId,
-									serviceId: this.serviceId,
-									characteristicId: this.notifyCharId,
-								});
-							} catch (e) {
-								// ignore probe errors
-							}
-						}
-					})();
-
-					return await respPromise;
-			} catch (e) {
-				const pending = this._pending;
-				if (pending) clearTimeout(pending.timer);
-				this._pending = null;
-				throw e;
-			}
+			return await respPromise;
+		} catch (e) {
+			const pending = this._pending;
+			if (pending) clearTimeout(pending.timer);
+			this._pending = null;
+			throw e;
 		}
+	}
 	}
 
 	export function createUniBleBmsTransport(options: UniBleBmsTransportOptions): UniBleBmsTransport {

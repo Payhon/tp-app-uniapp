@@ -147,6 +147,14 @@ export class BmsClient {
 		if (this.logger && this.logger.debug) this.logger.debug(...args);
 	}
 
+	getTransport(): BmsRequestTransport {
+		return this.transport;
+	}
+
+	getAddresses(): { targetAddress: number; sourceAddress: number } {
+		return { targetAddress: this.targetAddress, sourceAddress: this.sourceAddress };
+	}
+
 	private async _request(frameBytes: Uint8Array): Promise<BmsParsedFrame> {
 		const respBytes = await this.transport.request(frameBytes);
 		return parseFrame(respBytes);

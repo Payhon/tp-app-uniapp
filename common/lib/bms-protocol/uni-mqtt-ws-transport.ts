@@ -1,4 +1,5 @@
 import { BmsProtocolError, parseFrame } from './frame'
+import { parseBootFrame } from './boot-frame'
 import {
 	MqttPacketReader,
 	mqttBuildConnect,
@@ -66,15 +67,24 @@ function toArrayBuffer(u8: Uint8Array | ArrayLike<number>): ArrayBuffer {
 	return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-function mkReqExpect(reqFrameBytes: Uint8Array | ArrayLike<number>): ReqExpect {
+function mkReqExpect(reqFrameBytes: Uint8Array | ArrayLike<number>): { expect: ReqExpect; expectBoot: boolean } {
 	const req = reqFrameBytes instanceof Uint8Array ? reqFrameBytes : Uint8Array.from(reqFrameBytes);
-	if (req.length < 6) throw new BmsProtocolError('Invalid request frame bytes');
-	return {
-		functionCode: req[4] & 0xff,
-		// BMS 回复帧：source/target 互换
-		targetAddress: req[2] & 0xff,
-		sourceAddress: req[3] & 0xff,
-	};
+	const expectBoot = req[0] === 0x55 && req[1] !== 0x7f;
+	if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes');
+	if (expectBoot && req.length < 4) throw new BmsProtocolError('Invalid boot request frame bytes');
+	const expect = expectBoot
+		? {
+				functionCode: req[3] & 0xff,
+				targetAddress: req[1] & 0xff,
+				sourceAddress: req[2] & 0xff,
+			}
+		: {
+				functionCode: req[4] & 0xff,
+				// BMS 回复帧：source/target 互换
+				targetAddress: req[2] & 0xff,
+				sourceAddress: req[3] & 0xff,
+			};
+	return { expect, expectBoot };
 }
 
 class FrameCollector {
@@ -123,9 +133,41 @@ class FrameCollector {
 					if (this._logger && this._logger.debug) this._logger.debug('[mqtt] drop invalid frame:', msg);
 				}
 			}
+		return null;
+	}
+
+	tryShiftOneBootFrame(): Uint8Array | null {
+		const bytes = this._buf;
+		if (bytes.length < 5) return null;
+
+		let start = -1;
+		for (let i = 0; i < bytes.length; i += 1) {
+			if (bytes[i] === 0x55) {
+				start = i;
+				break;
+			}
+		}
+		if (start < 0) {
+			this._buf = bytes.slice(Math.max(0, bytes.length - 1));
 			return null;
 		}
+		if (start > 0) this._buf = bytes.slice(start);
+
+		for (let j = 1; j < this._buf.length; j += 1) {
+			if (this._buf[j] !== 0xfd) continue;
+			const candidate = this._buf.slice(0, j + 1);
+			try {
+				parseBootFrame(candidate);
+				this._buf = this._buf.slice(j + 1);
+				return candidate;
+			} catch (e) {
+				this._buf = this._buf.slice(1);
+				return null;
+			}
+		}
+		return null;
 	}
+}
 
 /**
  * 基于 uniapp WebSocket API 的 MQTT Transport（发送/接收 BMS 帧）
@@ -163,6 +205,7 @@ export class UniMqttWsBmsTransport {
 				reject: (err: unknown) => void
 				expect: ReqExpect
 				timer: ReturnType<typeof setTimeout>
+				expectBoot?: boolean
 		  };
 	private _queue: Promise<Uint8Array>
 	private _lastTxAt: number
@@ -384,8 +427,9 @@ export class UniMqttWsBmsTransport {
 
 			// payload 里可能是完整帧，也可能是多帧/粘包：用 FrameCollector 做拼帧
 			this._collector.push(pkt.payload);
+			const expectBoot = !!this._pending?.expectBoot;
 			while (true) {
-				const frame = this._collector.tryShiftOneValidFrame();
+				const frame = expectBoot ? this._collector.tryShiftOneBootFrame() : this._collector.tryShiftOneValidFrame();
 				if (!frame) break;
 				this._tryResolvePending(frame);
 			}
@@ -395,15 +439,19 @@ export class UniMqttWsBmsTransport {
 
 	_tryResolvePending(frameBytes: Uint8Array): void {
 		if (!this._pending) return;
-		const { expect, resolve, timer } = this._pending;
-		if (!this._isExpectedResponse(frameBytes, expect)) return;
+		const { expect, resolve, timer, expectBoot } = this._pending;
+		if (!this._isExpectedResponse(frameBytes, expect, expectBoot)) return;
 		clearTimeout(timer);
 		this._pending = null;
 		resolve(frameBytes);
 	}
 
-	_isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect): boolean {
+	_isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect, expectBoot?: boolean): boolean {
 		try {
+			if (expectBoot) {
+				const parsed = parseBootFrame(frameBytes);
+				return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.command === expect.functionCode;
+			}
 			const parsed = parseFrame(frameBytes);
 			if (parsed.type === 'error') {
 				return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.functionCode === (expect.functionCode | 0x80);
@@ -433,14 +481,14 @@ export class UniMqttWsBmsTransport {
 		if (delta < this.minFrameIntervalMs) await sleep(this.minFrameIntervalMs - delta);
 
 			const reqFrame = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
-			const expect = mkReqExpect(reqFrame);
+			const { expect, expectBoot } = mkReqExpect(reqFrame);
 
 			const deferred = defer<Uint8Array>();
 			const timer = setTimeout(() => {
 				if (this._pending && this._pending.reject === deferred.reject) this._pending = null;
 				deferred.reject(new BmsProtocolError(`MQTT request timeout after ${timeoutMs}ms`, { expect }));
 			}, timeoutMs);
-			this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer };
+			this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot };
 			const respPromise = deferred.promise;
 
 			try {

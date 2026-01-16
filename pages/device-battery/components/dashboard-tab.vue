@@ -132,12 +132,28 @@ const formatWithParams = (key: string, params: Record<string, unknown>) => {
 	})
 }
 
+const isInvalidU16 = (v: unknown) => {
+	const n = typeof v === 'number' ? v : Number(v)
+	return !Number.isFinite(n) || n >= 0xffff
+}
+
+const formatMac = (raw: unknown) => {
+	const s = String(raw || '')
+	const hex = s.replace(/[^0-9a-fA-F]/g, '').toUpperCase()
+	if (hex.length === 12) {
+		const parts: string[] = []
+		for (let i = 0; i < 12; i += 2) parts.push(hex.slice(i, i + 2))
+		return parts.join(':')
+	}
+	return s || '-'
+}
+
 const socPct = computed(() => {
 	const v = props.status?.energy?.socPct
 	if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.min(100, Math.round(v)))
 	const b = props.battery?.soc
 	if (typeof b === 'number' && Number.isFinite(b)) return Math.max(0, Math.min(100, Math.round(b)))
-	return 90
+	return 0
 })
 
 const sohPct = computed(() => {
@@ -145,7 +161,7 @@ const sohPct = computed(() => {
 	if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.min(100, Math.round(v)))
 	const b = props.battery?.soh
 	if (typeof b === 'number' && Number.isFinite(b)) return Math.max(0, Math.min(100, Math.round(b)))
-	return 60
+	return 0
 })
 
 const indicator = computed(() => props.status?.status?.indicatorStatus || {})
@@ -158,7 +174,10 @@ const stateText = computed(() => {
 	return t('deviceDetail.state.idle') as string
 })
 
-const macText = computed(() => String(props.status?.identity?.bluetoothMac || props.battery?.ble_mac || '-'))
+const macText = computed(() => {
+	if (props.connType === 'bluetooth') return formatMac(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '-')
+	return formatMac(props.status?.identity?.bluetoothMac || props.battery?.ble_mac || '-')
+})
 
 const remainLabel = computed(() => {
 	if ((indicator.value as any).charging) return t('deviceDetail.remain.charge') as string
@@ -167,8 +186,16 @@ const remainLabel = computed(() => {
 })
 
 const remainValue = computed(() => {
-	if ((indicator.value as any).charging) return formatWithParams('deviceDetail.unit.minutes', { n: Number(props.status?.timing?.chargeRemainingMin || 0) })
-	if ((indicator.value as any).discharging) return formatWithParams('deviceDetail.unit.minutes', { n: Number(props.status?.timing?.dischargeRemainingMin || 0) })
+	if ((indicator.value as any).charging) {
+		const v = props.status?.timing?.chargeRemainingMin
+		if (isInvalidU16(v)) return '-'
+		return formatWithParams('deviceDetail.unit.minutes', { n: Number(v || 0) })
+	}
+	if ((indicator.value as any).discharging) {
+		const v = props.status?.timing?.dischargeRemainingMin
+		if (isInvalidU16(v)) return '-'
+		return formatWithParams('deviceDetail.unit.minutes', { n: Number(v || 0) })
+	}
 	return '-'
 })
 
@@ -187,8 +214,16 @@ const protectCount = computed(() => {
 	return Object.keys(obj).filter((k) => !k.toLowerCase().includes('fault') && obj[k]).length
 })
 
-const cycleCountText = computed(() => formatWithParams('deviceDetail.unit.times', { n: Number(props.status?.energy?.cycleCount || 0) }))
-const chargeTimeText = computed(() => formatWithParams('deviceDetail.unit.perMinute', { n: Number(props.status?.timing?.chargeRemainingMin || 0) }))
+const cycleCountText = computed(() => {
+	const v = props.status?.energy?.cycleCount
+	if (isInvalidU16(v)) return '-'
+	return formatWithParams('deviceDetail.unit.times', { n: Number(v || 0) })
+})
+const chargeTimeText = computed(() => {
+	const v = props.status?.timing?.chargeRemainingMin
+	if (isInvalidU16(v)) return '-'
+	return formatWithParams('deviceDetail.unit.perMinute', { n: Number(v || 0) })
+})
 
 const chargeOn = computed(() => Boolean((indicator.value as any).chargeFetOn))
 const dischargeOn = computed(() => Boolean((indicator.value as any).dischargeFetOn))
@@ -197,7 +232,7 @@ const protectOn = computed(() => Boolean(Object.values(protect.value as Record<s
 
 const toV = (mv: unknown) => {
 	const n = typeof mv === 'number' ? mv : Number(mv)
-	if (!Number.isFinite(n)) return '-'
+	if (!Number.isFinite(n) || n >= 0xffff) return '-'
 	return `${(n / 1000).toFixed(2)}V`
 }
 
