@@ -56,9 +56,8 @@ import DashboardTab from './components/dashboard-tab.vue'
 import CellsTab from './components/cells-tab.vue'
 import ParamsTab from './components/params-tab.vue'
 
-import { appBatteryDetail, type AppBatteryDetail } from '@/service/app-battery'
-import $C from '@/common/config'
-import { BmsClient, createUniBleBmsTransport, createUniMqttSocketBmsTransport, type UniBleBmsTransport, type UniMqttSocketBmsTransport } from '@/common/lib/bms-protocol'
+import { appBatteryDetail, appBatteryMqttCredential, type AppBatteryDetail } from '@/service/app-battery'
+import { BmsClient, createUniBleBmsTransport, createUniMqttWsBmsTransport, type UniBleBmsTransport, type UniMqttWsBmsTransport } from '@/common/lib/bms-protocol'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import { getWindowInfo } from '@/common/platform'
 import { parseMacFromAdvertisement } from '@/common/device-provision/ble'
@@ -102,7 +101,7 @@ const goBack = () => uni.navigateBack()
 
 let pollTimer: number | null = null
 let bleTransport: UniBleBmsTransport | null = null
-let mqttTransport: UniMqttSocketBmsTransport | null = null
+let mqttTransport: UniMqttWsBmsTransport | null = null
 let pollErrLogged = 0
 
 const log = (event: string, data?: Record<string, unknown>) => {
@@ -144,15 +143,6 @@ const bytesToHexUpper = (ab: ArrayBuffer | Uint8Array | null | undefined): strin
 	return out.toUpperCase()
 }
 
-const buildWsUrl = () => {
-	const stored = String(uni.getStorageSync('serverAddress') || '').trim()
-	const base = stored || String($C.apiBaseUrl || '').trim()
-	const noSlash = base.endsWith('/') ? base.slice(0, -1) : base
-	if (noSlash.startsWith('wss://') || noSlash.startsWith('ws://')) return `${noSlash}/api/v1/app/battery/socket/ws`
-	if (noSlash.startsWith('https://')) return `wss://${noSlash.slice('https://'.length)}/api/v1/app/battery/socket/ws`
-	if (noSlash.startsWith('http://')) return `ws://${noSlash.slice('http://'.length)}/api/v1/app/battery/socket/ws`
-	return `${noSlash}/api/v1/app/battery/socket/ws`
-}
 
 const stopPolling = () => {
 	if (pollTimer != null) {
@@ -342,11 +332,26 @@ const connectBleFirst = async (): Promise<boolean> => {
 
 const connectMqttSocket = async (): Promise<boolean> => {
 	try {
-		const token = String(uni.getStorageSync('access_token') || '').trim()
-		if (!token) throw new Error('token missing')
-		const wsUrl = buildWsUrl()
+		const rsp = await appBatteryMqttCredential(deviceId.value)
+		if (!rsp || (rsp as any).code !== 200) throw new Error('mqtt credential fetch failed')
+		const cred = (rsp as any).data || {}
+		const wsUrl = String(cred.ws_url || '').trim()
+		const username = String(cred.username || '').trim()
+		const password = cred.password == null ? '' : String(cred.password)
+		const writeTopic = String(cred.write_topic || '').trim()
+		const readTopic = String(cred.read_topic || '').trim()
+		if (!wsUrl || !username || !writeTopic || !readTopic) throw new Error('mqtt credential invalid')
+		const clientId = `app_${String(deviceId.value).slice(0, 8)}_${Date.now()}`
 		log('mqtt(ws) connect start', { wsUrl, deviceId: deviceId.value })
-		mqttTransport = createUniMqttSocketBmsTransport({ wsUrl, deviceId: deviceId.value, token, logger: console as any })
+		mqttTransport = createUniMqttWsBmsTransport({
+			wsUrl,
+			clientId,
+			username,
+			password,
+			writeTopic,
+			readTopic,
+			logger: console as any,
+		})
 		await mqttTransport.connect()
 		const c = new BmsClient({ transport: mqttTransport })
 		// 仅 WebSocket 连接成功不代表设备能透传成功；这里做一次短探测再切换图标。

@@ -24,6 +24,20 @@ export type AppBatteryDetail = {
 	[key: string]: unknown
 }
 
+export type AppBatteryMqttCredential = {
+	device_id: string
+	ws_url: string
+	username: string
+	password?: string | null
+	write_topic: string
+	read_topic: string
+	[key: string]: unknown
+}
+
 export const appBatteryDetail = (deviceId: string) => {
 	return apiRequest<AppBatteryDetail>(`/api/v1/app/battery/detail/${deviceId}`, null, 'GET')
+}
+
+export const appBatteryMqttCredential = (deviceId: string) => {
+	return apiRequest<AppBatteryMqttCredential>(`/api/v1/app/battery/mqtt-credential/${deviceId}`, null, 'GET')
 }
