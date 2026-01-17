@@ -50,6 +50,13 @@ export type AppBatteryOtaCheck = {
 	[key: string]: unknown
 }
 
+export type AppBatteryOtaCheckReq = {
+	device_id: string
+	model?: string | null
+	version?: string | null
+	[key: string]: unknown
+}
+
 export const appBatteryDetail = (deviceId: string) => {
 	return apiRequest<AppBatteryDetail>(`/api/v1/app/battery/detail/${deviceId}`, null, 'GET')
 }
@@ -58,6 +65,6 @@ export const appBatteryMqttCredential = (deviceId: string) => {
 	return apiRequest<AppBatteryMqttCredential>(`/api/v1/app/battery/mqtt-credential/${deviceId}`, null, 'GET')
 }
 
-export const appBatteryOtaCheck = (deviceId: string) => {
-	return apiRequest<AppBatteryOtaCheck>(`/api/v1/app/battery/ota/check/${deviceId}`, null, 'GET')
+export const appBatteryOtaCheck = (payload: AppBatteryOtaCheckReq) => {
+	return apiRequest<AppBatteryOtaCheck>(`/api/v1/app/battery/ota/check`, payload, 'POST')
 }

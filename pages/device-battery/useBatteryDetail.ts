@@ -99,12 +99,7 @@ export const useBatteryDetail = () => {
 					const now = Date.now()
 					if (now - lastStatusLogAt > 3000) {
 						lastStatusLogAt = now
-						const debugFull = !!uni.getStorageSync('debugStatusJson')
-						if (debugFull) {
-							console.log('[device-detail] status json', status.value)
-						} else {
-							console.log('[device-detail] status identity', status.value?.identity || null)
-						}
+						console.log('[device-detail] status obj', status.value)
 					}
 				} catch (e) {}
 				pollErrLogged = 0

@@ -242,7 +242,7 @@ watch(() => [props.soc, props.soh], draw)
 	}
 
 	.num-main {
-		font-size: 92rpx; // 进一步增大数值
+		font-size: 76rpx;
 		font-weight: 900;
 		color: #003399;
 		line-height: 1;
@@ -250,14 +250,14 @@ watch(() => [props.soc, props.soh], draw)
 	}
 
 	.num-unit {
-		font-size: 32rpx;
+		font-size: 26rpx;
 		color: #003399;
 		margin-left: 8rpx;
 		font-weight: 800;
 	}
 
 	.val-label {
-		font-size: 34rpx;
+		font-size: 28rpx;
 		color: #4b5563;
 		font-weight: 800;
 		margin-top: 12rpx;

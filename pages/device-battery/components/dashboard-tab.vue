@@ -18,16 +18,16 @@
 			<text class="remain__value">{{ remainValue }}</text>
 		</view>
 
-		<view class="flags">
-			<view class="flag" :class="{ 'flag--danger': faultCount > 0 }">
+		<view v-if="hasFlags" class="flags">
+			<view v-if="faultCount > 0" class="flag flag--danger" hover-class="flag--hover" @tap="openFlag('fault')">
 				<image class="flag__icon" src="/static/image/device/icon-danger@2x.png" mode="aspectFit" />
 				<text class="flag__text">{{ $t('deviceDetail.flags.fault') }}</text>
 			</view>
-			<view class="flag" :class="{ 'flag--warn': alarmCount > 0 }">
+			<view v-if="alarmCount > 0" class="flag flag--warn" hover-class="flag--hover" @tap="openFlag('alarm')">
 				<image class="flag__icon" src="/static/image/device/icon-warn@2x.png" mode="aspectFit" />
 				<text class="flag__text">{{ $t('deviceDetail.flags.alarm') }}</text>
 			</view>
-			<view class="flag" :class="{ 'flag--guard': protectCount > 0 }">
+			<view v-if="protectCount > 0" class="flag flag--guard" hover-class="flag--hover" @tap="openFlag('protect')">
 				<image class="flag__icon" src="/static/image/device/icon-guard@2x.png" mode="aspectFit" />
 				<text class="flag__text">{{ $t('deviceDetail.flags.protect') }}</text>
 			</view>
@@ -104,11 +104,23 @@
 				<text class="temp-row__value">{{ t2Text }}</text>
 			</view>
 		</view>
+
+		<u-popup :show="flagPopup.show" mode="center" @close="closeFlagPopup">
+			<view class="flag-popup">
+				<text class="flag-popup__title">{{ flagPopup.title }}</text>
+				<view class="flag-popup__list">
+					<view v-for="(item, idx) in flagPopup.items" :key="`${flagPopup.title}-${idx}`" class="flag-popup__item">
+						<text class="flag-popup__idx">{{ idx + 1 }}.</text>
+						<text class="flag-popup__text">{{ item }}</text>
+					</view>
+				</view>
+			</view>
+		</u-popup>
 	</view>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import DashboardGauge from '@/components/dashboard-gauge/dashboard-gauge.vue'
@@ -121,7 +133,7 @@ const props = defineProps<{
 	connType: 'bluetooth' | 'mqtt' | 'offline'
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const formatWithParams = (key: string, params: Record<string, unknown>) => {
 	const tpl = t(key, params) as string
@@ -214,6 +226,62 @@ const protectCount = computed(() => {
 	return Object.keys(obj).filter((k) => !k.toLowerCase().includes('fault') && obj[k]).length
 })
 
+const hasFlags = computed(() => faultCount.value > 0 || alarmCount.value > 0 || protectCount.value > 0)
+
+const labelForStatus = (key: string) => {
+	const i18nKey = `deviceDetail.statusMap.${key}`
+	if (te(i18nKey)) return t(i18nKey) as string
+	return key
+}
+
+const faultItems = computed(() => {
+	const obj = protect.value as Record<string, boolean>
+	return Object.keys(obj)
+		.filter((k) => k.toLowerCase().includes('fault') && obj[k])
+		.map(labelForStatus)
+})
+
+const alarmItems = computed(() => {
+	const obj = alarm.value as Record<string, boolean>
+	return Object.keys(obj).filter((k) => obj[k]).map(labelForStatus)
+})
+
+const protectItems = computed(() => {
+	const obj = protect.value as Record<string, boolean>
+	return Object.keys(obj)
+		.filter((k) => !k.toLowerCase().includes('fault') && obj[k])
+		.map(labelForStatus)
+})
+
+const flagPopup = reactive({
+	show: false,
+	title: '',
+	items: [] as string[],
+})
+
+const openFlag = (type: 'fault' | 'alarm' | 'protect') => {
+	if (type === 'fault') {
+		if (!faultItems.value.length) return
+		flagPopup.title = t('deviceDetail.flags.fault') as string
+		flagPopup.items = faultItems.value
+	}
+	if (type === 'alarm') {
+		if (!alarmItems.value.length) return
+		flagPopup.title = t('deviceDetail.flags.alarm') as string
+		flagPopup.items = alarmItems.value
+	}
+	if (type === 'protect') {
+		if (!protectItems.value.length) return
+		flagPopup.title = t('deviceDetail.flags.protect') as string
+		flagPopup.items = protectItems.value
+	}
+	flagPopup.show = true
+}
+
+const closeFlagPopup = () => {
+	flagPopup.show = false
+}
+
 const cycleCountText = computed(() => {
 	const v = props.status?.energy?.cycleCount
 	if (isInvalidU16(v)) return '-'
@@ -247,12 +315,16 @@ const cToFText = (c: number | null | undefined) => {
 	return `${c.toFixed(0)}℃/${f.toFixed(0)}°F`
 }
 
-const mosText = computed(() => {
-	const c = props.status?.temperature?.chargeMosC
-	return cToFText(c)
+const mosText = computed(() => cToFText(props.status?.temperature?.chargeMosC))
+const t1Text = computed(() => cToFText(props.status?.temperature?.dischargeMosC))
+const t2Text = computed(() => {
+	const cellTemps = props.status?.temperature?.cellTempsC || []
+	const v =
+		cellTemps.length > 0
+			? cellTemps[0]
+			: props.status?.temperature?.highestTemp?.valueC ?? props.status?.temperature?.poleC ?? null
+	return cToFText(v)
 })
-const t1Text = computed(() => cToFText(props.status?.temperature?.ambientC))
-const t2Text = computed(() => cToFText(props.status?.temperature?.heatingFilmC))
 </script>
 
 <style lang="scss" scoped>
@@ -300,7 +372,7 @@ const t2Text = computed(() => cToFText(props.status?.temperature?.heatingFilmC))
 }
 
 .state-pill {
-	font-size: 28rpx;
+	font-size: 24rpx;
 	color: #f6a545;
 	padding: 8rpx 28rpx;
 	background: #fff3e6;
@@ -309,7 +381,7 @@ const t2Text = computed(() => cToFText(props.status?.temperature?.heatingFilmC))
 }
 
 .mac {
-	font-size: 30rpx;
+	font-size: 24rpx;
 	color: #4b5563;
 	font-family: 'Avenir Next', Helvetica, Arial, sans-serif;
 }
@@ -341,6 +413,10 @@ const t2Text = computed(() => cToFText(props.status?.temperature?.heatingFilmC))
 	align-items: center;
 	gap: 8rpx;
 	color: #a0a0a0;
+}
+
+.flag--hover {
+	opacity: 0.85;
 }
 
 .flag__icon {
@@ -481,5 +557,48 @@ const t2Text = computed(() => cToFText(props.status?.temperature?.heatingFilmC))
 .divider {
 	height: 1px;
 	background: #f2f3f5;
+}
+
+.flag-popup {
+	background: #ffffff;
+	border-radius: 24rpx;
+	padding: 24rpx 28rpx;
+	min-width: 420rpx;
+	max-width: 560rpx;
+	box-sizing: border-box;
+}
+
+.flag-popup__title {
+	font-size: 28rpx;
+	font-weight: 600;
+	color: #333333;
+	text-align: center;
+}
+
+.flag-popup__list {
+	margin-top: 18rpx;
+	display: flex;
+	flex-direction: column;
+	gap: 12rpx;
+	max-height: 60vh;
+	overflow: auto;
+}
+
+.flag-popup__item {
+	display: flex;
+	align-items: flex-start;
+	gap: 10rpx;
+}
+
+.flag-popup__idx {
+	font-size: 24rpx;
+	color: #9aa0a6;
+}
+
+.flag-popup__text {
+	font-size: 24rpx;
+	color: #333333;
+	flex: 1;
+	word-break: break-all;
 }
 </style>

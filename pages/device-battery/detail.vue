@@ -9,7 +9,7 @@
 				</view>
 				<view class="nav__title u-line-1">{{ titleText }}</view>
 				<view class="nav__right">
-					<view class="conn-pill" :class="`conn-pill--${connType}`">
+					<view class="conn-pill" :class="`conn-pill--${connClass}`">
 						<image class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
 						<text class="conn-pill__text">{{ connText }}</text>
 					</view>
@@ -53,11 +53,17 @@
 				</view>
 			</view>
 		</view>
+
+		<view v-if="connecting" class="connecting-mask">
+			<view class="connecting-mask__panel">
+				<text class="connecting-mask__text">{{ $t('deviceDetail.conn.connecting') }}</text>
+			</view>
+		</view>
 	</view>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 
@@ -71,7 +77,7 @@ import { useBatteryDetail } from './useBatteryDetail'
 const { t } = useI18n()
 
 const activeTab = ref<0 | 1 | 2>(0)
-const { battery, status, client, connType, loadById, disconnectAll, pausePolling, resumePolling } = useBatteryDetail()
+const { battery, status, client, connType, connecting, loadById, disconnectAll, pausePolling, resumePolling } = useBatteryDetail()
 
 const statusBarHeight = getWindowInfo().statusBarHeight || 0
 const safeBottom = getWindowInfo().safeAreaInsets?.bottom || 0
@@ -85,18 +91,38 @@ const titleText = computed(() => {
 })
 
 const connText = computed(() => {
+	if (connecting.value) return t('deviceDetail.conn.connecting') as string
 	if (connType.value === 'bluetooth') return t('deviceDetail.conn.bluetooth') as string
 	if (connType.value === 'mqtt') return t('deviceDetail.conn.mqtt') as string
 	return t('deviceDetail.conn.offline') as string
 })
 
 const connIcon = computed(() => {
+	if (connecting.value) return '/static/image/home/icon-wifi@2x.png'
 	if (connType.value === 'bluetooth') return '/static/image/device/icon-bluetoolth@2x.png'
 	if (connType.value === 'mqtt') return '/static/image/home/icon-wifi@2x.png'
 	return '/static/image/home/icon-unlink@2x.png'
 })
 
+const connClass = computed(() => {
+	if (connecting.value) return 'connecting'
+	return connType.value
+})
+
 const goBack = () => uni.navigateBack()
+
+watch(
+	() => activeTab.value,
+	(tab) => {
+		if (tab === 2) {
+			pausePolling()
+		} else {
+			resumePolling()
+		}
+	},
+	{ immediate: true }
+)
+
 onLoad((query) => {
 	const id = String((query as any)?.device_id || (query as any)?.id || '').trim()
 	loadById(id)
@@ -192,6 +218,11 @@ onUnload(() => {
 	color: #a0a0a0;
 }
 
+.conn-pill--connecting {
+	background: rgba(11, 59, 255, 0.12);
+	color: #0b3bff;
+}
+
 .conn-pill__icon {
 	width: 24rpx;
 	height: 24rpx;
@@ -219,6 +250,31 @@ onUnload(() => {
 	backdrop-filter: blur(12px);
 	border-top-left-radius: 28rpx;
 	border-top-right-radius: 28rpx;
+}
+
+.connecting-mask {
+	position: fixed;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.12);
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.connecting-mask__panel {
+	padding: 20rpx 32rpx;
+	background: rgba(255, 255, 255, 0.95);
+	border-radius: 999px;
+	box-shadow: 0 8rpx 30rpx rgba(0, 0, 0, 0.12);
+}
+
+.connecting-mask__text {
+	font-size: 24rpx;
+	color: #333333;
 }
 
 .bottom-bar__inner {

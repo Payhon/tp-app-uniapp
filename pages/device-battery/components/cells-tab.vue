@@ -34,7 +34,7 @@ const { t } = useI18n()
 const cellCount = computed(() => Number(props.status?.meta?.seriesCount || 0))
 
 const totalVText = computed(() => {
-	const v = props.status?.electrical?.vPackV
+	const v = props.status?.electrical?.packCellSumVoltageV
 	if (typeof v !== 'number' || !Number.isFinite(v)) return '-'
 	if (v >= 1000 || v >= 0xffff) return '-'
 	return `${v.toFixed(1)}V`

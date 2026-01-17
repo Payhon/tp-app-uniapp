@@ -531,7 +531,9 @@ const startOta = async () => {
 	updateOtaStage('checking', 0)
 
 	try {
-		const rsp = await appBatteryOtaCheck(deviceId)
+		const modelName = String(props.status?.identity?.hardwareModel || props.battery?.battery_model_name || '').trim()
+		const versionText = String(props.status?.meta?.softwareVersion || props.battery?.fw_version || '').trim()
+		const rsp = await appBatteryOtaCheck({ device_id: deviceId, model: modelName || undefined, version: versionText || undefined })
 		if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
 		const data = rsp.data || {}
 		if (!data.need_upgrade) {
@@ -540,8 +542,11 @@ const startOta = async () => {
 			return
 		}
 
-		const versionText = String(data.target_version || data.version || '').trim()
-		const confirmText = (t('deviceDetail.params.otaConfirm', { v: versionText || '-' }) as string) || ''
+		const targetVersionText = String(data.target_version || data.version || '').trim()
+		let confirmText = (t('deviceDetail.params.otaConfirm', { v: targetVersionText || '-' }) as string) || ''
+		if (confirmText.includes('{v}')) {
+			confirmText = confirmText.replace(/\{v\}/g, targetVersionText || '-')
+		}
 		const ok = await confirmModal(confirmText)
 		if (!ok) {
 			otaState.show = false
