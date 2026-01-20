@@ -67,18 +67,21 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { onHide, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 
 import HomeDeviceCard from '@/components/home/device-card.vue'
 import { appUnbindDevice, deviceMapTelemetry, updateDeviceName } from '@/service/device'
 import type { HomeDeviceCardModel } from '@/types/home'
 import { useBoundDevicesStore } from '@/store/bound-devices'
+import { canBleAutoConnect, connectBleClient, getBleClientEntry, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
 
 type BoundDeviceItem = {
 	device_id: string
 	device_number: string
 	device_name?: string
+	ble_mac?: string | null
+	bms_comm_type?: number | null
 	[key: string]: unknown
 }
 
@@ -98,7 +101,7 @@ type TelemetryMapRsp = {
 	[key: string]: unknown
 }
 
-const isLoggedIn = computed(() => Boolean(uni.getStorageSync('access_token')))
+const isLoggedIn = ref(false)
 const deviceCards = ref<HomeDeviceCardModel[]>([])
 const loading = ref(false)
 
@@ -111,6 +114,15 @@ const actionSheetShow = ref(false)
 const renamePopupShow = ref(false)
 const renameValue = ref('')
 const submitting = ref(false)
+
+const refreshLoginState = () => {
+	isLoggedIn.value = Boolean(uni.getStorageSync('access_token'))
+}
+
+const STORAGE_BT_AUTO_CONNECT = 'bluetoothAutoConnect'
+const BLE_MAX_READ_REGS = 60
+const homeBleKeys = new Set<string>()
+let autoConnectToken = 0
 
 const actionSheetActions = computed(() => [
 	{ key: 'rename', name: t('home.deviceMenu.rename') as string },
@@ -142,6 +154,9 @@ const toHomeModel = async (d: BoundDeviceItem): Promise<HomeDeviceCardModel> => 
 			isOnline = Number(data?.is_online || 0) === 1
 		}
 	} catch (e) {}
+	const rawComm = d?.bms_comm_type
+	const commNum = rawComm == null ? null : Number(rawComm)
+	const bmsCommType = Number.isFinite(commNum) ? commNum : null
 
 	return {
 		id: d.device_id,
@@ -149,17 +164,77 @@ const toHomeModel = async (d: BoundDeviceItem): Promise<HomeDeviceCardModel> => 
 		model: String(d?.device_number || '').trim() || '-',
 		isOnline,
 		connectType: isOnline ? 'mqtt' : 'offline',
-		batteryPercent
+		batteryPercent,
+		bleMac: d?.ble_mac ?? null,
+		bmsCommType
+	}
+}
+
+const isBluetoothAutoConnectEnabled = () => {
+	const raw = uni.getStorageSync(STORAGE_BT_AUTO_CONNECT)
+	if (raw === '' || raw === undefined || raw === null) return true
+	return Boolean(Number(raw))
+}
+
+const applyBleCacheStatus = () => {
+	deviceCards.value = deviceCards.value.map((card) => {
+		const fallback = card.isOnline ? 'mqtt' : 'offline'
+		if (card.bleMac && getBleClientEntry(card.bleMac, { touch: false })) {
+			return { ...card, connectType: 'bluetooth' }
+		}
+		return { ...card, connectType: fallback }
+	})
+}
+
+const stopAutoConnect = () => {
+	autoConnectToken += 1
+}
+
+const releaseHomeBleClients = () => {
+	for (const key of Array.from(homeBleKeys)) {
+		releaseBleClient(key)
+	}
+	homeBleKeys.clear()
+}
+
+const markCardBleConnected = (deviceId: string) => {
+	deviceCards.value = deviceCards.value.map((card) =>
+		String(card.id) === String(deviceId) ? { ...card, connectType: 'bluetooth' } : card
+	)
+}
+
+const autoConnectBleDevices = async () => {
+	if (!isBluetoothAutoConnectEnabled()) return
+	const token = ++autoConnectToken
+	const list = boundDevicesStore.list
+	if (!Array.isArray(list) || !list.length) return
+
+	for (const item of list) {
+		if (token !== autoConnectToken) return
+		if (!item?.device_id) continue
+		const decision = canBleAutoConnect(item?.bms_comm_type, item?.ble_mac)
+		if (!decision.ok || !decision.mac) continue
+		const entry = await connectBleClient({ mac: decision.mac, maxReadRegisters: BLE_MAX_READ_REGS })
+		if (!entry) continue
+		if (token !== autoConnectToken) return
+		if (!homeBleKeys.has(entry.key)) {
+			retainBleClient(entry.key)
+			homeBleKeys.add(entry.key)
+		}
+		markCardBleConnected(String(item.device_id))
 	}
 }
 
 const load = async () => {
 	if (loading.value) return
+	refreshLoginState()
+	stopAutoConnect()
 	loading.value = true
 	try {
 		if (!isLoggedIn.value) {
 			deviceCards.value = []
 			boundDevicesStore.clear()
+			releaseHomeBleClients()
 			return
 		}
 
@@ -167,6 +242,7 @@ const load = async () => {
 		const list = boundDevicesStore.list
 		if (!Array.isArray(list) || !list.length) {
 			deviceCards.value = []
+			releaseHomeBleClients()
 			return
 		}
 
@@ -177,6 +253,8 @@ const load = async () => {
 			out.push(await toHomeModel(item))
 		}
 		deviceCards.value = out
+		applyBleCacheStatus()
+		void autoConnectBleDevices()
 	} finally {
 		loading.value = false
 		try {
@@ -254,6 +332,11 @@ const confirmUnbind = () => {
 				if (rsp && (rsp as any).code === 200) {
 					deviceCards.value = deviceCards.value.filter((x) => x.id !== d.id)
 					boundDevicesStore.removeByDeviceId(String(d.id))
+					const decision = canBleAutoConnect(d.bmsCommType, d.bleMac)
+					if (decision.mac) {
+						homeBleKeys.delete(decision.mac)
+						releaseBleClient(decision.mac)
+					}
 					uni.showToast({ title: t('home.deviceMenu.unbindSuccess') as string, icon: 'none' })
 				} else {
 					uni.showToast({
@@ -290,8 +373,14 @@ const setMpTabSelected = () => {
 
 onShow(() => {
 	uni.setStorageSync('__last_tab_url__', '/pages/home/home')
+	refreshLoginState()
 	setMpTabSelected()
 	load()
+})
+
+onHide(() => {
+	stopAutoConnect()
+	releaseHomeBleClients()
 })
 
 onPullDownRefresh(() => load())

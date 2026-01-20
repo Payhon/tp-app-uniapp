@@ -1009,6 +1009,7 @@ export default {
       otaFailed: 'OTA failed',
       otaSuccess: 'OTA completed',
       otaRunning: 'Upgrading, do not close',
+      otaHardwareMismatch: 'Firmware package does not match hardware model',
       commandSent: 'Command sent',
       commandFailed: 'Command failed',
       openFailed: 'Open failed, retry',

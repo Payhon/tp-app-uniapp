@@ -57,12 +57,32 @@ function crc32(buffer: Uint8Array): number {
 	return (crc ^ 0xffffffff) >>> 0
 }
 
+function bytesToHex(bytes: Uint8Array, maxLen = 64): string {
+	const len = Math.min(bytes.length, maxLen)
+	let out = ''
+	for (let i = 0; i < len; i += 1) {
+		out += (bytes[i] & 0xff).toString(16).padStart(2, '0')
+	}
+	if (bytes.length > maxLen) out += '...'
+	return out.toUpperCase()
+}
+
+function cmdHex(cmd: number): string {
+	return `0x${(cmd & 0xff).toString(16).padStart(2, '0')}`
+}
+
 async function bootRequest(
 	transport: BmsRequestTransport,
 	frame: Uint8Array,
 	{ logger }: { logger?: LoggerLike } = {}
 ) {
+	try {
+		logger?.debug && logger.debug('[boot] tx', { cmd: cmdHex(frame[3]), len: frame.length, hex: bytesToHex(frame) })
+	} catch (e) {}
 	const respBytes = await transport.request(frame)
+	try {
+		logger?.debug && logger.debug('[boot] rx', { len: respBytes.length, hex: bytesToHex(respBytes) })
+	} catch (e) {}
 	const resp = parseBootFrame(respBytes)
 	if (resp.command !== frame[3]) {
 		logger?.warn && logger.warn('[boot] unexpected response cmd', { expect: frame[3], got: resp.command })
@@ -98,6 +118,9 @@ export async function bootOtaUpgrade({
 	transport,
 	firmware,
 	targetAddress,
+	queryTargetAddress,
+	dataTargetAddress,
+	fallbackDataTargetAddress,
 	sourceAddress = BOOT_FRAME.HOST_ADDR,
 	onProgress,
 	logger,
@@ -106,6 +129,9 @@ export async function bootOtaUpgrade({
 	transport: BmsRequestTransport
 	firmware: Uint8Array
 	targetAddress: number
+	queryTargetAddress?: number
+	dataTargetAddress?: number
+	fallbackDataTargetAddress?: number
 	sourceAddress?: number
 	onProgress?: (p: BootOtaProgress) => void
 	logger?: LoggerLike
@@ -117,7 +143,14 @@ export async function bootOtaUpgrade({
 	let versionInfo: BootVersionInfo | null = null
 	try {
 		onProgress?.({ stage: 'query', message: 'query' })
-		versionInfo = await bootQueryVersion({ transport, targetAddress, sourceAddress, logger })
+		const queryTarget = queryTargetAddress ?? targetAddress
+		try {
+			versionInfo = await bootQueryVersion({ transport, targetAddress: queryTarget, sourceAddress, logger })
+		} catch (e) {
+			// retry once to match double-query behavior
+			versionInfo = await bootQueryVersion({ transport, targetAddress: queryTarget, sourceAddress, logger })
+		}
+		logger?.info && logger.info('[boot] version', versionInfo)
 	} catch (e) {
 		logger?.warn && logger.warn('[boot] query version failed, continue', e)
 	}
@@ -129,7 +162,15 @@ export async function bootOtaUpgrade({
 
 	onProgress?.({ stage: 'prepare', message: 'prepare' })
 	const sizePayload = u32ToBytesBE(totalSize >>> 0)
-	const prepareResp = await bootRequest(transport, buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: sizePayload }), { logger })
+	const baudPayload = u32ToBytesBE(9600)
+	const preparePayload = new Uint8Array(8)
+	preparePayload.set(sizePayload, 0)
+	preparePayload.set(baudPayload, 4)
+	const prepareResp = await bootRequest(
+		transport,
+		buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: preparePayload }),
+		{ logger }
+	)
 	const prepareData = prepareResp.data
 	if (prepareData.length < 2) throw new Error('Boot prepare response too short')
 	if ((prepareData[0] & 0xff) !== 0) throw new Error('Boot prepare failed')
@@ -138,75 +179,176 @@ export async function bootOtaUpgrade({
 	if (maxPacketSize && packetSize > maxPacketSize) {
 		packetSize = PACKET_SIZE_OPTIONS.find((n) => n <= maxPacketSize) || packetSize
 	}
+	logger?.info && logger.info('[boot] prepare ok', { totalSize, optionIdx, packetSize })
+	// Wait 1s after prepare response before first data packet
+	await sleep(1000)
 
-	const packetTotal = Math.ceil(totalSize / packetSize)
+	// Use data length = packetSize, payload = 2 bytes seq + data => payload length = packetSize + 2
+	const dataPacketSize = Math.max(1, packetSize)
+	const payloadLen = dataPacketSize + 2
+	logger?.info && logger.info('[boot] data packet size', { dataPacketSize, packetSize, payloadLen })
+	const packetTotal = Math.ceil(totalSize / dataPacketSize)
 	let packetIndex = 0
 	let retry = 0
 	const maxRetry = 5
+	const maxPacketRetry = 3
+	const primaryWriteTarget = dataTargetAddress ?? targetAddress
+	const fallbackWriteTarget =
+		fallbackDataTargetAddress != null && (fallbackDataTargetAddress & 0xff) !== (primaryWriteTarget & 0xff)
+			? (fallbackDataTargetAddress & 0xff)
+			: null
+	let activeWriteTarget = primaryWriteTarget
+	let lastRequested = -1
+	let finalizeAttempt = 0
+	let lastCrc = 0
 
-	while (packetIndex < packetTotal) {
-		const start = packetIndex * packetSize
-		const end = Math.min(start + packetSize, totalSize)
-		const chunk = firmware.slice(start, end)
-		const payload = new Uint8Array(2 + chunk.length)
-		payload.set(u16ToBytesBE(packetIndex), 0)
-		payload.set(chunk, 2)
+	while (true) {
+		while (packetIndex < packetTotal) {
+			const start = packetIndex * dataPacketSize
+			const end = Math.min(start + dataPacketSize, totalSize)
+			const chunk = firmware.slice(start, end)
+			const payload = new Uint8Array(2 + chunk.length)
+			payload.set(u16ToBytesBE(packetIndex), 0)
+			payload.set(chunk, 2)
 
-		onProgress?.({
-			stage: 'transfer',
-			packetIndex,
-			packetTotal,
-			percent: Math.min(99, Math.floor((packetIndex / packetTotal) * 100)),
+			onProgress?.({
+				stage: 'transfer',
+				packetIndex,
+				packetTotal,
+				percent: Math.min(99, Math.floor((packetIndex / packetTotal) * 100)),
+			})
+
+			let resp: ReturnType<typeof parseBootFrame> | null = null
+			let packetRetry = 0
+			while (true) {
+				try {
+					resp = await bootRequest(
+						transport,
+						buildBootFrame({ sourceAddress, targetAddress: activeWriteTarget, command: 0x53, payload }),
+						{ logger }
+					)
+					break
+				} catch (e) {
+					packetRetry += 1
+					logger?.warn && logger.warn('[boot] packet timeout, retry', { packetIndex, packetRetry, maxPacketRetry })
+					if (packetRetry >= maxPacketRetry) {
+						if (fallbackWriteTarget != null && activeWriteTarget !== fallbackWriteTarget) {
+							activeWriteTarget = fallbackWriteTarget
+							packetRetry = 0
+							logger?.warn && logger.warn('[boot] switch data target', { packetIndex, target: activeWriteTarget })
+							await sleep(220)
+							continue
+						}
+						if (packetIndex === 0) {
+							throw new Error('boot_packet0_no_ack')
+						}
+						throw e
+					}
+					await sleep(220)
+				}
+			}
+			if (!resp) throw new Error('Boot packet response is empty')
+
+			if (resp.data.length < 3) throw new Error('Boot packet response too short')
+			const status = resp.data[0] & 0xff
+			const requested = bytesToU16BE(resp.data[1] & 0xff, resp.data[2] & 0xff)
+			lastRequested = requested
+			logger?.debug && logger.debug('[boot] packet ack', { packetIndex, status, requested })
+
+			if (status === 0) {
+				if (requested >= 0 && requested < packetTotal && requested !== packetIndex + 1) {
+					packetIndex = requested
+					retry = 0
+					continue
+				}
+				packetIndex += 1
+				retry = 0
+				continue
+			}
+
+			// status: 1=not initialized, 2=write error, 3=sequence mismatch
+			if (status === 1 && retry < maxRetry) {
+				retry += 1
+				// Re-send prepare then retry requested packet index
+				await bootRequest(
+					transport,
+					buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: sizePayload }),
+					{ logger }
+				)
+				packetIndex = Math.min(requested, packetTotal - 1)
+				continue
+			}
+			if (status === 3 && requested < packetTotal && retry < maxRetry) {
+				retry += 1
+				packetIndex = requested
+				continue
+			}
+			throw new Error(`Boot packet failed: status=${status}`)
+		}
+
+		lastCrc = crc32(firmware)
+		const finishPayload = u32ToBytesBE(lastCrc)
+		const finishFrame = buildBootFrame({
+			sourceAddress,
+			targetAddress: activeWriteTarget,
+			command: 0x54,
+			payload: finishPayload,
 		})
 
-		const resp = await bootRequest(
-			transport,
-			buildBootFrame({ sourceAddress, targetAddress, command: 0x53, payload }),
-			{ logger }
-		)
+		await sleep(1000)
+		let finalizeOk = false
+		for (finalizeAttempt = 1; finalizeAttempt <= 3; finalizeAttempt += 1) {
+			if (finalizeAttempt > 1) await sleep(300)
+			let finishResp: ReturnType<typeof parseBootFrame> | null = null
+			try {
+				if (typeof (transport as any)?.requestWithResponse === 'function') {
+					logger?.debug &&
+						logger.debug('[boot] tx', { cmd: cmdHex(0x54), len: finishFrame.length, hex: bytesToHex(finishFrame) })
+					const respBytes = await (transport as any).requestWithResponse(finishFrame)
+					logger?.debug && logger.debug('[boot] rx', { len: respBytes.length, hex: bytesToHex(respBytes) })
+					finishResp = parseBootFrame(respBytes)
+				} else {
+					finishResp = await bootRequest(transport, finishFrame, { logger })
+				}
+			} catch (e: any) {
+				const code = e?.code
+				const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
+				if ((code === 10004 || msg.includes('no connection')) && lastRequested >= packetTotal) {
+					logger?.warn && logger.warn('[boot] finalize assume success after disconnect', { finalizeAttempt })
+					finalizeOk = true
+					break
+				}
+				logger?.warn && logger.warn('[boot] finalize attempt failed', { finalizeAttempt, err: e })
+				continue
+			}
 
-		if (resp.data.length < 3) throw new Error('Boot packet response too short')
-		const status = resp.data[0] & 0xff
-		const requested = bytesToU16BE(resp.data[1] & 0xff, resp.data[2] & 0xff)
-
-		if (status === 0) {
-			packetIndex += 1
-			retry = 0
-			continue
+			if (!finishResp) continue
+			if ((finishResp.command & 0xff) === 0x53) {
+				if (finishResp.data.length >= 3) {
+					const status = finishResp.data[0] & 0xff
+					const requested = bytesToU16BE(finishResp.data[1] & 0xff, finishResp.data[2] & 0xff)
+					lastRequested = requested
+					logger?.warn && logger.warn('[boot] finalize got data ack', { status, requested })
+				}
+				continue
+			}
+			const finishStatus = finishResp.data[0] & 0xff
+			if (finishStatus !== 0) {
+				logger?.warn && logger.warn('[boot] finalize failed', { finalizeAttempt, status: finishStatus })
+				continue
+			}
+			logger?.info && logger.info('[boot] finalize ok', { crc32: lastCrc >>> 0 })
+			finalizeOk = true
+			break
 		}
 
-		// status: 1=not initialized, 2=write error, 3=sequence mismatch
-		if (status === 1 && retry < maxRetry) {
-			retry += 1
-			// Re-send prepare then retry requested packet index
-			await bootRequest(
-				transport,
-				buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: sizePayload }),
-				{ logger }
-			)
-			packetIndex = Math.min(requested, packetTotal - 1)
-			continue
+		if (!finalizeOk) {
+			throw new Error('Boot finalize timeout')
 		}
-		if (status === 3 && requested < packetTotal && retry < maxRetry) {
-			retry += 1
-			packetIndex = requested
-			continue
-		}
-		throw new Error(`Boot packet failed: status=${status}`)
+		break
 	}
-
-	const crc = crc32(firmware)
-	const finishPayload = u32ToBytesBE(crc)
-	const finishResp = await bootRequest(
-		transport,
-		buildBootFrame({ sourceAddress, targetAddress, command: 0x54, payload: finishPayload }),
-		{ logger }
-	)
-	const finishStatus = finishResp.data[0] & 0xff
-	if (finishStatus !== 0) throw new Error('Boot finalize failed')
-
 	onProgress?.({ stage: 'finalize', percent: 100 })
-	return { packetSize, packetTotal, crc32: crc >>> 0, versionInfo }
+	return { packetSize, packetTotal, crc32: lastCrc >>> 0, versionInfo }
 }
 
 export { crc32 }

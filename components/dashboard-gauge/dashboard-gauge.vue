@@ -7,6 +7,7 @@
 				:id="canvasId"
 			/>
 
+			<!-- #ifndef MP-WEIXIN -->
 			<view class="content-overlay">
 				<view class="values-row">
 					<view class="val-item">
@@ -30,6 +31,7 @@
 					<slot name="footer"></slot>
 				</view>
 			</view>
+			<!-- #endif -->
 		</view>
 	</view>
 </template>
@@ -42,11 +44,15 @@ type Pt = { x: number; y: number }
 type Props = {
 	soc?: number
 	soh?: number
+	footerStateText?: string
+	footerMacText?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
 	soc: 0,
 	soh: 0,
+	footerStateText: '',
+	footerMacText: '',
 })
 
 const instance = getCurrentInstance()
@@ -173,6 +179,48 @@ const draw = () => {
 	drawPath(ctx, RIGHT_PTS, (props.soh || 0) / 100)
 	ctx.stroke()
 
+	// #ifdef MP-WEIXIN
+	const soc = socText.value
+	const soh = sohText.value
+	const stateText = String(props.footerStateText || '')
+	const macText = String(props.footerMacText || '')
+
+	ctx.setTextAlign('center')
+	ctx.setTextBaseline('middle')
+
+	// SOC
+	ctx.setFillStyle('#003399')
+	ctx.setFontSize(36)
+	ctx.fillText(soc, 140, 120)
+	ctx.setFontSize(18)
+	ctx.fillText('%', 175, 120)
+	ctx.setFillStyle('#4b5563')
+	ctx.setFontSize(16)
+	ctx.fillText('SOC', 140, 150)
+
+	// SOH
+	ctx.setFillStyle('#003399')
+	ctx.setFontSize(36)
+	ctx.fillText(soh, 260, 120)
+	ctx.setFontSize(18)
+	ctx.fillText('%', 295, 120)
+	ctx.setFillStyle('#4b5563')
+	ctx.setFontSize(16)
+	ctx.fillText('SOH', 260, 150)
+
+	// Footer texts
+	if (stateText) {
+		ctx.setFillStyle('#f6a545')
+		ctx.setFontSize(14)
+		ctx.fillText(stateText, 200, 188)
+	}
+	if (macText) {
+		ctx.setFillStyle('#4b5563')
+		ctx.setFontSize(14)
+		ctx.fillText(macText, 200, 210)
+	}
+	// #endif
+
 	ctx.restore()
 	ctx.draw()
 }
@@ -195,7 +243,7 @@ onMounted(() => {
 	setTimeout(measure, 200)
 })
 
-watch(() => [props.soc, props.soh], draw)
+watch(() => [props.soc, props.soh, props.footerStateText, props.footerMacText], draw)
 </script>
 
 <style lang="scss" scoped>
@@ -272,5 +320,28 @@ watch(() => [props.soc, props.soh], draw)
 	bottom: 15%;
 	display: flex;
 	justify-content: center;
+}
+
+.gauge-footer {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 14rpx;
+}
+
+.state-pill {
+	font-size: 24rpx;
+	color: #f6a545;
+	padding: 8rpx 28rpx;
+	background: #fff3e6;
+	border-radius: 999px;
+	font-weight: 500;
+}
+
+.mac {
+	font-size: 24rpx;
+	color: #4b5563;
+	font-family: 'Avenir Next', Helvetica, Arial, sans-serif;
+	margin-top: 14rpx;
 }
 </style>

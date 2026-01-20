@@ -8,6 +8,7 @@ export type BoundDevice = {
 	device_number: string
 	device_name?: string
 	ble_mac?: string | null
+	bms_comm_type?: number | null
 	[key: string]: unknown
 }
 

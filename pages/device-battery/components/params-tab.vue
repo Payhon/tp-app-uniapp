@@ -518,6 +518,15 @@ const updateOtaStage = (stage: string, progress: number) => {
 	otaState.message = (te(msgKey) ? t(msgKey) : t('deviceDetail.params.otaProgress', { p: otaState.progress })) as string
 }
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const otaLogger = {
+	debug: (...args: unknown[]) => console.log('[ota]', ...args),
+	info: (...args: unknown[]) => console.log('[ota]', ...args),
+	warn: (...args: unknown[]) => console.warn('[ota]', ...args),
+	error: (...args: unknown[]) => console.error('[ota]', ...args),
+}
+
 const startOta = async () => {
 	if (!props.client || props.connType === 'offline') {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
@@ -531,6 +540,8 @@ const startOta = async () => {
 	updateOtaStage('checking', 0)
 
 	try {
+		props.onPausePolling && props.onPausePolling()
+		await delay(120)
 		const modelName = String(props.status?.identity?.hardwareModel || props.battery?.battery_model_name || '').trim()
 		const versionText = String(props.status?.meta?.softwareVersion || props.battery?.fw_version || '').trim()
 		const rsp = await appBatteryOtaCheck({ device_id: deviceId, model: modelName || undefined, version: versionText || undefined })
@@ -560,35 +571,67 @@ const startOta = async () => {
 		const firmware = await downloadFirmware(firmwareUrl)
 		updateOtaStage('prepare', 10)
 
-		const { targetAddress, sourceAddress } = props.client.getAddresses()
-		await bootOtaUpgrade({
-			transport: props.client.getTransport(),
-			firmware,
-			targetAddress,
-			sourceAddress,
-			onProgress: (p) => {
-				if (p.stage === 'transfer' && p.packetTotal) {
-					const rate = Math.min(1, Math.max(0, ((p.packetIndex ?? 0) + 1) / p.packetTotal))
-					updateOtaStage('transfer', 10 + Math.round(rate * 85))
-					return
-				}
-				if (p.stage === 'finalize') {
-					updateOtaStage('finalize', 100)
-					return
-				}
-				if (p.stage === 'enter') updateOtaStage('enter', 6)
-				if (p.stage === 'prepare') updateOtaStage('prepare', 10)
-				if (p.stage === 'query') updateOtaStage('checking', 2)
+		const { sourceAddress, targetAddress: deviceTarget } = props.client.getAddresses()
+		const rawTransport = props.client.getTransport()
+		const otaTransport = {
+			request: (frameBytes: Uint8Array) => {
+				const t = rawTransport as any
+				if (typeof t?.request !== 'function') throw new Error('transport not ready')
+				const cmd = frameBytes[3] & 0xff
+				const timeoutMs = cmd === 0x50 ? 3000 : 12000
+				return t.request(frameBytes, { timeoutMs })
 			},
-		})
+		}
+		const queryTargetAddress = 0x00
+		const targets = [deviceTarget]
+		let otaErr: unknown = null
+		for (const targetAddress of targets) {
+			try {
+				await bootOtaUpgrade({
+					transport: otaTransport,
+					firmware,
+					targetAddress,
+					queryTargetAddress,
+					sourceAddress,
+					logger: otaLogger,
+					onProgress: (p) => {
+						if (p.stage === 'transfer' && p.packetTotal) {
+							const rate = Math.min(1, Math.max(0, ((p.packetIndex ?? 0) + 1) / p.packetTotal))
+							updateOtaStage('transfer', 10 + Math.round(rate * 85))
+							return
+						}
+						if (p.stage === 'finalize') {
+							updateOtaStage('finalize', 100)
+							return
+						}
+						if (p.stage === 'enter') updateOtaStage('enter', 6)
+						if (p.stage === 'prepare') updateOtaStage('prepare', 10)
+						if (p.stage === 'query') updateOtaStage('checking', 2)
+					},
+				})
+				otaErr = null
+				break
+			} catch (e) {
+				otaErr = e
+			}
+		}
+		if (otaErr) throw otaErr
 
 		updateOtaStage('success', 100)
 		uni.showToast({ title: t('deviceDetail.toast.otaSuccess') as string, icon: 'none' })
 	} catch (e) {
 		updateOtaStage('failed', otaState.progress || 0)
-		uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
+		const errMessage = (e as Error)?.message || String(e || '')
+		if (errMessage === 'boot_packet0_no_ack') {
+			const mismatchText = t('deviceDetail.toast.otaHardwareMismatch') as string
+			otaState.message = mismatchText
+			uni.showToast({ title: mismatchText, icon: 'none' })
+		} else {
+			uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
+		}
 	} finally {
 		otaState.running = false
+		applyPollingState()
 	}
 }
 

@@ -2,7 +2,13 @@
 	<view class="wrap">
 		<view class="top">
 			<view class="top__inner">
-				<dashboard-gauge class="gauge" :soc="socPct" :soh="sohPct">
+				<dashboard-gauge
+					class="gauge"
+					:soc="socPct"
+					:soh="sohPct"
+					:footer-state-text="stateText"
+					:footer-mac-text="macText"
+				>
 					<template #footer>
 						<view class="gauge-footer">
 							<text class="state-pill">{{ stateText }}</text>

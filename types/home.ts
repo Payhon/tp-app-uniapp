@@ -5,5 +5,6 @@ export type HomeDeviceCardModel = {
 	isOnline: boolean
 	connectType: 'bluetooth' | 'mqtt' | 'offline'
 	batteryPercent: number
+	bleMac?: string | null
+	bmsCommType?: number | null
 }
-

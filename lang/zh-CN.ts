@@ -1016,6 +1016,7 @@ export default {
       otaFailed: 'OTA升级失败',
       otaSuccess: 'OTA升级完成',
       otaRunning: '升级中，请勿关闭',
+      otaHardwareMismatch: '固件包与硬件型号不匹配',
       commandSent: '指令已下发',
       commandFailed: '指令下发失败',
       openFailed: '打开失败，请重试',

@@ -1,51 +1,12 @@
 import { ref, shallowRef } from 'vue'
 
 import { appBatteryDetail, appBatteryMqttCredential, type AppBatteryDetail } from '@/service/app-battery'
-import { BmsClient, createUniBleBmsTransport, createUniMqttWsBmsTransport, type UniBleBmsTransport, type UniMqttWsBmsTransport } from '@/common/lib/bms-protocol'
+import { BmsClient, createUniMqttWsBmsTransport, type UniMqttWsBmsTransport } from '@/common/lib/bms-protocol'
+import { canBleAutoConnect, connectBleClient, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
-import { parseMacFromAdvertisement } from '@/common/device-provision/ble'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
 
-type FoundBleDevice = {
-	deviceId: string
-	name?: string
-	localName?: string
-	RSSI?: number
-	advertisData?: ArrayBuffer
-	advertisingData?: ArrayBuffer
-}
-
-const normalizeMac = (s: unknown) =>
-	String(s || '')
-		.trim()
-		.toUpperCase()
-		.replace(/[^0-9A-F]/g, '')
-
-const extractMacHex = (s: unknown) => {
-	const hex = normalizeMac(s)
-	if (hex.length === 12) return hex
-	const raw = String(s || '').toUpperCase()
-	const m = raw.match(/[0-9A-F]{12}/g)
-	if (m && m.length) return m[m.length - 1]
-	return ''
-}
-
-const mac12ToColon = (mac12: string) => {
-	const hex = normalizeMac(mac12)
-	if (hex.length !== 12) return String(mac12 || '')
-	const parts: string[] = []
-	for (let i = 0; i < 12; i += 2) parts.push(hex.slice(i, i + 2))
-	return parts.join(':')
-}
-
-const bytesToHexUpper = (ab: ArrayBuffer | Uint8Array | null | undefined): string => {
-	if (!ab) return ''
-	const u8 = ab instanceof Uint8Array ? ab : new Uint8Array(ab)
-	let out = ''
-	for (let i = 0; i < u8.length; i += 1) out += (u8[i] & 0xff).toString(16).padStart(2, '0')
-	return out.toUpperCase()
-}
 
 const log = (event: string, data?: Record<string, unknown>) => {
 	try {
@@ -77,8 +38,8 @@ export const useBatteryDetail = () => {
 	const pollingPaused = ref(false)
 
 	let pollTimer: number | null = null
-	let bleTransport: UniBleBmsTransport | null = null
 	let mqttTransport: UniMqttWsBmsTransport | null = null
+	let bleCacheKey: string | null = null
 	let pollErrLogged = 0
 	let lastStatusLogAt = 0
 
@@ -128,147 +89,31 @@ export const useBatteryDetail = () => {
 		stopPolling()
 		client.value = null
 		connType.value = 'offline'
-		try {
-			await bleTransport?.disconnect()
-		} catch (e) {}
+		if (bleCacheKey) {
+			releaseBleClient(bleCacheKey)
+			bleCacheKey = null
+		}
 		try {
 			await mqttTransport?.disconnect()
 		} catch (e) {}
-		bleTransport = null
 		mqttTransport = null
 		log('disconnectAll done')
 	}
 
-	const discoverWithAdv = async ({ durationMs }: { durationMs: number }): Promise<FoundBleDevice[]> => {
-		const found = new Map<string, FoundBleDevice>()
-
-		const onFound = (res: { devices?: FoundBleDevice[] }) => {
-			const list = (res && res.devices) || []
-			for (const d of list) {
-				if (!d?.deviceId) continue
-				found.set(String(d.deviceId), d)
-			}
-		}
-
-		const offFn = (uni as any).offBluetoothDeviceFound
-		if (typeof offFn === 'function') offFn(onFound)
-		uni.onBluetoothDeviceFound(onFound as any)
-
-		try {
-			await new Promise((resolve, reject) => {
-				uni.startBluetoothDevicesDiscovery({
-					allowDuplicatesKey: true,
-					success: resolve,
-					fail: reject,
-				})
-			})
-			await new Promise((r) => setTimeout(r, durationMs))
-		} finally {
-			try {
-				await new Promise((resolve) => uni.stopBluetoothDevicesDiscovery({ complete: resolve }))
-			} catch (e) {}
-		}
-		return Array.from(found.values())
-	}
-
 	const connectBleFirst = async (): Promise<boolean> => {
-		const targetMac = normalizeMac(battery.value?.ble_mac)
-		if (!targetMac) return false
-
+		const decision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
+		if (!decision.ok || !decision.mac) return false
 		try {
-			const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
-			const platform = String((sys as any)?.platform || '').toLowerCase()
-			const isAndroid = platform === 'android'
-			log('ble target', { targetMac, targetMacColon: mac12ToColon(targetMac), platform })
-
-			log('ble discover start', { targetMac })
-			bleTransport = createUniBleBmsTransport({})
-
-			if (isAndroid) {
-				const directCandidates = [
-					mac12ToColon(targetMac),
-					mac12ToColon(targetMac).toLowerCase(),
-					targetMac,
-					targetMac.toLowerCase(),
-				].filter(Boolean)
-				for (const cand of directCandidates) {
-					try {
-						log('ble direct connect try', { deviceId: cand })
-						await bleTransport.connect({ deviceId: cand })
-						const c = new BmsClient({ transport: bleTransport, maxReadRegisters: BLE_MAX_READ_REGS })
-						client.value = c
-						connType.value = 'bluetooth'
-						startPolling(c)
-						log('ble direct connect ok', { deviceId: cand })
-						return true
-					} catch (e) {
-						log('ble direct connect failed', { deviceId: cand, err: e instanceof Error ? e.message : String(e || '') })
-						try {
-							await bleTransport.disconnect()
-						} catch (e2) {}
-					}
-				}
-			}
-
-			const list = await discoverWithAdv({ durationMs: 5000 })
-			log('ble discover done', { found: Array.isArray(list) ? list.length : 0 })
-			if (Array.isArray(list) && list.length) {
-				const sample = list.slice(0, 30)
-				for (const d of sample) {
-					const adv = (d as any).advertisData || (d as any).advertisingData || null
-					const advHex = bytesToHexUpper(adv)
-					const parsedMac = parseMacFromAdvertisement(adv) || ''
-					const idHex = extractMacHex(d?.deviceId)
-					const nameHex = extractMacHex(d?.name || d?.localName)
-					log('ble device', {
-						deviceId: d.deviceId,
-						name: d.name || d.localName || '',
-						rssi: d.RSSI ?? null,
-						advHexHead: advHex ? advHex.slice(0, 64) : '',
-						advHexLen: advHex ? advHex.length / 2 : 0,
-						parsedMac,
-						idHex,
-						nameHex,
-						match: parsedMac === targetMac || idHex === targetMac || nameHex === targetMac,
-					})
-				}
-				if (list.length > sample.length) {
-					log('ble device list truncated', { shown: sample.length, total: list.length })
-				}
-			}
-
-			const candidates = (list || [])
-				.map((d: any) => {
-					const adv = (d as any).advertisData || (d as any).advertisingData || null
-					const advMac = parseMacFromAdvertisement(adv)
-					const idHex = extractMacHex(d?.deviceId)
-					const nameHex = extractMacHex(d?.name || d?.localName)
-					const ok =
-						(advMac && advMac === targetMac) ||
-						(idHex && idHex === targetMac) ||
-						(nameHex && nameHex === targetMac) ||
-						(String(d?.name || d?.localName || '').toUpperCase().includes(targetMac))
-					return { d, ok, rssi: Number(d?.RSSI ?? -9999) }
-				})
-				.filter((x) => x.ok)
-				.sort((a, b) => b.rssi - a.rssi)
-			const hit = candidates[0]?.d
-			if (!hit?.deviceId) return false
-
-			log('ble connect start', { deviceId: hit.deviceId })
-			await bleTransport.connect({ deviceId: hit.deviceId })
-			const c = new BmsClient({ transport: bleTransport, maxReadRegisters: BLE_MAX_READ_REGS })
-			client.value = c
+			const entry = await connectBleClient({ mac: decision.mac, maxReadRegisters: BLE_MAX_READ_REGS, probe: true })
+			if (!entry) return false
+			bleCacheKey = entry.key
+			retainBleClient(entry.key)
+			client.value = entry.client
 			connType.value = 'bluetooth'
-			startPolling(c)
-			log('ble connect ok', { deviceId: hit.deviceId })
+			startPolling(entry.client)
 			return true
 		} catch (e) {
 			log('ble connect failed', { err: e instanceof Error ? e.message : String(e || '') })
-			try {
-				await bleTransport?.disconnect()
-			} catch (e2) {}
-			bleTransport = null
 			return false
 		}
 	}
@@ -324,9 +169,8 @@ export const useBatteryDetail = () => {
 		try {
 			await disconnectAll()
 			const commType = Number(battery.value?.bms_comm_type || 0)
-			const chipId = String(battery.value?.comm_chip_id || '').trim()
-			const hasBleMac = Boolean(normalizeMac(battery.value?.ble_mac))
-			const treatBleOnly = commType === 1 || ((commType === 0 || !Number.isFinite(commType)) && hasBleMac && !chipId)
+			const bleDecision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
+			const treatBleOnly = commType === 1
 			log('connectAuto', {
 				deviceId: deviceId.value,
 				bms_comm_type: battery.value?.bms_comm_type ?? null,
@@ -335,11 +179,11 @@ export const useBatteryDetail = () => {
 			})
 			if (treatBleOnly) {
 				log('connectAuto choose BLE-only')
-				if (await connectBleFirst()) return
+				if (bleDecision.ok && (await connectBleFirst())) return
 				connType.value = 'offline'
 				return
 			}
-			if (await connectBleFirst()) return
+			if (bleDecision.ok && (await connectBleFirst())) return
 			log('connectAuto BLE not available, try MQTT socket')
 			if (await connectMqttSocket()) return
 			connType.value = 'offline'

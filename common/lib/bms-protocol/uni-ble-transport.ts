@@ -228,7 +228,7 @@ class FrameCollector {
 
 	tryShiftOneBootFrame(): Uint8Array | null {
 		const bytes = this._buf;
-		if (bytes.length < 5) return null;
+		if (bytes.length < 9) return null;
 
 		let start = -1;
 		for (let i = 0; i < bytes.length; i += 1) {
@@ -243,19 +243,23 @@ class FrameCollector {
 		}
 		if (start > 0) this._buf = bytes.slice(start);
 
-		for (let j = 1; j < this._buf.length; j += 1) {
-			if (this._buf[j] !== 0xfd) continue;
-			const candidate = this._buf.slice(0, j + 1);
-			try {
-				parseBootFrame(candidate);
-				this._buf = this._buf.slice(j + 1);
-				return candidate;
-			} catch (e) {
-				this._buf = this._buf.slice(1);
-				return null;
-			}
+		if (this._buf.length < 9) return null;
+		const dataLen = ((this._buf[4] & 0xff) << 8) | (this._buf[5] & 0xff);
+		const expectedLen = 1 + 1 + 1 + 1 + 2 + dataLen + 2 + 1;
+		if (expectedLen > this._buf.length) return null;
+		const candidate = this._buf.slice(0, expectedLen);
+		if (candidate[candidate.length - 1] !== 0xfd) {
+			this._buf = this._buf.slice(1);
+			return null;
 		}
-		return null;
+		try {
+			parseBootFrame(candidate);
+			this._buf = this._buf.slice(expectedLen);
+			return candidate;
+		} catch (e) {
+			this._buf = this._buf.slice(1);
+			return null;
+		}
 	}
 }
 
@@ -308,7 +312,7 @@ export class UniBleBmsTransport {
 		serviceUUID = BMS_BLE_SERVICE_UUID,
 		writeCharUUID = BMS_BLE_WRITE_UUID,
 		notifyCharUUID = BMS_BLE_NOTIFY_UUID,
-		writeChunkSize = 20,
+		writeChunkSize = 185,
 		writeChunkIntervalMs = 20,
 		minFrameIntervalMs = 120,
 		requestTimeoutMs = 5000,
@@ -549,7 +553,14 @@ export class UniBleBmsTransport {
 			try {
 				if (expectBoot) {
 					const parsed = parseBootFrame(frameBytes);
-					return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.command === expect.functionCode;
+					if (parsed.targetAddress !== expect.targetAddress) return false;
+					if (parsed.command !== expect.functionCode) {
+						// Allow boot finalize (0x54) to accept data ACK (0x53)
+						if ((expect.functionCode & 0xff) !== 0x54 || (parsed.command & 0xff) !== 0x53) return false;
+					}
+					// 广播地址 0x00：允许任意从机地址回复
+					if ((expect.sourceAddress & 0xff) === 0x00) return true;
+					return parsed.sourceAddress === expect.sourceAddress;
 				}
 				const parsed = parseFrame(frameBytes);
 				if (parsed.type === 'error') {
@@ -571,7 +582,11 @@ export class UniBleBmsTransport {
 
 		async _writeFrameBytes(
 			frameBytes: Uint8Array | ArrayLike<number>,
-			{ chunkSize = this.writeChunkSize, chunkIntervalMs = this.writeChunkIntervalMs }: { chunkSize?: number; chunkIntervalMs?: number } = {}
+			{
+				chunkSize = this.writeChunkSize,
+				chunkIntervalMs = this.writeChunkIntervalMs,
+				writeWithResponse = false,
+			}: { chunkSize?: number; chunkIntervalMs?: number; writeWithResponse?: boolean } = {}
 		): Promise<void> {
 			if (!this._connected) throw new BmsProtocolError('BLE is not connected');
 			if (!this.deviceId || !this.serviceId || !this.writeCharId) throw new BmsProtocolError('BLE characteristic not ready');
@@ -586,7 +601,7 @@ export class UniBleBmsTransport {
 					serviceId: this.serviceId,
 					characteristicId: this.writeCharId,
 					// 目标特征值为 write without response，但部分运行时不支持 writeType 入参；失败时降级重试一次
-					writeType: 'writeNoResponse',
+					...(writeWithResponse ? {} : { writeType: 'writeNoResponse' }),
 					value: toArrayBuffer(chunk),
 				});
 			} catch (e: any) {
@@ -607,6 +622,18 @@ export class UniBleBmsTransport {
 		}
 	}
 
+	async setMtu(mtu: number): Promise<number> {
+		if (!this.deviceId) throw new BmsProtocolError('deviceId is required for setMtu');
+		const api = (uni as Record<string, any>)?.setBLEMTU;
+		if (typeof api !== 'function') throw new BmsProtocolError('setBLEMTU not supported');
+		const desired = Math.max(23, Math.floor(mtu));
+		const res = await uniAsync<{ mtu?: number }>('setBLEMTU', { deviceId: this.deviceId, mtu: desired });
+		const actual = Number.isFinite(res?.mtu as number) ? Number(res?.mtu) : desired;
+		const attPayload = Math.max(20, actual - 3);
+		this.writeChunkSize = attPayload;
+		return actual;
+	}
+
 	/**
 	 * 通讯层核心方法：发送请求帧，等待一帧有效回复。
 	 * - 为避免“串包”，内部默认强制串行
@@ -615,17 +642,32 @@ export class UniBleBmsTransport {
 		frameBytes: Uint8Array | ArrayLike<number>,
 		{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
 	): Promise<Uint8Array> {
-		this._queue = this._queue.then(() => this._requestSerial(frameBytes, { timeoutMs }));
+		this._queue = this._queue
+			.catch(() => new Uint8Array(0))
+			.then(() => this._requestSerial(frameBytes, { timeoutMs, writeWithResponse: false }));
 		return this._queue;
 	}
 
-	async _requestSerial(frameBytes: Uint8Array | ArrayLike<number>, { timeoutMs }: { timeoutMs: number }): Promise<Uint8Array> {
+	requestWithResponse(
+		frameBytes: Uint8Array | ArrayLike<number>,
+		{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
+	): Promise<Uint8Array> {
+		this._queue = this._queue
+			.catch(() => new Uint8Array(0))
+			.then(() => this._requestSerial(frameBytes, { timeoutMs, writeWithResponse: true }));
+		return this._queue;
+	}
+
+	async _requestSerial(
+		frameBytes: Uint8Array | ArrayLike<number>,
+		{ timeoutMs, writeWithResponse }: { timeoutMs: number; writeWithResponse?: boolean }
+	): Promise<Uint8Array> {
 		if (this._pending) throw new BmsProtocolError('Previous request still pending');
 
 		const req = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
 		const expectBoot = req[0] === 0x55 && req[1] !== 0x7f;
 		if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes');
-		if (expectBoot && req.length < 4) throw new BmsProtocolError('Invalid boot request frame bytes');
+		if (expectBoot && req.length < 9) throw new BmsProtocolError('Invalid boot request frame bytes');
 
 		// 协议要求帧间隔 >100ms，这里做一个最小间隔保护
 		const now = Date.now();
@@ -660,7 +702,7 @@ export class UniBleBmsTransport {
 
 		try {
 			if (this.logger?.debug) this.logger.debug(`[ble] tx frame len=${req.length} hex=${u8ToHex(req)}`);
-			await this._writeFrameBytes(req);
+			await this._writeFrameBytes(req, { writeWithResponse: !!writeWithResponse });
 			this._lastTxAt = Date.now();
 
 			// 某些设备/运行时不会主动推送 notify，需要通过 read 触发 value change（特征值含 Read 属性时）

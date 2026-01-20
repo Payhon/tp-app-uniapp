@@ -71,7 +71,7 @@ function mkReqExpect(reqFrameBytes: Uint8Array | ArrayLike<number>): { expect: R
 	const req = reqFrameBytes instanceof Uint8Array ? reqFrameBytes : Uint8Array.from(reqFrameBytes);
 	const expectBoot = req[0] === 0x55 && req[1] !== 0x7f;
 	if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes');
-	if (expectBoot && req.length < 4) throw new BmsProtocolError('Invalid boot request frame bytes');
+	if (expectBoot && req.length < 9) throw new BmsProtocolError('Invalid boot request frame bytes');
 	const expect = expectBoot
 		? {
 				functionCode: req[3] & 0xff,
@@ -138,7 +138,7 @@ class FrameCollector {
 
 	tryShiftOneBootFrame(): Uint8Array | null {
 		const bytes = this._buf;
-		if (bytes.length < 5) return null;
+		if (bytes.length < 9) return null;
 
 		let start = -1;
 		for (let i = 0; i < bytes.length; i += 1) {
@@ -153,19 +153,23 @@ class FrameCollector {
 		}
 		if (start > 0) this._buf = bytes.slice(start);
 
-		for (let j = 1; j < this._buf.length; j += 1) {
-			if (this._buf[j] !== 0xfd) continue;
-			const candidate = this._buf.slice(0, j + 1);
-			try {
-				parseBootFrame(candidate);
-				this._buf = this._buf.slice(j + 1);
-				return candidate;
-			} catch (e) {
-				this._buf = this._buf.slice(1);
-				return null;
-			}
+		if (this._buf.length < 9) return null;
+		const dataLen = ((this._buf[4] & 0xff) << 8) | (this._buf[5] & 0xff);
+		const expectedLen = 1 + 1 + 1 + 1 + 2 + dataLen + 2 + 1;
+		if (expectedLen > this._buf.length) return null;
+		const candidate = this._buf.slice(0, expectedLen);
+		if (candidate[candidate.length - 1] !== 0xfd) {
+			this._buf = this._buf.slice(1);
+			return null;
 		}
-		return null;
+		try {
+			parseBootFrame(candidate);
+			this._buf = this._buf.slice(expectedLen);
+			return candidate;
+		} catch (e) {
+			this._buf = this._buf.slice(1);
+			return null;
+		}
 	}
 }
 
@@ -450,7 +454,10 @@ export class UniMqttWsBmsTransport {
 		try {
 			if (expectBoot) {
 				const parsed = parseBootFrame(frameBytes);
-				return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.command === expect.functionCode;
+				if (parsed.targetAddress !== expect.targetAddress) return false;
+				if (parsed.command !== expect.functionCode) return false;
+				if ((expect.sourceAddress & 0xff) === 0x00) return true;
+				return parsed.sourceAddress === expect.sourceAddress;
 			}
 			const parsed = parseFrame(frameBytes);
 			if (parsed.type === 'error') {

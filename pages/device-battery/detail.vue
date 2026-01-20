@@ -8,13 +8,23 @@
 					<u-icon name="arrow-left" size="20" color="#333333"></u-icon>
 				</view>
 				<view class="nav__title u-line-1">{{ titleText }}</view>
+				<!-- #ifndef MP-WEIXIN -->
 				<view class="nav__right">
 					<view class="conn-pill" :class="`conn-pill--${connClass}`">
 						<image class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
 						<text class="conn-pill__text">{{ connText }}</text>
 					</view>
 				</view>
+				<!-- #endif -->
 			</view>
+			<!-- #ifdef MP-WEIXIN -->
+			<view class="nav__conn-row">
+				<view class="conn-pill" :class="`conn-pill--${connClass}`">
+					<image class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
+					<text class="conn-pill__text">{{ connText }}</text>
+				</view>
+			</view>
+			<!-- #endif -->
 		</view>
 
 		<view class="content" :style="{ paddingTop: navHeight + 'px', paddingBottom: contentBottomPadPx + 'px' }">
@@ -81,7 +91,11 @@ const { battery, status, client, connType, connecting, loadById, disconnectAll, 
 
 const statusBarHeight = getWindowInfo().statusBarHeight || 0
 const safeBottom = getWindowInfo().safeAreaInsets?.bottom || 0
-const navHeight = 44 + statusBarHeight
+let mpExtraNavHeight = 0
+// #ifdef MP-WEIXIN
+mpExtraNavHeight = 32
+// #endif
+const navHeight = 44 + statusBarHeight + mpExtraNavHeight
 const rpx2px = Number(getWindowInfo().windowWidth || getWindowInfo().screenWidth || 375) / 750
 const contentBottomPadPx = Math.round(160 * rpx2px + safeBottom)
 
@@ -195,6 +209,12 @@ onUnload(() => {
 	width: 200rpx;
 	display: flex;
 	justify-content: flex-end;
+}
+
+.nav__conn-row {
+	padding: 0 24rpx 12rpx;
+	display: flex;
+	justify-content: center;
 }
 
 .conn-pill {
