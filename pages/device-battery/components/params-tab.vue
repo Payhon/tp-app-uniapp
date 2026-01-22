@@ -527,6 +527,13 @@ const otaLogger = {
 	error: (...args: unknown[]) => console.error('[ota]', ...args),
 }
 
+const parseMacFirstByte = (mac: string): number | null => {
+	const hex = String(mac || '').replace(/[^0-9a-fA-F]/g, '')
+	if (hex.length < 2) return null
+	const v = Number.parseInt(hex.slice(0, 2), 16)
+	return Number.isFinite(v) ? v : null
+}
+
 const startOta = async () => {
 	if (!props.client || props.connType === 'offline') {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
@@ -572,6 +579,10 @@ const startOta = async () => {
 		updateOtaStage('prepare', 10)
 
 		const { sourceAddress, targetAddress: deviceTarget } = props.client.getAddresses()
+		const macRaw = String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim()
+		const macFirst = parseMacFirstByte(macRaw)
+		const isGaugeDevice = macFirst === 0xaa
+		const otaTargetAddress = isGaugeDevice ? 0xfc : deviceTarget
 		const rawTransport = props.client.getTransport()
 		const otaTransport = {
 			request: (frameBytes: Uint8Array) => {
@@ -582,8 +593,8 @@ const startOta = async () => {
 				return t.request(frameBytes, { timeoutMs })
 			},
 		}
-		const queryTargetAddress = 0x00
-		const targets = [deviceTarget]
+		const queryTargetAddress = isGaugeDevice ? 0xfc : 0x00
+		const targets = [otaTargetAddress]
 		let otaErr: unknown = null
 		for (const targetAddress of targets) {
 			try {
