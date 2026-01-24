@@ -196,13 +196,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { appBatteryOtaCheck, type AppBatteryDetail } from '@/service/app-battery'
+import { fetchCurrentDeviceParamPermissions } from '@/service/permissions'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import type { BmsClient } from '@/common/lib/bms-protocol'
 import { bootOtaUpgrade } from '@/common/lib/bms-protocol'
-import { PARAM_CATEGORIES, PARAM_DEF_BY_KEY, listParamsByCategory } from '@/common/lib/bms-protocol/param-registry'
+import { PARAM_CATEGORIES, PARAM_DEF_BY_KEY, getParamPermissionKey, listParamsByCategory } from '@/common/lib/bms-protocol/param-registry'
 
 type ParamItem = {
 	key: string
@@ -250,6 +251,10 @@ const applyPollingState = () => {
 	props.onResumePolling && props.onResumePolling()
 }
 
+onMounted(() => {
+	loadDeviceParamPermissions()
+})
+
 const toggle = (k: keyof typeof opened) => {
 	opened[k] = !opened[k]
 	if (opened[k]) loadSection(k)
@@ -259,6 +264,25 @@ const toggle = (k: keyof typeof opened) => {
 const fwVersionText = computed(() => String(props.battery?.fw_version || props.status?.meta?.softwareVersion || '-'))
 
 const paramValues = reactive<Record<string, unknown>>({})
+
+const deviceParamPerm = reactive({
+	allowAll: true,
+	keys: [] as string[],
+})
+const deviceParamPermSet = computed(() => new Set(deviceParamPerm.keys))
+
+const canAccessParamKey = (actualKey: string) => {
+	if (deviceParamPerm.allowAll) return true
+	const permKey = getParamPermissionKey(actualKey)
+	if (!permKey) return true
+	return deviceParamPermSet.value.has(permKey)
+}
+
+const filterParamEntries = <T extends string | { displayKey: string; actualKey: string }>(entries: T[]) =>
+	entries.filter((entry) => {
+		const actualKey = typeof entry === 'string' ? entry : entry.actualKey
+		return canAccessParamKey(actualKey)
+	})
 
 const labelOf = (key: string) => {
 	const i18nKey = `bmsParam.${key}`
@@ -279,6 +303,18 @@ const formatValue = (v: unknown, unit: string) => {
 	if (unit.toLowerCase() === 's') return `${n.toFixed(0)}S`
 	if (unit.toLowerCase() === 'min') return `${n.toFixed(0)}MIN`
 	return `${n}${unit}`
+}
+
+const loadDeviceParamPermissions = async () => {
+	try {
+		const resp = await fetchCurrentDeviceParamPermissions()
+		const data = (resp as any)?.data || {}
+		deviceParamPerm.allowAll = data?.allow_all ?? true
+		deviceParamPerm.keys = Array.isArray(data?.device_param_permissions) ? data.device_param_permissions : []
+	} catch (e) {
+		deviceParamPerm.allowAll = true
+		deviceParamPerm.keys = []
+	}
 }
 
 const mkItems = (keys: Array<string | { displayKey: string; actualKey: string }>) =>
@@ -320,18 +356,18 @@ const TEMP_KEYS = [
 	{ displayKey: 'CELL_UNDER_TEMP_RELEASE_C', actualKey: 'CHARGE_UT_PROTECT_RELEASE_C' },
 ]
 
-const singleItems = computed(() => mkItems(SINGLE_KEYS))
-const voltageItems = computed(() => mkItems(VOLTAGE_KEYS))
-const currentItems = computed(() => mkItems(CURRENT_KEYS))
-const temperatureItems = computed(() => mkItems(TEMP_KEYS))
+const singleItems = computed(() => mkItems(filterParamEntries(SINGLE_KEYS)))
+const voltageItems = computed(() => mkItems(filterParamEntries(VOLTAGE_KEYS)))
+const currentItems = computed(() => mkItems(filterParamEntries(CURRENT_KEYS)))
+const temperatureItems = computed(() => mkItems(filterParamEntries(TEMP_KEYS)))
 
 const OTHER_KEYS = listParamsByCategory(PARAM_CATEGORIES.OTHER)
 const NUMBERING_KEYS = listParamsByCategory(PARAM_CATEGORIES.STRING)
 const SYSTEM_KEYS = listParamsByCategory(PARAM_CATEGORIES.SYSTEM)
 
-const otherItems = computed(() => mkItems(OTHER_KEYS))
-const numberingItems = computed(() => mkItems(NUMBERING_KEYS))
-const systemItems = computed(() => mkItems(SYSTEM_KEYS))
+const otherItems = computed(() => mkItems(filterParamEntries(OTHER_KEYS)))
+const numberingItems = computed(() => mkItems(filterParamEntries(NUMBERING_KEYS)))
+const systemItems = computed(() => mkItems(filterParamEntries(SYSTEM_KEYS)))
 
 const FACTORY_ACTIONS = [
 	// 以下 raw 值按协议示例帧整理（0x57A~0x57B，共 32bit），确保与设备端一致
@@ -418,6 +454,9 @@ watch(
 const openEdit = (item: ParamItem) => {
 	if (!props.client || props.connType === 'offline') {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	if (!canAccessParamKey(item.actualKey || item.key)) {
 		return
 	}
 	editPopup.title = item.label
@@ -671,7 +710,8 @@ const openAdvanced = () => {
 const loadKeys = async (keys: string[]) => {
 	const c = props.client
 	if (!c) return
-	for (const k of keys) {
+	const allowedKeys = keys.filter((k) => canAccessParamKey(k))
+	for (const k of allowedKeys) {
 		try {
 			// eslint-disable-next-line no-await-in-loop
 			paramValues[k] = await c.readParam(k)

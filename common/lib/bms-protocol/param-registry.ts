@@ -659,3 +659,77 @@ export function camelToConst(camelKey: string): string {
 		.replace(/([a-z0-9])([A-Z])/g, '$1_$2')
 		.toUpperCase();
 }
+
+export type DeviceParamPermissionNode = {
+	key: string;
+	label: string;
+	children?: DeviceParamPermissionNode[];
+};
+
+export function getParamPermissionKeyByDef(def: BmsParamDef | undefined | null): string | null {
+	if (!def) return null;
+	if (def.valueType === 'statusPath') return null;
+	const addr = def.valueType === 'str' ? def.startAddress : def.address;
+	if (typeof addr !== 'number' || !Number.isFinite(addr)) return null;
+	return addr.toString(16).toLowerCase();
+}
+
+export function getParamPermissionKey(paramKey: string): string | null {
+	const normalized = normalizeParamKey(paramKey);
+	if (!normalized) return null;
+	return getParamPermissionKeyByDef(PARAM_DEF_BY_KEY[normalized]);
+}
+
+export function buildDeviceParamPermissionTree(): DeviceParamPermissionNode[] {
+	const categoryLabels: Record<string, string> = {
+		[PARAM_CATEGORIES.VOLTAGE]: '电压配置',
+		[PARAM_CATEGORIES.CURRENT]: '电流配置',
+		[PARAM_CATEGORIES.TEMPERATURE]: '温度配置',
+		[PARAM_CATEGORIES.OTHER]: '其他配置',
+		[PARAM_CATEGORIES.STRING]: '编号/字符串',
+		[PARAM_CATEGORIES.SYSTEM]: '系统配置',
+		[PARAM_CATEGORIES.STATUS]: '状态参数',
+	};
+	const categoryOrder: ParamCategory[] = [
+		PARAM_CATEGORIES.VOLTAGE,
+		PARAM_CATEGORIES.CURRENT,
+		PARAM_CATEGORIES.TEMPERATURE,
+		PARAM_CATEGORIES.OTHER,
+		PARAM_CATEGORIES.STRING,
+		PARAM_CATEGORIES.SYSTEM,
+	];
+
+	const grouped = new Map<ParamCategory, Map<string, { labels: string[] }>>();
+
+	for (const def of PARAM_DEFS) {
+		if (def.access !== 'RW') continue;
+		const permKey = getParamPermissionKeyByDef(def);
+		if (!permKey) continue;
+		const category = def.category as ParamCategory;
+		if (!grouped.has(category)) grouped.set(category, new Map());
+		const catMap = grouped.get(category)!;
+		if (!catMap.has(permKey)) {
+			catMap.set(permKey, { labels: [] });
+		}
+		const entry = catMap.get(permKey)!;
+		const label = (def.label || def.key || '').trim();
+		if (label && !entry.labels.includes(label)) entry.labels.push(label);
+	}
+
+	const out: DeviceParamPermissionNode[] = [];
+	for (const category of categoryOrder) {
+		const catMap = grouped.get(category);
+		if (!catMap || catMap.size === 0) continue;
+		const children: DeviceParamPermissionNode[] = [];
+		for (const [key, entry] of catMap.entries()) {
+			const label = entry.labels.length > 0 ? entry.labels.join(' / ') : key;
+			children.push({ key, label });
+		}
+		out.push({
+			key: `cat:${category}`,
+			label: categoryLabels[category] || category,
+			children,
+		});
+	}
+	return out;
+}
