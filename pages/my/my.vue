@@ -65,6 +65,18 @@
 
 				<view class="menu-divider"></view>
 
+				<view v-if="isOrgUser" class="menu-item" hover-class="menu-item--hover" @tap="goOrgDevices">
+					<view class="menu-left">
+						<image class="menu-icon" src="/static/image/my/icon-about@2x.png" mode="aspectFit" />
+						<text class="menu-title">{{ $t('pages.my.orgDevices') }}</text>
+					</view>
+					<view class="menu-right">
+						<u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
+					</view>
+				</view>
+
+				<view v-if="isOrgUser" class="menu-divider"></view>
+
 				<view class="menu-item" hover-class="menu-item--hover" @tap="goHelpFeedback">
 					<view class="menu-left">
 						<image class="menu-icon" src="/static/image/my/icon-help@2x.png" mode="aspectFit" />
@@ -145,6 +157,16 @@ const refreshLoginState = () => {
 }
 
 const userInfo = computed(() => userStore.userInfo)
+const isOrgUser = computed(() => {
+	const u = userInfo.value as any
+	const kind = String(u?.user_kind || '').toUpperCase()
+	if (kind === 'ORG_USER') return true
+	const authority = String(u?.authority || '').toUpperCase()
+	if (authority === 'TENANT_ADMIN' || authority === 'SYS_ADMIN') return true
+	const orgID = String(u?.org_id || '').trim()
+	const orgType = String(u?.org_type || '').trim()
+	return Boolean(orgID || orgType)
+})
 
 const avatarUrl = computed(() => {
 	const raw = (userInfo.value as unknown as { avatar_url?: string } | null)?.avatar_url
@@ -347,6 +369,10 @@ const goBluetooth = () => {
 
 const goHelpFeedback = () => {
 	uni.navigateTo({ url: '/pages/my/help-feedback/index' })
+}
+
+const goOrgDevices = () => {
+	uni.navigateTo({ url: '/pages/org-devices/index' })
 }
 
 const goContact = () => {

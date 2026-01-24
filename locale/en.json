@@ -11,6 +11,7 @@
   "pages.contentPage": "Content",
   "pages.deviceDetailTitle": "Device Detail",
   "pages.deviceList": "Device List",
+  "pages.orgDevicesTitle": "Org Devices",
   "pages.deviceProvision.bleSearchTitle": "Bluetooth Search",
   "pages.deviceProvision.uuidBindTitle": "Add Device",
   "pages.deviceProvision.wizardTitle": "Add Device",

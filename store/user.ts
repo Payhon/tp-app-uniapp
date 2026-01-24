@@ -7,6 +7,10 @@ export interface UserInfo {
 	email?: string
 	is_admin?: number
 	business_id?: string | number
+	user_kind?: string
+	org_id?: string | null
+	org_type?: string | null
+	org_name?: string | null
 	[key: string]: unknown
 }
 
@@ -34,4 +38,3 @@ export const useUserStore = defineStore('user', {
 		}
 	}
 })
-

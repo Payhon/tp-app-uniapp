@@ -141,6 +141,7 @@ export default {
     notifyTitle: '告警信息',
     notifyDetailTitle: '告警详情',
     deviceList: '设备列表',
+    orgDevicesTitle: '机构设备',
     intelligentControlTitle: '智能控制',
     userCenter: '个人中心',
     basicInfo: '基本资料',
@@ -253,6 +254,7 @@ export default {
       helpFeedback: '帮助与反馈',
       setting: '设置',
       about: '关于我们',
+      orgDevices: '机构设备',
       clearCacheConfirm: '确定要清除缓存吗？',
       clearCacheSuccess: '缓存已清除',
       contactHint: '请通过官方渠道联系我们',
@@ -687,6 +689,22 @@ export default {
         registerSuccess: '注册成功',
         registerFailed: '注册失败'
       }
+    },
+    orgDevices: {
+      searchPlaceholder: '设备编号/名称',
+      filterType: '筛选类型',
+      filterOrg: '筛选机构',
+      filterClear: '清除筛选',
+      selectTypeFirst: '请先选择类型',
+      noOrgOptions: '暂无可选机构',
+      emptyTip: '暂无设备',
+      orgFactory: '厂家库存',
+      all: '全部',
+      online: '在线',
+      offline: '离线',
+      typePack: 'PACK厂',
+      typeDealer: '经销商',
+      typeStore: '门店'
     },
     notify: {
       noAlerts: '暂无新的告警内容',

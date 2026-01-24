@@ -11,6 +11,7 @@
   "pages.contentPage": "内容",
   "pages.deviceDetailTitle": "设备详情",
   "pages.deviceList": "设备列表",
+  "pages.orgDevicesTitle": "机构设备",
   "pages.deviceProvision.bleSearchTitle": "蓝牙搜索",
   "pages.deviceProvision.uuidBindTitle": "添加设备",
   "pages.deviceProvision.wizardTitle": "添加设备",

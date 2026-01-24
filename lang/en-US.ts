@@ -143,6 +143,7 @@ export default {
     notifyTitle: 'Alerts',
     notifyDetailTitle: 'Alert Details',
     deviceList: 'Device List',
+    orgDevicesTitle: 'Org Devices',
     intelligentControlTitle: 'Intelligent Control',
     userCenter: 'User Center',
     basicInfo: 'Basic Info',
@@ -255,6 +256,7 @@ export default {
       helpFeedback: 'Help & Feedback',
       setting: 'Settings',
       about: 'About',
+      orgDevices: 'Org Devices',
       clearCacheConfirm: 'Are you sure you want to clear the cache?',
       clearCacheSuccess: 'Cache cleared',
       contactHint: 'Please contact us through official channels',
@@ -673,6 +675,22 @@ export default {
         registerSuccess: 'Registration successful',
         registerFailed: 'Registration failed'
       }
+    },
+    orgDevices: {
+      searchPlaceholder: 'Device number/name',
+      filterType: 'Filter type',
+      filterOrg: 'Filter org',
+      filterClear: 'Clear filters',
+      selectTypeFirst: 'Select a type first',
+      noOrgOptions: 'No org options',
+      emptyTip: 'No devices',
+      orgFactory: 'Factory inventory',
+      all: 'All',
+      online: 'Online',
+      offline: 'Offline',
+      typePack: 'PACK factory',
+      typeDealer: 'Dealer',
+      typeStore: 'Store'
     },
     notify: {
       noAlerts: 'No new alerts',

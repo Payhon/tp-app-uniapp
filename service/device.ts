@@ -233,6 +233,22 @@ export const appBoundDeviceList = (params: { page: number; page_size: number; us
 	return apiRequest<unknown>('/api/v1/app/device/list', params, 'GET')
 }
 
+// APP 端：组织范围设备列表
+export const appOrgDeviceList = (params: {
+	page: number
+	page_size: number
+	device_number?: string
+	owner_org_id?: string | null
+	owner_org_type?: string | null
+}) => {
+	return apiRequest<unknown>('/api/v1/app/device/org/list', params, 'GET')
+}
+
+// APP 端：组织选项（按类型）
+export const appOrgOptions = (params: { org_type: string }) => {
+	return apiRequest<unknown>('/api/v1/app/org/options', params, 'GET')
+}
+
 // 更新设备信息（目前首页仅用于改名）
 export const updateDeviceName = (payload: { id: string; name: string }) => {
 	return apiRequest<unknown>('/api/v1/device', payload, 'PUT')

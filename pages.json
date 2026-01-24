@@ -201,6 +201,14 @@
 				"enablePullDownRefresh": false,
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
+		},
+		{
+			"path": "pages/org-devices/index",
+			"style": {
+				"navigationBarTitleText": "%pages.orgDevicesTitle%",
+				"enablePullDownRefresh": true,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
 		}
 	],
 	"globalStyle": {
