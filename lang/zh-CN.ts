@@ -961,7 +961,7 @@ export default {
       voltageDiff: '电压差',
     },
     cells: {
-      cellCount: '电芯数量：{n}',
+      cellCount: '电芯串数：{n}',
       cellNo: '电芯{n}',
     },
     params: {
