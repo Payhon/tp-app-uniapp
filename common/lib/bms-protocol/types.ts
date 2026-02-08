@@ -26,6 +26,8 @@ export type BmsParamDefBase = {
 	label: string
 	access: AccessMode
 	unit?: string
+	functionCode?: number
+	targetAddress?: number
 }
 
 export type BmsStatusPathParamDef = BmsParamDefBase & {
@@ -145,4 +147,3 @@ export type BmsStatus = {
 	}
 	customParams: number[]
 }
-

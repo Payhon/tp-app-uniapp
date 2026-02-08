@@ -20,7 +20,8 @@
         "modules" : {
             "Bluetooth" : {},
             "Barcode" : {},
-            "SQLite" : {}
+            "SQLite" : {},
+            "Push" : {}
         },
         /* 应用发布信息 */
         "distribute" : {
@@ -104,7 +105,7 @@
     "quickapp" : {},
     /* 小程序特有相关 */
     "mp-weixin" : {
-        "appid" : "wx40d17175f91bdbf0",
+        "appid" : "wxea563e4e504e24c7",
         "setting" : {
             "urlCheck" : false
         },
@@ -113,6 +114,9 @@
             "scope.userLocation" : {
                 "desc" : "用于蓝牙搜索附近设备"
             }
+        },
+        "unipush" : {
+            "enable" : false
         }
     },
     "mp-alipay" : {
@@ -129,5 +133,10 @@
     },
     "fallbackLocale" : "zh-Hans",
     "vueVersion" : "3",
-    "locale" : "zh-Hans"
+    "locale" : "zh-Hans",
+    "app-harmony" : {
+        "distribute" : {
+            "bundleName" : "fjbms.fjiacom.hm"
+        }
+    }
 }

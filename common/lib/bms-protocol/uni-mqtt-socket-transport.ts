@@ -1,4 +1,4 @@
-import { BmsProtocolError, parseFrame } from './frame'
+import { BMS_FUNC, BmsProtocolError, buildReadFrame, parseFrame } from './frame'
 import { parseBootFrame } from './boot-frame'
 
 type LoggerLike = {
@@ -33,6 +33,23 @@ function hexToBytes(hex: string): Uint8Array {
 	const out = new Uint8Array(clean.length / 2)
 	for (let i = 0; i < clean.length; i += 2) out[i / 2] = parseInt(clean.slice(i, i + 2), 16) & 0xff
 	return out
+}
+
+function buildMqttSocketReadFrame(reqFrameBytes: Uint8Array): Uint8Array {
+	if (reqFrameBytes.length < 9) return reqFrameBytes
+	if (reqFrameBytes[0] !== 0x7f || reqFrameBytes[1] !== 0x55) return reqFrameBytes
+	const func = reqFrameBytes[4] & 0xff
+	if (func !== BMS_FUNC.READ_HOLDING_REGISTERS) return reqFrameBytes
+	const sourceAddress = reqFrameBytes[2] & 0xff
+	const startAddress = (reqFrameBytes[5] << 8) | reqFrameBytes[6]
+	const quantity = (reqFrameBytes[7] << 8) | reqFrameBytes[8]
+	return buildReadFrame({
+		sourceAddress,
+		targetAddress: 0xfa,
+		functionCode: BMS_FUNC.SOCKET_READ,
+		startAddress,
+		quantity,
+	})
 }
 
 class FrameCollector {
@@ -282,7 +299,8 @@ export class UniMqttSocketBmsTransport {
 		if (!this._connected || !this._socketTask) throw new BmsProtocolError('WebSocket is not connected')
 		if (this._pending) throw new BmsProtocolError('Previous request still pending')
 
-		const req = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes)
+		const rawReq = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes)
+		const req = buildMqttSocketReadFrame(rawReq)
 		const expectBoot = req[0] === 0x55 && req[1] !== 0x7f
 		if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes')
 		if (expectBoot && req.length < 9) throw new BmsProtocolError('Invalid boot request frame bytes')
@@ -348,6 +366,10 @@ export class UniMqttSocketBmsTransport {
 					parsed.sourceAddress === expect.sourceAddress &&
 					parsed.functionCode === (expect.functionCode | 0x80)
 				)
+			}
+			if (parsed.functionCode === BMS_FUNC.SOCKET_READ && expect.functionCode === BMS_FUNC.SOCKET_READ) {
+				if (parsed.targetAddress !== expect.targetAddress) return false
+				if ((expect.sourceAddress & 0xff) === 0xfa) return true
 			}
 			return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.functionCode === expect.functionCode
 		} catch {

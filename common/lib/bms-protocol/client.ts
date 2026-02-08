@@ -5,6 +5,7 @@ import {
 	buildReadFrame,
 	buildWriteMultipleRegistersFrame,
 	parseFrame,
+	parseSocketReadPayload,
 	splitIntoRegistersBE,
 } from './frame';
 import {
@@ -245,15 +246,16 @@ export class BmsClient {
 	async readRegisters(
 		startAddress: number,
 		quantity: number,
-		{ functionCode = BMS_FUNC.READ_HOLDING_REGISTERS }: { functionCode?: number } = {}
+		{ functionCode = BMS_FUNC.READ_HOLDING_REGISTERS, targetAddress }: { functionCode?: number; targetAddress?: number } = {}
 	): Promise<Uint16Array> {
 		const ranges = chunkRanges(startAddress, quantity, this.maxReadRegisters);
 		const out = new Uint16Array(quantity);
 		let offset = 0;
+		const reqTargetAddress = targetAddress == null ? this.targetAddress : targetAddress;
 		for (const r of ranges) {
 			const req = buildReadFrame({
 				sourceAddress: this.sourceAddress,
-				targetAddress: this.targetAddress,
+				targetAddress: reqTargetAddress,
 				functionCode,
 				startAddress: r.startAddress,
 				quantity: r.quantity,
@@ -261,7 +263,20 @@ export class BmsClient {
 			const resp = await this._request(req);
 			if (resp.type === 'error') throw new BmsProtocolError('BMS error response', resp);
 			if (resp.type !== 'read') throw new BmsProtocolError('Unexpected response type', resp);
-			const regs = splitIntoRegistersBE(resp.data);
+			let dataBytes = resp.data;
+			if (functionCode === BMS_FUNC.SOCKET_READ) {
+				const parsed = parseSocketReadPayload(resp.data);
+				if (parsed.startAddress !== r.startAddress || parsed.quantity !== r.quantity) {
+					throw new BmsProtocolError('Socket read response address mismatch', {
+						expectStart: r.startAddress,
+						expectQty: r.quantity,
+						gotStart: parsed.startAddress,
+						gotQty: parsed.quantity,
+					});
+				}
+				dataBytes = parsed.payload;
+			}
+			const regs = splitIntoRegistersBE(dataBytes);
 			out.set(regs, offset);
 			offset += regs.length;
 		}
@@ -407,13 +422,19 @@ export class BmsClient {
 		}
 
 		if (def.valueType === 'str') {
-			const regs = await this.readRegisters(def.startAddress, Math.ceil(def.byteLength / 2));
+			const regs = await this.readRegisters(def.startAddress, Math.ceil(def.byteLength / 2), {
+				functionCode: def.functionCode,
+				targetAddress: def.targetAddress,
+			});
 			const view = new RegisterView(def.startAddress, regs);
 			return decodeParam(def, view);
 		}
 
 		const quantity = def.valueType === 'u32' ? 2 : 1;
-		const regs = await this.readRegisters(def.address, quantity);
+		const regs = await this.readRegisters(def.address, quantity, {
+			functionCode: def.functionCode,
+			targetAddress: def.targetAddress,
+		});
 		const view = new RegisterView(def.address, regs);
 		return decodeParam(def, view);
 	}

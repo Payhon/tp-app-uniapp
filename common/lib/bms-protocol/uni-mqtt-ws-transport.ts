@@ -1,4 +1,4 @@
-import { BmsProtocolError, parseFrame } from './frame'
+import { BMS_FUNC, BmsProtocolError, buildReadFrame, parseFrame } from './frame'
 import { parseBootFrame } from './boot-frame'
 import {
 	MqttPacketReader,
@@ -85,6 +85,23 @@ function mkReqExpect(reqFrameBytes: Uint8Array | ArrayLike<number>): { expect: R
 				sourceAddress: req[3] & 0xff,
 			};
 	return { expect, expectBoot };
+}
+
+function buildMqttSocketReadFrame(reqFrameBytes: Uint8Array): Uint8Array {
+	if (reqFrameBytes.length < 9) return reqFrameBytes;
+	if (reqFrameBytes[0] !== 0x7f || reqFrameBytes[1] !== 0x55) return reqFrameBytes;
+	const func = reqFrameBytes[4] & 0xff;
+	if (func !== BMS_FUNC.READ_HOLDING_REGISTERS) return reqFrameBytes;
+	const sourceAddress = reqFrameBytes[2] & 0xff;
+	const startAddress = (reqFrameBytes[5] << 8) | reqFrameBytes[6];
+	const quantity = (reqFrameBytes[7] << 8) | reqFrameBytes[8];
+	return buildReadFrame({
+		sourceAddress,
+		targetAddress: 0xfa,
+		functionCode: BMS_FUNC.SOCKET_READ,
+		startAddress,
+		quantity,
+	});
 }
 
 class FrameCollector {
@@ -463,6 +480,10 @@ export class UniMqttWsBmsTransport {
 			if (parsed.type === 'error') {
 				return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.functionCode === (expect.functionCode | 0x80);
 			}
+			if (parsed.functionCode === BMS_FUNC.SOCKET_READ && expect.functionCode === BMS_FUNC.SOCKET_READ) {
+				if (parsed.targetAddress !== expect.targetAddress) return false;
+				if ((expect.sourceAddress & 0xff) === 0xfa) return true;
+			}
 			return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.functionCode === expect.functionCode;
 		} catch {
 			return false;
@@ -487,7 +508,8 @@ export class UniMqttWsBmsTransport {
 		const delta = now - this._lastTxAt;
 		if (delta < this.minFrameIntervalMs) await sleep(this.minFrameIntervalMs - delta);
 
-			const reqFrame = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
+			const rawFrame = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
+			const reqFrame = buildMqttSocketReadFrame(rawFrame);
 			const { expect, expectBoot } = mkReqExpect(reqFrame);
 
 			const deferred = defer<Uint8Array>();

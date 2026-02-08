@@ -1,3 +1,4 @@
+import { BMS_FUNC } from './frame'
 import type { BmsParamDef } from './types'
 
 export const BMS_PARAM = Object.freeze({
@@ -122,6 +123,18 @@ export const BMS_PARAM = Object.freeze({
 	CHARGE_RELEASE_A: 'CHARGE_RELEASE_A',
 	// 0x42D(H) 锁定次数
 	CHARGE_LOCK_COUNT: 'CHARGE_LOCK_COUNT',
+
+	// 4G Socket 查询（doc/oriigin/device_comm_protocol_socket.md 0x900~）
+	SOCKET_LONGITUDE: 'SOCKET_LONGITUDE',
+	SOCKET_LATITUDE: 'SOCKET_LATITUDE',
+	SOCKET_SPEED: 'SOCKET_SPEED',
+	SOCKET_ALTITUDE: 'SOCKET_ALTITUDE',
+	SOCKET_RSSI: 'SOCKET_RSSI',
+	SOCKET_TAC: 'SOCKET_TAC',
+	SOCKET_CELL_ID: 'SOCKET_CELL_ID',
+	SOCKET_IMEI: 'SOCKET_IMEI',
+	SOCKET_ICCID: 'SOCKET_ICCID',
+	SOCKET_MODULE_SW_VERSION: 'SOCKET_MODULE_SW_VERSION',
 
 	// 温度配置（doc/oriigin/device_comm_protocol_write.md 3.3，0x438~；温度类单位 ℃，偏移 -40）
 	// 0x438(L) MOS过温告警温度
@@ -381,16 +394,18 @@ export const PARAM_CATEGORIES = Object.freeze({
 	SYSTEM: 'system',
 	// 主要状态寄存器类（doc/oriigin/device_comm_protocol_basic.md 0x100~，只读）
 	STATUS: 'status',
+	// 4G Socket 查询寄存器（doc/oriigin/device_comm_protocol_socket.md 0x900~）
+	SOCKET: 'socket',
 } as const);
 
 export type ParamCategory = (typeof PARAM_CATEGORIES)[keyof typeof PARAM_CATEGORIES]
 
 type ParamDefInput =
-	| { label?: string; valueType: 'statusPath'; path: string; access: 'R'; unit?: string }
-	| { label?: string; valueType: 'u16'; address: number; access: 'R' | 'RW'; scale?: number; offset?: number; unit?: string }
-	| { label?: string; valueType: 'u32'; address: number; access: 'R' | 'RW'; scale?: number; offset?: number; unit?: string }
-	| { label?: string; valueType: 'u8'; address: number; byte: 'H' | 'L'; access: 'R' | 'RW'; scale?: number; offset?: number; unit?: string }
-	| { label?: string; valueType: 'str'; startAddress: number; byteLength: number; encoding?: 'ascii'; access: 'R' | 'RW'; unit?: string }
+	| { label?: string; valueType: 'statusPath'; path: string; access: 'R'; unit?: string; functionCode?: number; targetAddress?: number }
+	| { label?: string; valueType: 'u16'; address: number; access: 'R' | 'RW'; scale?: number; offset?: number; unit?: string; functionCode?: number; targetAddress?: number }
+	| { label?: string; valueType: 'u32'; address: number; access: 'R' | 'RW'; scale?: number; offset?: number; unit?: string; functionCode?: number; targetAddress?: number }
+	| { label?: string; valueType: 'u8'; address: number; byte: 'H' | 'L'; access: 'R' | 'RW'; scale?: number; offset?: number; unit?: string; functionCode?: number; targetAddress?: number }
+	| { label?: string; valueType: 'str'; startAddress: number; byteLength: number; encoding?: 'ascii'; access: 'R' | 'RW'; unit?: string; functionCode?: number; targetAddress?: number }
 
 function def(key: AnyParamKey, category: ParamCategory, spec: ParamDefInput): BmsParamDef {
 	const { label, ...rest } = spec || {};
@@ -467,6 +482,99 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_STATUS_PARAM.HARDWARE_MODEL, PARAM_CATEGORIES.STATUS, { label: '硬件型号', valueType: 'statusPath', path: 'identity.hardwareModel', access: 'R' }),
 	def(BMS_STATUS_PARAM.BOARD_CODE, PARAM_CATEGORIES.STATUS, { label: 'BMS板编码', valueType: 'statusPath', path: 'identity.boardCode', access: 'R' }),
 	def(BMS_STATUS_PARAM.BLUETOOTH_MAC, PARAM_CATEGORIES.STATUS, { label: '蓝牙MAC地址', valueType: 'statusPath', path: 'identity.bluetoothMac', access: 'R' }),
+
+	// --- Socket (0x900~) ReadOnly (4G模块)
+	def(BMS_PARAM.SOCKET_LONGITUDE, PARAM_CATEGORIES.SOCKET, {
+		label: '经度',
+		access: 'R',
+		valueType: 'u32',
+		address: 0x900,
+		scale: 0.00001,
+		unit: 'deg',
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_LATITUDE, PARAM_CATEGORIES.SOCKET, {
+		label: '纬度',
+		access: 'R',
+		valueType: 'u32',
+		address: 0x902,
+		scale: 0.00001,
+		unit: 'deg',
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_SPEED, PARAM_CATEGORIES.SOCKET, {
+		label: '速度',
+		access: 'R',
+		valueType: 'u16',
+		address: 0x904,
+		scale: 0.001,
+		unit: 'km/h',
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_ALTITUDE, PARAM_CATEGORIES.SOCKET, {
+		label: '高度',
+		access: 'R',
+		valueType: 'u16',
+		address: 0x905,
+		scale: 1,
+		unit: 'm',
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_RSSI, PARAM_CATEGORIES.SOCKET, {
+		label: '信号强度RSSI',
+		access: 'R',
+		valueType: 'u16',
+		address: 0x906,
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_TAC, PARAM_CATEGORIES.SOCKET, {
+		label: '位置区码(TAC)',
+		access: 'R',
+		valueType: 'u16',
+		address: 0x907,
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_CELL_ID, PARAM_CATEGORIES.SOCKET, {
+		label: '小区识别码(Cell ID)',
+		access: 'R',
+		valueType: 'u32',
+		address: 0x908,
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_IMEI, PARAM_CATEGORIES.SOCKET, {
+		label: 'IMEI',
+		access: 'R',
+		valueType: 'str',
+		startAddress: 0x90a,
+		byteLength: 18,
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_ICCID, PARAM_CATEGORIES.SOCKET, {
+		label: 'ICCID',
+		access: 'R',
+		valueType: 'str',
+		startAddress: 0x913,
+		byteLength: 22,
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
+	def(BMS_PARAM.SOCKET_MODULE_SW_VERSION, PARAM_CATEGORIES.SOCKET, {
+		label: '4G模块软件版本号',
+		access: 'R',
+		valueType: 'str',
+		startAddress: 0x91e,
+		byteLength: 12,
+		functionCode: BMS_FUNC.SOCKET_READ,
+		targetAddress: 0xfa,
+	}),
 
 	// --- Voltage (0x400~)
 	def(BMS_PARAM.CELL_OV_ALARM_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过压告警电压', access: 'RW', valueType: 'u16', address: 0x400, scale: 0.001, unit: 'V' }),

@@ -14,6 +14,8 @@ export const BMS_FRAME = Object.freeze({
 export const BMS_FUNC = Object.freeze({
 	// 0x03：读寄存器（寄存器查询）
 	READ_HOLDING_REGISTERS: 0x03,
+	// 0x0F：Socket 透传云平台查询（4G模块）
+	SOCKET_READ: 0x0f,
 	// 0x10：写连续寄存器
 	WRITE_MULTIPLE_REGISTERS: 0x10,
 	// 0x11：写从机地址/分配地址
@@ -38,6 +40,8 @@ export type BmsReadFrame = {
 	functionCode: number
 	byteCount: number
 	data: Uint8Array
+	socketStartAddress?: number
+	socketQuantity?: number
 	raw: Uint8Array
 }
 
@@ -174,13 +178,29 @@ export function parseFrame(frameBytes: Uint8Array | ArrayLike<number>): BmsParse
 	}
 
 	// Read response: [.., func, byteCount, data..., crcLo, crcHi, tail]
-	if (bytes.length >= 10 && (functionCode === BMS_FUNC.READ_HOLDING_REGISTERS || functionCode === BMS_FUNC.READ_UUID)) {
+	if (
+		bytes.length >= 10 &&
+		(functionCode === BMS_FUNC.READ_HOLDING_REGISTERS ||
+			functionCode === BMS_FUNC.READ_UUID ||
+			functionCode === BMS_FUNC.SOCKET_READ)
+	) {
 		const byteCount = bytes[5];
-		const expectedLength = 2 + 3 + 1 + byteCount + 2 + 1; // head2 + (src,dst,func) + byteCount + data + crc2 + tail
+		const dataLen = functionCode === BMS_FUNC.SOCKET_READ ? byteCount * 2 : byteCount;
+		const expectedLength = 2 + 3 + 1 + dataLen + 2 + 1; // head2 + (src,dst,func) + byteCount + data + crc2 + tail
 		if (bytes.length !== expectedLength) {
 			throw new BmsProtocolError('Read response length mismatch', { byteCount, length: bytes.length });
 		}
-		const data = bytes.slice(6, 6 + byteCount);
+		let data = bytes.slice(6, 6 + dataLen);
+		let socketStartAddress: number | undefined;
+		let socketQuantity: number | undefined;
+		if (functionCode === BMS_FUNC.SOCKET_READ && data.length >= 4) {
+			socketStartAddress = (data[0] << 8) | data[1];
+			socketQuantity = (data[2] << 8) | data[3];
+			const payload = data.slice(4);
+			if (socketQuantity >= 0 && payload.length === socketQuantity * 2) {
+				data = payload;
+			}
+		}
 		return {
 			type: 'read',
 			sourceAddress,
@@ -188,6 +208,8 @@ export function parseFrame(frameBytes: Uint8Array | ArrayLike<number>): BmsParse
 			functionCode,
 			byteCount,
 			data,
+			socketStartAddress,
+			socketQuantity,
 			raw: bytes,
 		};
 	}
@@ -219,6 +241,21 @@ export function splitIntoRegistersBE(dataBytes: Uint8Array): Uint16Array {
 		regs[i] = (hi << 8) | lo;
 	}
 	return regs;
+}
+
+export function parseSocketReadPayload(dataBytes: Uint8Array): {
+	startAddress: number
+	quantity: number
+	payload: Uint8Array
+} {
+	if (dataBytes.length < 4) throw new BmsProtocolError('Socket payload too short', { length: dataBytes.length });
+	const startAddress = (dataBytes[0] << 8) | dataBytes[1];
+	const quantity = (dataBytes[2] << 8) | dataBytes[3];
+	return {
+		startAddress,
+		quantity,
+		payload: dataBytes.slice(4),
+	};
 }
 
 export function registersToBytesBE(registerValues: Uint16Array): Uint8Array {
