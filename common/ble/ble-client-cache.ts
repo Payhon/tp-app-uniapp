@@ -49,6 +49,36 @@ const extractMacHex = (s: unknown) => {
 	return ''
 }
 
+const bytesToHex = (bytes: Uint8Array, maxBytes?: number) => {
+	const limit = maxBytes ? Math.min(bytes.length, maxBytes) : bytes.length
+	let out = ''
+	for (let i = 0; i < limit; i += 1) out += (bytes[i] & 0xff).toString(16).padStart(2, '0')
+	return (bytes.length > limit ? `${out}...` : out).toUpperCase()
+}
+
+const normalizeHexPreview = (input: string, maxChars: number) => {
+	const hex = String(input || '')
+		.trim()
+		.replace(/^0x/i, '')
+		.replace(/[^0-9a-fA-F]/g, '')
+		.toUpperCase()
+	if (!hex) return ''
+	return hex.length > maxChars ? `${hex.slice(0, maxChars)}...` : hex
+}
+
+const toHexPreview = (data: unknown, maxBytes = 32): string => {
+	if (!data) return ''
+	if (typeof data === 'string') return normalizeHexPreview(data, maxBytes * 2)
+	if (data instanceof Uint8Array) return bytesToHex(data, maxBytes)
+	if (data instanceof ArrayBuffer) return bytesToHex(new Uint8Array(data), maxBytes)
+	if (typeof data === 'object') {
+		const obj = data as Record<string, unknown>
+		const manuf = obj.manufacturerData || obj.manufacturerdata
+		if (manuf) return toHexPreview(manuf, maxBytes)
+	}
+	return ''
+}
+
 const discoverWithAdv = async ({ durationMs }: { durationMs: number }): Promise<FoundBleDevice[]> => {
 	const found = new Map<string, FoundBleDevice>()
 
@@ -81,23 +111,61 @@ const discoverWithAdv = async ({ durationMs }: { durationMs: number }): Promise<
 	return Array.from(found.values())
 }
 
+const buildAdvSummary = (d: any, targetMac?: string) => {
+	const adv = (d as any).advertisData || (d as any).advertisingData || null
+	const advMac = parseMacFromAdvertisement(adv) || parseMacFromAdvertisement(d)
+	const idHex = extractMacHex(d?.deviceId)
+	const nameHex = extractMacHex(d?.name || d?.localName)
+	const advLen = adv instanceof ArrayBuffer ? adv.byteLength : adv instanceof Uint8Array ? adv.length : undefined
+	const ok =
+		!!targetMac &&
+		((advMac && advMac === targetMac) ||
+			(idHex && idHex === targetMac) ||
+			(nameHex && nameHex === targetMac) ||
+			String(d?.name || d?.localName || '').toUpperCase().includes(targetMac))
+	return {
+		deviceId: d?.deviceId,
+		name: d?.name,
+		localName: d?.localName,
+		rssi: d?.RSSI,
+		advMac,
+		idHex,
+		nameHex,
+		advLen,
+		advHex: toHexPreview(adv, 32),
+		manufHex: toHexPreview((d as any).manufacturerData || (d as any).manufacturerdata, 32),
+		ok,
+	}
+}
+
 const pickCandidate = (list: FoundBleDevice[], targetMac: string) => {
 	const candidates = (list || [])
 		.map((d: any) => {
-			const adv = (d as any).advertisData || (d as any).advertisingData || null
-			const advMac = parseMacFromAdvertisement(adv)
-			const idHex = extractMacHex(d?.deviceId)
-			const nameHex = extractMacHex(d?.name || d?.localName)
-			const ok =
-				(advMac && advMac === targetMac) ||
-				(idHex && idHex === targetMac) ||
-				(nameHex && nameHex === targetMac) ||
-				(String(d?.name || d?.localName || '').toUpperCase().includes(targetMac))
-			return { d, ok, rssi: Number(d?.RSSI ?? -9999) }
+			const summary = buildAdvSummary(d, targetMac)
+			return { d, summary, rssi: Number(d?.RSSI ?? -9999) }
 		})
-		.filter((x) => x.ok)
+		.filter((x) => x.summary.ok)
 		.sort((a, b) => b.rssi - a.rssi)
-	return candidates[0]?.d || null
+	return {
+		hit: candidates[0]?.d || null,
+		summaries: (list || []).map((d: any) => buildAdvSummary(d, targetMac)),
+	}
+}
+
+const summarizeDeviceLines = (summaries: ReturnType<typeof buildAdvSummary>[]) => {
+	return summaries
+		.map((s) => {
+			const name = String(s.name || s.localName || '')
+			const namePart = name ? ` name=${name}` : ''
+			const advMac = s.advMac ? ` advMac=${s.advMac}` : ''
+			const advLen = typeof s.advLen === 'number' ? ` advLen=${s.advLen}` : ''
+			const advHex = s.advHex ? ` advHex=${s.advHex}` : ''
+			const manufHex = s.manufHex ? ` manufHex=${s.manufHex}` : ''
+			const idHex = s.idHex ? ` idHex=${s.idHex}` : ''
+			const nameHex = s.nameHex ? ` nameHex=${s.nameHex}` : ''
+			return `id=${s.deviceId || ''} rssi=${s.rssi ?? ''}${namePart}${advMac}${advLen}${advHex}${manufHex}${idHex}${nameHex}`
+		})
+		.join(' | ')
 }
 
 let connectLock = Promise.resolve()
@@ -275,10 +343,27 @@ export const connectBleClient = async ({
 			}
 
 			const list = await discoverWithAdv({ durationMs: 5000 })
-			const hit = pickCandidate(list, key)
+			const { hit, summaries } = pickCandidate(list, key)
 			if (!hit?.deviceId) {
-				log('discover no match', { mac: key, found: Array.isArray(list) ? list.length : 0 })
+				log('discover no match', {
+					mac: key,
+					found: Array.isArray(list) ? list.length : 0,
+					devices: summaries.slice(0, 10),
+					devicesText: summarizeDeviceLines(summaries.slice(0, 10)),
+				})
 				return null
+			}
+
+			const hitSummary = summaries.find((s) => s.deviceId === hit.deviceId)
+			if (hitSummary) {
+				log('discover candidate', {
+					mac: key,
+					deviceId: hit.deviceId,
+					advMac: hitSummary.advMac,
+					advHex: hitSummary.advHex,
+					manufHex: hitSummary.manufHex,
+					deviceText: summarizeDeviceLines([hitSummary]),
+				})
 			}
 
 			log('discover connect try', { deviceId: hit.deviceId, mac: key })

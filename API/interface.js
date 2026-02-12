@@ -3,7 +3,7 @@
  * 基于 Promise 对象实现更简单的 request 使用方式，支持请求和响应拦截
  */
 const DEFAULT_BASE_URL_DEV = 'https://fjbms.yz6688.cn'
-const DEFAULT_BASE_URL_PROD = 'https://fjbms.com'
+const DEFAULT_BASE_URL_PROD = 'https://fjbms.yz6688.cn'
 
 function normalizeBaseUrl(url) {
 	if (!url) return ''

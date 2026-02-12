@@ -25,10 +25,29 @@ function bytesToHex(bytes: Uint8Array): string {
 	return out.toUpperCase()
 }
 
-function ensureUint8Array(data: ArrayBuffer | Uint8Array | null | undefined): Uint8Array | null {
+function hexToBytes(hex: string): Uint8Array | null {
+	const clean = String(hex || '')
+		.trim()
+		.replace(/^0x/i, '')
+		.replace(/[^0-9a-fA-F]/g, '')
+	if (!clean || clean.length < 2 || clean.length % 2 !== 0) return null
+	const out = new Uint8Array(clean.length / 2)
+	for (let i = 0; i < clean.length; i += 2) {
+		out[i / 2] = parseInt(clean.slice(i, i + 2), 16) & 0xff
+	}
+	return out
+}
+
+function ensureUint8Array(data: unknown): Uint8Array | null {
 	if (!data) return null
 	if (data instanceof Uint8Array) return data
 	if (data instanceof ArrayBuffer) return new Uint8Array(data)
+	if (typeof data === 'string') return hexToBytes(data)
+	if (typeof data === 'object') {
+		const obj = data as Record<string, unknown>
+		const manuf = obj.manufacturerData || obj.manufacturerdata
+		if (manuf) return ensureUint8Array(manuf)
+	}
 	return null
 }
 
@@ -41,8 +60,12 @@ function ensureUint8Array(data: ArrayBuffer | Uint8Array | null | undefined): Ui
  *
  * TODO(4G判定/设备差异): 若不同硬件厂商广播格式变化，需要在此扩展解析规则。
  */
-export function parseMacFromAdvertisement(data: ArrayBuffer | Uint8Array | null | undefined): string | null {
+export function parseMacFromAdvertisement(data: ArrayBuffer | Uint8Array | string | Record<string, unknown> | null | undefined): string | null {
 	const u8 = ensureUint8Array(data)
+	// 微信小程序/iOS 可能只返回 6 字节 MAC（无 0x07 0xFF 前缀）
+	if (u8 && u8.length === 6) {
+		return bytesToHex(u8)
+	}
 	if (!u8 || u8.length < 8) return null
 	for (let i = 0; i <= u8.length - 8; i += 1) {
 		if ((u8[i] & 0xff) !== 0x07) continue
@@ -52,4 +75,3 @@ export function parseMacFromAdvertisement(data: ArrayBuffer | Uint8Array | null 
 	}
 	return null
 }
-
