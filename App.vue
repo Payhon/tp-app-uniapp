@@ -1,6 +1,8 @@
 <script lang="ts">
 import api from '@/API/'
 import { showAddDeviceActionSheet } from '@/common/composables/useAddDeviceActionSheet'
+// APP 端自动检查更新（对接自建 backend，不依赖 uniCloud）
+import checkAppUpdate from '@/uni_modules/fjbms-upgrade/utils/check-update'
 
 type AlarmPayload = {
 	alarm_id?: string | number
@@ -44,6 +46,13 @@ export default {
 					fail() {}
 				})
 			}
+		} catch (e) {}
+		// #endif
+
+		// #ifdef APP
+		// 启动自动检测升级（失败不阻断启动流程）
+		try {
+			checkAppUpdate().catch(() => {})
 		} catch (e) {}
 		// #endif
 	},
