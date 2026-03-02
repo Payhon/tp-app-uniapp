@@ -57,6 +57,23 @@ export type AppBatteryOtaCheckReq = {
 	[key: string]: unknown
 }
 
+export type AppBatteryReportReq = {
+	device_id: string
+	ts: number
+	conn_type: 'bluetooth' | 'mqtt' | 'offline' | string
+	platform: string
+	core: Record<string, unknown>
+	snapshot?: Record<string, unknown>
+}
+
+export type AppBatteryReportResp = {
+	device_id: string
+	ts: number
+	accepted: boolean
+	ignored_reason?: string
+	[key: string]: unknown
+}
+
 export const appBatteryDetail = (deviceId: string) => {
 	return apiRequest<AppBatteryDetail>(`/api/v1/app/battery/detail/${deviceId}`, null, 'GET')
 }
@@ -67,4 +84,8 @@ export const appBatteryMqttCredential = (deviceId: string) => {
 
 export const appBatteryOtaCheck = (payload: AppBatteryOtaCheckReq) => {
 	return apiRequest<AppBatteryOtaCheck>(`/api/v1/app/battery/ota/check`, payload, 'POST')
+}
+
+export const appBatteryReport = (payload: AppBatteryReportReq) => {
+	return apiRequest<AppBatteryReportResp>(`/api/v1/app/battery/report`, payload, 'POST')
 }
