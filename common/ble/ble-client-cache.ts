@@ -171,7 +171,7 @@ const summarizeDeviceLines = (summaries: ReturnType<typeof buildAdvSummary>[]) =
 let connectLock = Promise.resolve()
 const runSerial = async <T>(fn: () => Promise<T>): Promise<T> => {
 	const prev = connectLock
-	let release: (() => void) | null = null
+	let release!: () => void
 	connectLock = new Promise<void>((resolve) => {
 		release = resolve
 	})
@@ -179,7 +179,7 @@ const runSerial = async <T>(fn: () => Promise<T>): Promise<T> => {
 	try {
 		return await fn()
 	} finally {
-		if (release) release()
+		release()
 	}
 }
 
@@ -233,13 +233,41 @@ export const releaseBleClient = (mac: unknown) => {
 	if (entry.refCount === 0) scheduleCleanup(entry)
 }
 
+export const disconnectBleClient = async (mac: unknown): Promise<boolean> => {
+	const key = normalizeBleMac(mac)
+	if (!key) return false
+	const pending = inFlight.get(key)
+	if (pending) {
+		try {
+			await pending
+		} catch (e) {}
+	}
+	const entry = cache.get(key)
+	if (!entry) return false
+	try {
+		if (entry.cleanupTimer != null) {
+			clearTimeout(entry.cleanupTimer)
+			entry.cleanupTimer = null
+		}
+		entry.refCount = 0
+		await entry.transport.disconnect()
+		log('manual disconnect', { mac: key, deviceId: entry.deviceId })
+		return true
+	} catch (e) {
+		log('manual disconnect failed', { mac: key, deviceId: entry.deviceId })
+		return false
+	} finally {
+		cache.delete(key)
+	}
+}
+
 export const canBleAutoConnect = (commType: unknown, bleMac: unknown) => {
 	const mac = normalizeBleMac(bleMac)
 	if (!mac) return { ok: false, mac: null }
 	const ct = Number(commType || 0)
-	if (ct === 1 || ct === 3) return { ok: true, mac }
-	if (!Number.isFinite(ct) || ct === 0) return { ok: true, mac }
-	return { ok: false, mac: null }
+	// 生产数据可能存在 bms_comm_type 与设备实际能力不同步；只要有有效 BLE MAC 就允许尝试 BLE 连接。
+	if (!Number.isFinite(ct) || ct === 0 || ct === 1 || ct === 2 || ct === 3) return { ok: true, mac }
+	return { ok: true, mac }
 }
 
 type ConnectBleOptions = {

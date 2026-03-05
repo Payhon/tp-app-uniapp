@@ -44,13 +44,18 @@
 					<view v-for="d in visibleDevices" :key="d.deviceId" class="item" @click="selectDevice(d)">
 						<view class="item-main">
 							<text class="item-name">{{ d.displayName }}</text>
-							<text class="item-rssi">{{ d.RSSI == null ? '' : format(t('pages.deviceProvision.rssi') as string, { rssi: d.RSSI }) }}</text>
+							<view class="item-signal" :class="`item-signal--${signalLevel(d.RSSI)}`">
+								<view class="item-signal__bar item-signal__bar--1"></view>
+								<view class="item-signal__bar item-signal__bar--2"></view>
+								<view class="item-signal__bar item-signal__bar--3"></view>
+								<view class="item-signal__bar item-signal__bar--4"></view>
+							</view>
 						</view>
 					<view class="item-sub">
 						<text class="item-sub-text">{{ d.deviceId }}</text>
 					</view>
-					<view class="item-sub" v-if="d.advMac">
-						<text class="item-sub-text">{{ $t('pages.deviceProvision.advMac', { mac: d.advMac }) }}</text>
+					<view class="item-sub" v-if="hasAdvMac(d.advMac)">
+						<text class="item-sub-text">{{ format(t('pages.deviceProvision.advMac') as string, { mac: d.advMac }) }}</text>
 						<text v-if="targetMac && d.advMac === targetMac" class="item-match">{{ $t('pages.deviceProvision.matched') }}</text>
 					</view>
 				</view>
@@ -143,6 +148,17 @@ const visibleDevices = computed(() => {
 	})
 	return filtered
 })
+
+const signalLevel = (rssi: number | null) => {
+	if (typeof rssi !== 'number') return 0
+	if (rssi >= -60) return 4
+	if (rssi >= -70) return 3
+	if (rssi >= -80) return 2
+	if (rssi >= -90) return 1
+	return 0
+}
+
+const hasAdvMac = (advMac: string | null) => Boolean(String(advMac || '').trim())
 
 function clearList() {
 	rows.value = new Map()
@@ -639,9 +655,43 @@ onUnload(() => {
 	color: #111111;
 }
 
-.item-rssi {
-	font-size: 26rpx;
-	color: #666666;
+.item-signal {
+	display: flex;
+	align-items: flex-end;
+	gap: 4rpx;
+	height: 28rpx;
+}
+
+.item-signal__bar {
+	width: 5rpx;
+	border-radius: 999rpx;
+	background: #d9dde6;
+}
+
+.item-signal__bar--1 {
+	height: 10rpx;
+}
+
+.item-signal__bar--2 {
+	height: 14rpx;
+}
+
+.item-signal__bar--3 {
+	height: 19rpx;
+}
+
+.item-signal__bar--4 {
+	height: 24rpx;
+}
+
+.item-signal--1 .item-signal__bar--1,
+.item-signal--2 .item-signal__bar--1,
+.item-signal--2 .item-signal__bar--2,
+.item-signal--3 .item-signal__bar--1,
+.item-signal--3 .item-signal__bar--2,
+.item-signal--3 .item-signal__bar--3,
+.item-signal--4 .item-signal__bar {
+	background: #246fdd;
 }
 
 .item-sub {

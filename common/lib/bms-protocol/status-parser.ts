@@ -27,6 +27,18 @@ function allSame(bytes: Uint8Array, v: number): boolean {
 	return true;
 }
 
+function normalizeMacFromStatusBytes(bytes: Uint8Array): string | null {
+	if (!bytes.length) return null;
+	if (allSame(bytes, 0x00) || allSame(bytes, 0xff)) return null;
+	let end = bytes.length;
+	// 一些固件会把 6-byte MAC 放在 10-byte 区域，后面补 00；这里做尾部 00 裁剪。
+	while (end > 6 && bytes[end - 1] === 0x00) end -= 1;
+	if (end < 6) return null;
+	const mac6 = bytes.slice(0, 6);
+	if (allSame(mac6, 0x00) || allSame(mac6, 0xff)) return null;
+	return bytesToHex(mac6, ':').toUpperCase();
+}
+
 function decodeBitField32(u32: number, mapping: Record<number, string>): Record<string, boolean> {
 	const out: Record<string, boolean> = {};
 	for (const [bit, name] of Object.entries(mapping)) {
@@ -173,7 +185,7 @@ export function parseStatusRegisters({
 	const boardCode = decodeAscii(swapWordBytes(view.bytes(boardCodeStart, 32)));
 
 	const macBytes = view.bytes(macStart, 10);
-	const bluetoothMac = allSame(macBytes, 0x00) || allSame(macBytes, 0xff) ? null : bytesToHex(macBytes, ':');
+	const bluetoothMac = normalizeMacFromStatusBytes(macBytes);
 
 	const balanceWord1 = view.u16(0x11b);
 	const balanceWord2 = view.u16(0x11c);

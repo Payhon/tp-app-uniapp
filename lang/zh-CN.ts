@@ -886,6 +886,10 @@ export default {
       mqttOnline: 'MQTT在线',
       offline: '离线',
     },
+    disconnect: {
+      disconnected: '蓝牙已断开',
+      disconnectionFailed: '蓝牙断开失败',
+    },
   },
   deviceDetail: {
     tabs: {
@@ -898,6 +902,9 @@ export default {
       mqtt: 'MQTT连接',
       offline: '离线',
       connecting: '连接中...',
+      disconnect: '断开',
+      disconnected: '蓝牙已断开',
+      disconnectionFailed: '蓝牙断开失败',
     },
     flags: {
       fault: '故障',

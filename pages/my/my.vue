@@ -151,6 +151,17 @@ const loadingDeviceCount = ref(false)
 
 const bluetoothAutoConnect = ref<boolean>(true)
 
+const parseBooleanStorage = (raw: unknown, defaultValue: boolean) => {
+	if (raw === '' || raw === undefined || raw === null) return defaultValue
+	if (typeof raw === 'boolean') return raw
+	const text = String(raw).trim().toLowerCase()
+	if (text === '1' || text === 'true' || text === 'on') return true
+	if (text === '0' || text === 'false' || text === 'off') return false
+	const n = Number(text)
+	if (Number.isFinite(n)) return n !== 0
+	return defaultValue
+}
+
 const isLoggedIn = ref<boolean>(false)
 const refreshLoginState = () => {
 	isLoggedIn.value = login?.isLoginType?.()?.isLogin ?? false
@@ -336,11 +347,7 @@ onLoad(() => {
 	// #endif
 
 	const raw = uni.getStorageSync(STORAGE_BT_AUTO_CONNECT)
-	if (raw === '' || raw === undefined || raw === null) {
-		bluetoothAutoConnect.value = true
-	} else {
-		bluetoothAutoConnect.value = Boolean(Number(raw))
-	}
+	bluetoothAutoConnect.value = parseBooleanStorage(raw, true)
 })
 
 onShow(() => {
@@ -424,7 +431,7 @@ const clearCache = () => {
 			if (language) uni.setStorageSync('language', language)
 			if (btAutoConnect !== '' && btAutoConnect !== null && btAutoConnect !== undefined) {
 				uni.setStorageSync(STORAGE_BT_AUTO_CONNECT, btAutoConnect)
-				bluetoothAutoConnect.value = Boolean(Number(btAutoConnect))
+				bluetoothAutoConnect.value = parseBooleanStorage(btAutoConnect, true)
 			}
 			uni.hideLoading()
 			uni.showToast({ title: t('pages.my.clearCacheSuccess'), icon: 'success' })

@@ -7,7 +7,12 @@ export function normalizeHex(input: string): string {
 }
 
 export function normalizeMac(input: string): string | null {
-	const hex = normalizeHex(input)
+	let hex = normalizeHex(input)
+	if (hex.length < 12) return null
+	// 兼容异常上报值：有些链路会把 6-byte MAC 放到 10-byte 区域，尾部补 00。
+	while (hex.length > 12 && hex.endsWith('00')) {
+		hex = hex.slice(0, -2)
+	}
 	if (!/^[0-9A-F]{12}$/.test(hex)) return null
 	return hex
 }

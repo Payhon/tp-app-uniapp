@@ -14,7 +14,7 @@ export interface AppConfig {
 
 // 配置信息
 const API_BSE_URL = process.env.NODE_ENV === 'development' ? 'https://fjbms.yz6688.cn' : 'https://cloud.fjiaenergy.com'
-const IMAGE_CDN_PREFIX = process.env.NODE_ENV === 'development' ? 'https://fjcdn.yz6688.cn' : 'https://fjcdn.fjiaenergy.com'
+const IMAGE_CDN_PREFIX = process.env.NODE_ENV === 'development' ? 'https://fjcdn.yz6688.cn' : 'https://fjcdn.yz6688.cn'
 
 const config: AppConfig = {
 	// 请求地址前缀

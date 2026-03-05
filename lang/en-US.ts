@@ -879,6 +879,10 @@ export default {
       mqttOnline: 'MQTT Online',
       offline: 'Offline',
     },
+    disconnect: {
+      disconnected: 'Bluetooth disconnected',
+      disconnectionFailed: 'Bluetooth disconnect failed',
+    },
   },
   deviceDetail: {
     tabs: {
@@ -891,6 +895,9 @@ export default {
       mqtt: 'MQTT',
       offline: 'Offline',
       connecting: 'Connecting...',
+      disconnect: 'Disconnect',
+      disconnected: 'Bluetooth disconnected',
+      disconnectionFailed: 'Bluetooth disconnect failed',
     },
     flags: {
       fault: 'Fault',

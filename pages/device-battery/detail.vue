@@ -14,6 +14,10 @@
 						<image class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
 						<text class="conn-pill__text">{{ connText }}</text>
 					</view>
+					<view v-if="showBleDisconnectBtn" class="conn-disconnect" hover-class="conn-disconnect--hover" @tap="onDisconnectBluetooth">
+						<u-icon name="close" size="12" color="#246FDD"></u-icon>
+						<text class="conn-disconnect__text">{{ $t('deviceDetail.conn.disconnect') }}</text>
+					</view>
 				</view>
 				<!-- #endif -->
 			</view>
@@ -22,6 +26,10 @@
 				<view class="conn-pill" :class="`conn-pill--${connClass}`">
 					<image class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
 					<text class="conn-pill__text">{{ connText }}</text>
+				</view>
+				<view v-if="showBleDisconnectBtn" class="conn-disconnect" hover-class="conn-disconnect--hover" @tap="onDisconnectBluetooth">
+					<u-icon name="close" size="12" color="#246FDD"></u-icon>
+					<text class="conn-disconnect__text">{{ $t('deviceDetail.conn.disconnect') }}</text>
 				</view>
 			</view>
 			<!-- #endif -->
@@ -87,7 +95,7 @@ import { useBatteryDetail } from './useBatteryDetail'
 const { t } = useI18n()
 
 const activeTab = ref<0 | 1 | 2>(0)
-const { battery, status, client, connType, connecting, loadById, disconnectAll, pausePolling, resumePolling } = useBatteryDetail()
+const { battery, status, client, connType, connecting, loadById, disconnectAll, disconnectBluetooth, pausePolling, resumePolling } = useBatteryDetail()
 
 const statusBarHeight = getWindowInfo().statusBarHeight || 0
 const safeBottom = getWindowInfo().safeAreaInsets?.bottom || 0
@@ -123,7 +131,18 @@ const connClass = computed(() => {
 	return connType.value
 })
 
+const showBleDisconnectBtn = computed(() => connType.value === 'bluetooth' && !connecting.value)
+
 const goBack = () => uni.navigateBack()
+
+const onDisconnectBluetooth = async () => {
+	if (!showBleDisconnectBtn.value) return
+	const ok = await disconnectBluetooth()
+	uni.showToast({
+		title: ok ? (t('deviceDetail.conn.disconnected') as string) : (t('deviceDetail.conn.disconnectionFailed') as string),
+		icon: 'none',
+	})
+}
 
 watch(
 	() => activeTab.value,
@@ -206,15 +225,17 @@ onUnload(() => {
 }
 
 .nav__right {
-	width: 200rpx;
 	display: flex;
+	align-items: center;
 	justify-content: flex-end;
+	gap: 12rpx;
 }
 
 .nav__conn-row {
 	padding: 0 24rpx 12rpx;
 	display: flex;
 	justify-content: center;
+	gap: 12rpx;
 }
 
 .conn-pill {
@@ -250,6 +271,26 @@ onUnload(() => {
 
 .conn-pill__text {
 	font-size: 22rpx;
+}
+
+.conn-disconnect {
+	height: 44rpx;
+	padding: 0 14rpx;
+	border-radius: 22rpx;
+	display: inline-flex;
+	align-items: center;
+	gap: 6rpx;
+	border: 1rpx solid rgba(36, 111, 221, 0.35);
+	background: #ffffff;
+}
+
+.conn-disconnect--hover {
+	opacity: 0.85;
+}
+
+.conn-disconnect__text {
+	font-size: 22rpx;
+	color: #246fdd;
 }
 
 .content {

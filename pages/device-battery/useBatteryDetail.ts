@@ -15,7 +15,7 @@ import {
 	type UniMqttSocketBmsTransport,
 	type UniMqttWsBmsTransport,
 } from '@/common/lib/bms-protocol'
-import { canBleAutoConnect, connectBleClient, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
+import { canBleAutoConnect, connectBleClient, disconnectBleClient, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
@@ -26,6 +26,8 @@ const BLE_MAX_READ_REGS = 60
 const SNAPSHOT_REPORT_INTERVAL_MS = 30_000
 const REPORT_QUEUE_MAX = 100
 const REPORT_RETRY_DELAYS_MS = [3_000, 10_000, 30_000]
+const RELAY_HEARTBEAT_MS = 15_000
+const RELAY_RECONNECT_DELAY_MS = 3_000
 
 const log = (event: string, data?: Record<string, unknown>) => {
 	try {
@@ -137,8 +139,36 @@ const buildSocketBridgeWsUrl = () => {
 	return `wss://${base}/api/v1/app/battery/socket/ws`
 }
 
+const buildRelayWsUrl = () => {
+	const base = String($C.apiBaseUrl || '')
+		.trim()
+		.replace(/\/+$/, '')
+	if (!base) return ''
+	if (base.startsWith('https://')) return `wss://${base.slice('https://'.length)}/api/v1/app/battery/relay/ws`
+	if (base.startsWith('http://')) return `ws://${base.slice('http://'.length)}/api/v1/app/battery/relay/ws`
+	if (base.startsWith('wss://') || base.startsWith('ws://')) return `${base}/api/v1/app/battery/relay/ws`
+	return `wss://${base}/api/v1/app/battery/relay/ws`
+}
+
 const getAccessToken = () => {
 	return String(uni.getStorageSync('access_token') || '').trim()
+}
+
+const socketMessageToText = (data: unknown): string => {
+	if (typeof data === 'string') return data
+	if (data instanceof ArrayBuffer) {
+		try {
+			// eslint-disable-next-line no-undef
+			return String.fromCharCode(...new Uint8Array(data))
+		} catch (e) {
+			return ''
+		}
+	}
+	try {
+		return JSON.stringify(data)
+	} catch (e) {
+		return ''
+	}
 }
 
 export const useBatteryDetail = () => {
@@ -155,6 +185,11 @@ export const useBatteryDetail = () => {
 	let bleCacheKey: string | null = null
 	let pollErrLogged = 0
 	let lastStatusLogAt = 0
+	let relaySocketTask: any = null
+	let relaySocketOpen = false
+	let relayHeartbeatTimer: number | null = null
+	let relayReconnectTimer: number | null = null
+	let relayClosing = false
 
 	let reportQueue: AppBatteryReportReq[] = []
 	let reportFlushing = false
@@ -266,6 +301,186 @@ export const useBatteryDetail = () => {
 		enqueueReport(payload)
 	}
 
+	const clearRelayHeartbeatTimer = () => {
+		if (relayHeartbeatTimer != null) {
+			clearInterval(relayHeartbeatTimer)
+			relayHeartbeatTimer = null
+		}
+	}
+
+	const clearRelayReconnectTimer = () => {
+		if (relayReconnectTimer != null) {
+			clearTimeout(relayReconnectTimer)
+			relayReconnectTimer = null
+		}
+	}
+
+	const sendRelayMessage = (payload: Record<string, unknown> | string) => {
+		if (!relaySocketTask || !relaySocketOpen) return
+		try {
+			const data = typeof payload === 'string' ? payload : JSON.stringify(payload)
+			relaySocketTask.send({
+				data,
+				fail: () => {},
+			})
+		} catch (e) {}
+	}
+
+	const sendRelayHeartbeat = () => {
+		sendRelayMessage({
+			type: 'relay_heartbeat',
+			ble_connected: connType.value === 'bluetooth',
+			ts: Date.now(),
+		})
+	}
+
+	const closeRelaySocket = () => {
+		clearRelayHeartbeatTimer()
+		clearRelayReconnectTimer()
+		relaySocketOpen = false
+		if (relaySocketTask) {
+			relayClosing = true
+			try {
+				relaySocketTask.close({})
+			} catch (e) {}
+			relaySocketTask = null
+		}
+	}
+
+	const scheduleRelayReconnect = () => {
+		if (relayReconnectTimer != null) return
+		if (connType.value !== 'bluetooth' || !deviceId.value) return
+		relayReconnectTimer = setTimeout(() => {
+			relayReconnectTimer = null
+			void connectRelaySocket()
+		}, RELAY_RECONNECT_DELAY_MS) as unknown as number
+	}
+
+	const executeRelayCommand = async (payload: Record<string, any>) => {
+		const cmdId = String(payload?.cmd_id || '').trim()
+		if (!cmdId) return
+		if (!client.value || connType.value !== 'bluetooth') {
+			sendRelayMessage({
+				type: 'relay_result',
+				cmd_id: cmdId,
+				ok: false,
+				error: 'bluetooth_not_connected',
+				ts: Date.now(),
+			})
+			return
+		}
+
+		try {
+			const commandType = String(payload?.command_type || '').trim().toLowerCase()
+			let result: Record<string, unknown> = {}
+			if (commandType === 'read_param') {
+				const paramKey = String(payload?.param_key || '').trim()
+				if (!paramKey) throw new Error('param_key is required')
+				const value = await client.value.readParam(paramKey)
+				result = { value }
+			} else if (commandType === 'write_param') {
+				const paramKey = String(payload?.param_key || '').trim()
+				if (!paramKey) throw new Error('param_key is required')
+				await client.value.writeParam(paramKey, payload?.value)
+				let value: unknown = null
+				try {
+					value = await client.value.readParam(paramKey)
+				} catch (e) {}
+				result = { value }
+			} else if (commandType === 'write_registers') {
+				const startAddress = Number(payload?.start_address)
+				const values = Array.isArray(payload?.register_values) ? payload.register_values : []
+				if (!Number.isFinite(startAddress) || startAddress < 0) throw new Error('start_address invalid')
+				if (!values.length) throw new Error('register_values is required')
+				const regs = new Uint16Array(values.map((v: any) => Number(v) & 0xffff))
+				await client.value.writeRegisters(Number(startAddress), regs)
+				result = { written: true }
+			} else {
+				throw new Error(`unsupported command_type: ${commandType}`)
+			}
+			sendRelayMessage({
+				type: 'relay_result',
+				cmd_id: cmdId,
+				ok: true,
+				result,
+				ts: Date.now(),
+			})
+		} catch (e) {
+			sendRelayMessage({
+				type: 'relay_result',
+				cmd_id: cmdId,
+				ok: false,
+				error: formatErr(e) || 'relay_command_failed',
+				ts: Date.now(),
+			})
+		}
+	}
+
+	const connectRelaySocket = async () => {
+		if (connType.value !== 'bluetooth' || !deviceId.value) return
+		if (relaySocketTask) return
+		const wsUrl = buildRelayWsUrl()
+		const token = getAccessToken()
+		if (!wsUrl || !token) return
+		try {
+			const task = uni.connectSocket({
+				url: wsUrl,
+				success: () => {},
+				fail: () => {},
+			})
+			relaySocketTask = task
+			task.onOpen(() => {
+				relaySocketOpen = true
+				sendRelayMessage({
+					device_id: deviceId.value,
+					token,
+					platform: getReportPlatform(),
+					conn_type: 'bluetooth',
+					ble_connected: true,
+				})
+				clearRelayHeartbeatTimer()
+				relayHeartbeatTimer = setInterval(() => {
+					sendRelayHeartbeat()
+				}, RELAY_HEARTBEAT_MS) as unknown as number
+			})
+			task.onMessage((res: { data: unknown }) => {
+				const txt = socketMessageToText(res?.data).trim()
+				if (!txt || txt === 'pong') return
+				try {
+					const payload = JSON.parse(txt) as Record<string, unknown>
+					const type = String(payload?.type || '').trim().toLowerCase()
+					if (type === 'relay_ready') {
+						sendRelayHeartbeat()
+						return
+					}
+					if (type === 'relay_command') {
+						void executeRelayCommand(payload)
+					}
+				} catch (e) {
+					// ignore non-json messages
+				}
+			})
+			task.onError(() => {
+				relaySocketOpen = false
+			})
+			task.onClose(() => {
+				relaySocketOpen = false
+				clearRelayHeartbeatTimer()
+				relaySocketTask = null
+				if (relayClosing) {
+					relayClosing = false
+					return
+				}
+				scheduleRelayReconnect()
+			})
+		} catch (e) {
+			log('relay socket connect failed', { err: formatErr(e) })
+			relaySocketTask = null
+			relaySocketOpen = false
+			scheduleRelayReconnect()
+		}
+	}
+
 	const startPolling = (c: BmsClient) => {
 		stopPolling()
 		if (pollingPaused.value) return
@@ -306,6 +521,7 @@ export const useBatteryDetail = () => {
 
 	const disconnectAll = async () => {
 		stopPolling()
+		closeRelaySocket()
 		client.value = null
 		connType.value = 'offline'
 		clearReportRetryTimer()
@@ -320,10 +536,20 @@ export const useBatteryDetail = () => {
 		log('disconnectAll done')
 	}
 
+	const disconnectBluetooth = async () => {
+		if (connType.value !== 'bluetooth') return false
+		const bleKey = bleCacheKey || String(battery.value?.ble_mac || '').trim()
+		await disconnectAll()
+		resetReportState({ clearQueue: true })
+		if (!bleKey) return false
+		return disconnectBleClient(bleKey)
+	}
+
 	const connectBleFirst = async (): Promise<boolean> => {
 		const decision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
 		if (!decision.ok || !decision.mac) return false
 		try {
+			closeRelaySocket()
 			const entry = await connectBleClient({ mac: decision.mac, maxReadRegisters: BLE_MAX_READ_REGS, probe: true })
 			if (!entry) return false
 			bleCacheKey = entry.key
@@ -332,6 +558,7 @@ export const useBatteryDetail = () => {
 			connType.value = 'bluetooth'
 			startPolling(entry.client)
 			void flushReportQueue()
+			void connectRelaySocket()
 			return true
 		} catch (e) {
 			log('ble connect failed', { err: e instanceof Error ? e.message : String(e || '') })
@@ -341,6 +568,7 @@ export const useBatteryDetail = () => {
 
 	const connectMqttWs = async (): Promise<boolean> => {
 		try {
+			closeRelaySocket()
 			const rsp = await appBatteryMqttCredential(deviceId.value)
 			if (!rsp || (rsp as any).code !== 200) throw new Error('mqtt credential fetch failed')
 			const cred = (rsp as any).data || {}
@@ -381,6 +609,7 @@ export const useBatteryDetail = () => {
 
 	const connectSocketBridge = async (): Promise<boolean> => {
 		try {
+			closeRelaySocket()
 			const wsUrl = buildSocketBridgeWsUrl()
 			const token = getAccessToken()
 			if (!wsUrl) throw new Error('socket bridge ws url not configured')
@@ -480,5 +709,6 @@ export const useBatteryDetail = () => {
 		resumePolling,
 		loadById,
 		disconnectAll,
+		disconnectBluetooth,
 	}
 }

@@ -9,135 +9,6 @@
 			}
 		},
 		{
-			"path": "pages/alarm/alarm",
-			"style": {
-				"navigationBarTitleText": "%pages.alarmDevices%",
-				"enablePullDownRefresh": false,
-				"navigationBarBackgroundColor": "#FFFFFF",
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/alarm/detail",
-			"style": {
-				"navigationBarTitleText": "%alarm.detailTitle%",
-				"enablePullDownRefresh": false,
-				"navigationBarBackgroundColor": "#FFFFFF",
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/login/login",
-			"style": {
-				"navigationBarTitleText": "%pages.loginTitle%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/login/register",
-			"style": {
-				"navigationBarTitleText": "%pages.register.title%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/login/register-password",
-			"style": {
-				"navigationBarTitleText": "%pages.registerPasswordTitle%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/login/forgot",
-			"style": {
-				"navigationBarTitleText": "%pages.forgotPasswordTitle%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/login/forgot-reset",
-			"style": {
-				"navigationBarTitleText": "%pages.resetPasswordTitle%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/notify/detail",
-			"style": {
-				"navigationBarTitleText": "%pages.notifyDetailTitle%",
-				"enablePullDownRefresh": false,
-				"navigationBarBackgroundColor": "#FFFFFF"
-			}
-		},
-		{
-			"path": "pages/device-battery/detail",
-			"style": {
-				"navigationBarTitleText": "%pages.deviceDetailTitle%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/webViewPage/webViewPage",
-			"style": {
-				"navigationBarTitleText": "%pages.deviceDetailTitle%",
-				"navigationBarBackgroundColor": "#FFFFFF"
-			}
-		},
-		{
-			"path": "pages/content/page",
-			"style": {
-				"navigationBarTitleText": "%pages.contentPage%",
-				"enablePullDownRefresh": false,
-				"navigationBarBackgroundColor": "#FFFFFF"
-			}
-		},
-		{
-			"path": "pages/content/faq",
-			"style": {
-				"navigationBarTitleText": "%pages.faq%",
-				"enablePullDownRefresh": false,
-				"navigationBarBackgroundColor": "#FFFFFF"
-			}
-		},
-		{
-			"path": "pages/device-provision/ble-scan",
-			"style": {
-				"navigationBarTitleText": "%pages.deviceProvision.bleSearchTitle%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/device-provision/provision-wizard",
-			"style": {
-				"navigationBarTitleText": "%pages.deviceProvision.wizardTitle%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/device-provision/uuid-bind",
-			"style": {
-				"navigationBarTitleText": "%pages.deviceProvision.uuidBindTitle%",
-				"enablePullDownRefresh": false,
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/change-pwd/change-pwd",
-			"style": {
-				"navigationBarTitleText": "%pages.modifyPassword%",
-				"enablePullDownRefresh": false,
-				"navigationBarBackgroundColor": "#FAFAFA"
-			}
-		},
-		{
 			"path": "pages/my/my",
 			"style": {
 				"navigationBarTitleText": "%pages.my.title%",
@@ -154,30 +25,30 @@
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
 		},
-			{
-				"path": "pages/my/setting/index",
-				"style": {
-					"navigationBarTitleText": "%pages.my.settingTitle%",
-					"enablePullDownRefresh": false,
-					"navigationBarBackgroundColor": "#FFFFFF"
-				}
-			},
-			{
-				"path": "pages/my/setting/username",
-				"style": {
-					"navigationBarTitleText": "%pages.my.settingPage.usernameTitle%",
-					"enablePullDownRefresh": false,
-					"navigationBarBackgroundColor": "#FFFFFF"
-				}
-			},
-			{
-				"path": "pages/my/help-feedback/index",
-				"style": {
-					"navigationBarTitleText": "%pages.my.helpTitle%",
-					"enablePullDownRefresh": false,
-					"navigationBarBackgroundColor": "#FFFFFF"
-				}
-			},
+		{
+			"path": "pages/my/setting/index",
+			"style": {
+				"navigationBarTitleText": "%pages.my.settingTitle%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/my/setting/username",
+			"style": {
+				"navigationBarTitleText": "%pages.my.settingPage.usernameTitle%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
+		{
+			"path": "pages/my/help-feedback/index",
+			"style": {
+				"navigationBarTitleText": "%pages.my.helpTitle%",
+				"enablePullDownRefresh": false,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
+		},
 		{
 			"path": "pages/my/contact/index",
 			"style": {
@@ -201,14 +72,190 @@
 				"enablePullDownRefresh": false,
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
+		}
+	],
+	"subPackages": [
+		{
+			"root": "pages/alarm",
+			"pages": [
+				{
+					"path": "alarm",
+					"style": {
+						"navigationBarTitleText": "%pages.alarmDevices%",
+						"enablePullDownRefresh": false,
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "detail",
+					"style": {
+						"navigationBarTitleText": "%alarm.detailTitle%",
+						"enablePullDownRefresh": false,
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationStyle": "custom"
+					}
+				}
+			]
 		},
 		{
-			"path": "pages/org-devices/index",
-			"style": {
-				"navigationBarTitleText": "%pages.orgDevicesTitle%",
-				"enablePullDownRefresh": true,
-				"navigationBarBackgroundColor": "#FFFFFF"
-			}
+			"root": "pages/login",
+			"pages": [
+				{
+					"path": "login",
+					"style": {
+						"navigationBarTitleText": "%pages.loginTitle%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "register",
+					"style": {
+						"navigationBarTitleText": "%pages.register.title%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "register-password",
+					"style": {
+						"navigationBarTitleText": "%pages.registerPasswordTitle%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "forgot",
+					"style": {
+						"navigationBarTitleText": "%pages.forgotPasswordTitle%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "forgot-reset",
+					"style": {
+						"navigationBarTitleText": "%pages.resetPasswordTitle%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/notify",
+			"pages": [
+				{
+					"path": "detail",
+					"style": {
+						"navigationBarTitleText": "%pages.notifyDetailTitle%",
+						"enablePullDownRefresh": false,
+						"navigationBarBackgroundColor": "#FFFFFF"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/device-battery",
+			"pages": [
+				{
+					"path": "detail",
+					"style": {
+						"navigationBarTitleText": "%pages.deviceDetailTitle%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/webViewPage",
+			"pages": [
+				{
+					"path": "webViewPage",
+					"style": {
+						"navigationBarTitleText": "%pages.deviceDetailTitle%",
+						"navigationBarBackgroundColor": "#FFFFFF"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/content",
+			"pages": [
+				{
+					"path": "page",
+					"style": {
+						"navigationBarTitleText": "%pages.contentPage%",
+						"enablePullDownRefresh": false,
+						"navigationBarBackgroundColor": "#FFFFFF"
+					}
+				},
+				{
+					"path": "faq",
+					"style": {
+						"navigationBarTitleText": "%pages.faq%",
+						"enablePullDownRefresh": false,
+						"navigationBarBackgroundColor": "#FFFFFF"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/device-provision",
+			"pages": [
+				{
+					"path": "ble-scan",
+					"style": {
+						"navigationBarTitleText": "%pages.deviceProvision.bleSearchTitle%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "provision-wizard",
+					"style": {
+						"navigationBarTitleText": "%pages.deviceProvision.wizardTitle%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "uuid-bind",
+					"style": {
+						"navigationBarTitleText": "%pages.deviceProvision.uuidBindTitle%",
+						"enablePullDownRefresh": false,
+						"navigationStyle": "custom"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/change-pwd",
+			"pages": [
+				{
+					"path": "change-pwd",
+					"style": {
+						"navigationBarTitleText": "%pages.modifyPassword%",
+						"enablePullDownRefresh": false,
+						"navigationBarBackgroundColor": "#FAFAFA"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/org-devices",
+			"pages": [
+				{
+					"path": "index",
+					"style": {
+						"navigationBarTitleText": "%pages.orgDevicesTitle%",
+						"enablePullDownRefresh": true,
+						"navigationBarBackgroundColor": "#FFFFFF"
+					}
+				}
+			]
 		}
 	],
 	"globalStyle": {

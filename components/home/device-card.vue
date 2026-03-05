@@ -4,6 +4,9 @@
 			<image class="status__icon" :src="statusIcon" mode="aspectFit" />
 			<text class="status__text">{{ statusText }}</text>
 		</view>
+		<view v-if="showDisconnectButton" class="disconnect-btn" hover-class="disconnect-btn--hover" @tap.stop="onDisconnectTap" @longpress.stop>
+			<u-icon name="close" size="12" color="#246FDD"></u-icon>
+		</view>
 
 		<view class="card__top">
 			<view class="card__title-wrap">
@@ -37,12 +40,16 @@ const props = defineProps<{
 const emit = defineEmits<{
 	(e: 'select', id: string): void
 	(e: 'longpress', device: HomeDeviceCardModel): void
+	(e: 'disconnect', device: HomeDeviceCardModel): void
 }>()
 
 const { t } = useI18n()
 
 const onTap = () => emit('select', String(props.device.id))
 const onLongPress = () => emit('longpress', props.device)
+const onDisconnectTap = () => emit('disconnect', props.device)
+
+const showDisconnectButton = computed(() => props.device.connectType === 'bluetooth')
 
 const statusText = computed(() => {
 	if (props.device.connectType === 'bluetooth') return t('home.status.bluetooth') as string
@@ -137,6 +144,23 @@ const barWidth = computed(() => `${Math.max(0, Math.min(100, Number(props.device
 .status--offline {
 	background: rgba(160, 160, 160, 0.12);
 	color: #a0a0a0;
+}
+
+.disconnect-btn {
+	position: absolute;
+	right: 14rpx;
+	top: 64rpx;
+	width: 44rpx;
+	height: 44rpx;
+	border-radius: 50%;
+	background: rgba(36, 111, 221, 0.12);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.disconnect-btn--hover {
+	opacity: 0.82;
 }
 
 .battery {

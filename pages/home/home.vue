@@ -30,6 +30,7 @@
 						:device="item"
 						@select="goDeviceDetail"
 						@longpress="onCardLongPress"
+						@disconnect="disconnectCardBluetooth"
 					></home-device-card>
 				</view>
 			</scroll-view>
@@ -74,7 +75,7 @@ import HomeDeviceCard from '@/components/home/device-card.vue'
 import { appUnbindDevice, deviceMapTelemetry, updateDeviceName } from '@/service/device'
 import type { HomeDeviceCardModel } from '@/types/home'
 import { useBoundDevicesStore } from '@/store/bound-devices'
-import { canBleAutoConnect, connectBleClient, getBleClientEntry, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
+import { canBleAutoConnect, connectBleClient, disconnectBleClient, getBleClientEntry, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
 
 type BoundDeviceItem = {
 	device_id: string
@@ -114,6 +115,7 @@ const actionSheetShow = ref(false)
 const renamePopupShow = ref(false)
 const renameValue = ref('')
 const submitting = ref(false)
+const disconnectingBleDeviceIds = ref<Set<string>>(new Set())
 
 const refreshLoginState = () => {
 	isLoggedIn.value = Boolean(uni.getStorageSync('access_token'))
@@ -123,6 +125,17 @@ const STORAGE_BT_AUTO_CONNECT = 'bluetoothAutoConnect'
 const BLE_MAX_READ_REGS = 60
 const homeBleKeys = new Set<string>()
 let autoConnectToken = 0
+
+const parseBooleanStorage = (raw: unknown, defaultValue: boolean) => {
+	if (raw === '' || raw === undefined || raw === null) return defaultValue
+	if (typeof raw === 'boolean') return raw
+	const text = String(raw).trim().toLowerCase()
+	if (text === '1' || text === 'true' || text === 'on') return true
+	if (text === '0' || text === 'false' || text === 'off') return false
+	const n = Number(text)
+	if (Number.isFinite(n)) return n !== 0
+	return defaultValue
+}
 
 const actionSheetActions = computed(() => [
 	{ key: 'rename', name: t('home.deviceMenu.rename') as string },
@@ -172,8 +185,7 @@ const toHomeModel = async (d: BoundDeviceItem): Promise<HomeDeviceCardModel> => 
 
 const isBluetoothAutoConnectEnabled = () => {
 	const raw = uni.getStorageSync(STORAGE_BT_AUTO_CONNECT)
-	if (raw === '' || raw === undefined || raw === null) return true
-	return Boolean(Number(raw))
+	return parseBooleanStorage(raw, true)
 }
 
 const applyBleCacheStatus = () => {
@@ -201,6 +213,13 @@ const markCardBleConnected = (deviceId: string) => {
 	deviceCards.value = deviceCards.value.map((card) =>
 		String(card.id) === String(deviceId) ? { ...card, connectType: 'bluetooth' } : card
 	)
+}
+
+const applyCardFallbackConnectType = (deviceId: string) => {
+	deviceCards.value = deviceCards.value.map((card) => {
+		if (String(card.id) !== String(deviceId)) return card
+		return { ...card, connectType: card.isOnline ? 'mqtt' : 'offline' }
+	})
 }
 
 const autoConnectBleDevices = async () => {
@@ -269,6 +288,35 @@ const goAlarm = () => {
 
 const goDeviceDetail = (id: string) => {
 	uni.navigateTo({ url: `/pages/device-battery/detail?device_id=${encodeURIComponent(String(id || ''))}` })
+}
+
+const disconnectCardBluetooth = async (device: HomeDeviceCardModel) => {
+	const targetId = String(device?.id || '')
+	if (!targetId || device.connectType !== 'bluetooth') return
+	if (disconnectingBleDeviceIds.value.has(targetId)) return
+
+	const bleKey = String(device.bleMac || '').trim()
+	if (!bleKey) return
+	const entry = getBleClientEntry(bleKey, { touch: false })
+	if (!entry) {
+		applyCardFallbackConnectType(targetId)
+		return
+	}
+
+	disconnectingBleDeviceIds.value.add(targetId)
+	try {
+		const ok = await disconnectBleClient(entry.key)
+		if (ok) {
+			homeBleKeys.delete(entry.key)
+			applyCardFallbackConnectType(targetId)
+		}
+		uni.showToast({
+			title: ok ? (t('home.disconnect.disconnected') as string) : (t('home.disconnect.disconnectionFailed') as string),
+			icon: 'none',
+		})
+	} finally {
+		disconnectingBleDeviceIds.value.delete(targetId)
+	}
 }
 
 const onCardLongPress = (device: HomeDeviceCardModel) => {
