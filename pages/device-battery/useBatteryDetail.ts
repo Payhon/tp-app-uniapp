@@ -3,9 +3,11 @@ import { ref, shallowRef } from 'vue'
 import $C from '@/common/config'
 import {
 	appBatteryDetail,
+	appBatteryConnectionStatus,
 	appBatteryMqttCredential,
 	appBatteryReport,
 	type AppBatteryDetail,
+	type AppBatteryConnectionStatusReq,
 	type AppBatteryReportReq,
 } from '@/service/app-battery'
 import {
@@ -301,6 +303,29 @@ export const useBatteryDetail = () => {
 		enqueueReport(payload)
 	}
 
+	const reportConnectionStatus = async (bleConnected: boolean, connTypeOverride: ConnType | string = connType.value) => {
+		if (!deviceId.value) return
+		const payload: AppBatteryConnectionStatusReq = {
+			device_id: deviceId.value,
+			conn_type: String(connTypeOverride || connType.value || 'offline'),
+			platform: getReportPlatform(),
+			ble_connected: bleConnected,
+			ts: Date.now(),
+		}
+		try {
+			const rsp = await appBatteryConnectionStatus(payload)
+			if (!rsp || (rsp as any).code !== 200) {
+				throw new Error((rsp as any)?.message || 'connection status report failed')
+			}
+		} catch (e) {
+			log('connection status report failed', {
+				err: formatErr(e),
+				ble_connected: bleConnected,
+				conn_type: payload.conn_type,
+			})
+		}
+	}
+
 	const clearRelayHeartbeatTimer = () => {
 		if (relayHeartbeatTimer != null) {
 			clearInterval(relayHeartbeatTimer)
@@ -520,6 +545,10 @@ export const useBatteryDetail = () => {
 	}
 
 	const disconnectAll = async () => {
+		const wasBluetooth = connType.value === 'bluetooth'
+		if (wasBluetooth) {
+			void reportConnectionStatus(false, 'bluetooth')
+		}
 		stopPolling()
 		closeRelaySocket()
 		client.value = null
@@ -556,6 +585,7 @@ export const useBatteryDetail = () => {
 			retainBleClient(entry.key)
 			client.value = entry.client
 			connType.value = 'bluetooth'
+			void reportConnectionStatus(true, 'bluetooth')
 			startPolling(entry.client)
 			void flushReportQueue()
 			void connectRelaySocket()
