@@ -1,14 +1,14 @@
 <template>
 	<view class="wrap">
-		<view class="panel">
-			<view class="section" @tap="toggle('single')">
+		<view v-if="hasBasicSections" class="panel">
+			<view v-if="hasSingleItems" class="section" @tap="toggle('single')">
 				<view class="section__left">
 					<image class="section__icon" src="/static/image/device/icon-mono@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.singleCell') }}</text>
 				</view>
 				<u-icon :name="opened.single ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
 			</view>
-			<view v-if="opened.single" class="list">
+			<view v-if="hasSingleItems && opened.single" class="list">
 				<view v-for="item in singleItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
 					<text class="item__label">{{ item.label }}</text>
 					<view class="item__right">
@@ -18,16 +18,16 @@
 				</view>
 			</view>
 
-			<view class="divider"></view>
+			<view v-if="hasSingleItems && hasVoltageItems" class="divider"></view>
 
-			<view class="section" @tap="toggle('voltage')">
+			<view v-if="hasVoltageItems" class="section" @tap="toggle('voltage')">
 				<view class="section__left">
 					<image class="section__icon" src="/static/image/device/icon-voltage@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.voltage') }}</text>
 				</view>
 				<u-icon :name="opened.voltage ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
 			</view>
-			<view v-if="opened.voltage" class="list">
+			<view v-if="hasVoltageItems && opened.voltage" class="list">
 				<view v-for="item in voltageItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
 					<text class="item__label">{{ item.label }}</text>
 					<view class="item__right">
@@ -37,16 +37,16 @@
 				</view>
 			</view>
 
-			<view class="divider"></view>
+			<view v-if="hasCurrentItems && (hasSingleItems || hasVoltageItems)" class="divider"></view>
 
-			<view class="section" @tap="toggle('current')">
+			<view v-if="hasCurrentItems" class="section" @tap="toggle('current')">
 				<view class="section__left">
 					<image class="section__icon" src="/static/image/device/icon-currency@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.current') }}</text>
 				</view>
 				<u-icon :name="opened.current ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
 			</view>
-			<view v-if="opened.current" class="list">
+			<view v-if="hasCurrentItems && opened.current" class="list">
 				<view v-for="item in currentItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
 					<text class="item__label">{{ item.label }}</text>
 					<view class="item__right">
@@ -56,16 +56,16 @@
 				</view>
 			</view>
 
-			<view class="divider"></view>
+			<view v-if="hasTemperatureItems && (hasSingleItems || hasVoltageItems || hasCurrentItems)" class="divider"></view>
 
-			<view class="section" @tap="toggle('temperature')">
+			<view v-if="hasTemperatureItems" class="section" @tap="toggle('temperature')">
 				<view class="section__left">
 					<image class="section__icon" src="/static/image/device/icon-temperature@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.temperature') }}</text>
 				</view>
 				<u-icon :name="opened.temperature ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
 			</view>
-			<view v-if="opened.temperature" class="list">
+			<view v-if="hasTemperatureItems && opened.temperature" class="list">
 				<view v-for="item in temperatureItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
 					<text class="item__label">{{ item.label }}</text>
 					<view class="item__right">
@@ -77,43 +77,7 @@
 		</view>
 
 		<view class="panel panel--actions">
-			<view class="section section--static">
-				<view class="section__left">
-					<image class="section__icon" src="/static/image/device/icon-guard@2x.png" mode="aspectFit" />
-					<text class="section__title">功能控制</text>
-				</view>
-				<view class="section__tips">基于地址 62 的位定义，按功能项直接操作</view>
-			</view>
-			<view class="list">
-				<view v-for="item in functionControlItems" :key="item.key" class="function-item">
-					<view class="function-item__main">
-						<text class="item__label">{{ item.label }}</text>
-						<text class="function-item__status">{{ item.statusText }}</text>
-					</view>
-					<view class="function-item__actions">
-						<view
-							class="function-btn function-btn--primary"
-							:class="{ 'function-btn--disabled': item.enabled || !canManageFunctionConfig }"
-							hover-class="function-btn--hover"
-							@tap="setFunctionControl(item.key, true)"
-						>
-							{{ item.enabledLabel }}
-						</view>
-						<view
-							class="function-btn function-btn--warning"
-							:class="{ 'function-btn--disabled': !item.enabled || !canManageFunctionConfig }"
-							hover-class="function-btn--hover"
-							@tap="setFunctionControl(item.key, false)"
-						>
-							{{ item.disabledLabel }}
-						</view>
-					</view>
-				</view>
-			</view>
-
-			<view class="divider"></view>
-
-			<view class="action" hover-class="action--hover" @tap="openAdvanced">
+			<view v-if="hasAdvancedSections" class="action" hover-class="action--hover" @tap="openAdvanced">
 				<view class="action__left">
 					<image class="action__icon" src="/static/image/device/icon-advance-setting@2x.png" mode="aspectFit" />
 					<text class="action__title">{{ $t('deviceDetail.params.advanced') }}</text>
@@ -121,7 +85,7 @@
 				<u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
 			</view>
 
-			<view class="divider"></view>
+			<view v-if="hasAdvancedSections" class="divider"></view>
 
 			<view class="action" hover-class="action--hover" @tap="openOta">
 				<view class="action__left">
@@ -154,6 +118,18 @@
 			</view>
 		</u-popup>
 
+		<u-picker
+			:show="batteryTypePicker.show"
+			:title="batteryTypePicker.title"
+			:columns="[BATTERY_TYPE_OPTIONS]"
+			keyName="text"
+			valueName="value"
+			:defaultIndex="[batteryTypePicker.index]"
+			@confirm="confirmBatteryTypePicker"
+			@cancel="closeBatteryTypePicker"
+			@close="closeBatteryTypePicker"
+		></u-picker>
+
 		<u-popup :show="otaState.show" mode="center" @close="closeOtaPopup">
 			<view class="ota">
 				<text class="ota__title">{{ $t('deviceDetail.params.otaUpgrade') }}</text>
@@ -174,7 +150,7 @@
 				</view>
 
 				<scroll-view class="advanced__body" scroll-y>
-					<view class="advanced__section">
+					<view v-if="hasOtherItems" class="advanced__section">
 						<text class="advanced__section-title">{{ $t('deviceDetail.params.advancedConfig') }}</text>
 						<view class="list list--popup">
 							<view v-for="item in otherItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -187,7 +163,7 @@
 						</view>
 					</view>
 
-					<view class="advanced__section">
+					<view v-if="hasNumberingItems" class="advanced__section">
 						<text class="advanced__section-title">{{ $t('deviceDetail.params.numberingConfig') }}</text>
 						<view class="list list--popup">
 							<view v-for="item in numberingItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -200,35 +176,26 @@
 						</view>
 					</view>
 
-					<view class="advanced__section">
+					<view v-if="hasSystemSection" class="advanced__section">
 						<text class="advanced__section-title">{{ $t('deviceDetail.params.systemConfig') }}</text>
-						<view class="function-list function-list--popup">
+						<view v-if="hasFunctionControlItems" class="function-list function-list--popup">
 							<view v-for="item in functionControlItems" :key="item.key" class="function-item">
 								<view class="function-item__main">
 									<text class="item__label">{{ item.label }}</text>
 									<text class="function-item__status">{{ item.statusText }}</text>
 								</view>
-								<view class="function-item__actions">
-									<view
-										class="function-btn function-btn--primary"
-										:class="{ 'function-btn--disabled': item.enabled || !canManageFunctionConfig }"
-										hover-class="function-btn--hover"
-										@tap="setFunctionControl(item.key, true)"
-									>
-										{{ item.enabledLabel }}
-									</view>
-									<view
-										class="function-btn function-btn--warning"
-										:class="{ 'function-btn--disabled': !item.enabled || !canManageFunctionConfig }"
-										hover-class="function-btn--hover"
-										@tap="setFunctionControl(item.key, false)"
-									>
-										{{ item.disabledLabel }}
-									</view>
+								<view class="function-item__switch">
+									<u-switch
+										:modelValue="item.enabled"
+										:size="22"
+										:activeColor="'#0B3BFF'"
+										:inactiveColor="'#E6E7EB'"
+										@change="value => setFunctionControl(item.key, !!value)"
+									></u-switch>
 								</view>
 							</view>
 						</view>
-						<view class="list list--popup">
+						<view v-if="hasSystemItems" class="list list--popup">
 							<view v-for="item in systemItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
 								<text class="item__label">{{ item.label }}</text>
 								<view class="item__right">
@@ -239,7 +206,7 @@
 						</view>
 					</view>
 
-					<view class="advanced__section">
+					<view v-if="hasFactoryItems" class="advanced__section">
 						<text class="advanced__section-title">{{ $t('deviceDetail.params.factoryConfig') }}</text>
 						<view class="list list--popup">
 							<view v-for="item in factoryItems" :key="item.key" class="item" hover-class="item--hover" @tap="runFactory(item)">
@@ -272,7 +239,14 @@ import {
 	setFunctionConfigFlag,
 	type FunctionConfigFlagKey,
 } from '@/common/lib/bms-protocol'
-import { PARAM_CATEGORIES, PARAM_DEF_BY_KEY, getParamPermissionKey, listParamsByCategory } from '@/common/lib/bms-protocol/param-registry'
+import {
+	PARAM_CATEGORIES,
+	PARAM_DEF_BY_KEY,
+	getFactoryPermissionKey,
+	getFunctionPermissionKey,
+	getParamPermissionKey,
+	listParamsByCategory,
+} from '@/common/lib/bms-protocol/param-registry'
 
 type ParamItem = {
 	key: string
@@ -281,12 +255,45 @@ type ParamItem = {
 	valueText: string
 	unit: string
 	valueType: string
+	rawValue?: unknown
 }
 
 type FunctionControlItem = (typeof FUNCTION_CONFIG_ITEMS)[number] & {
 	enabled: boolean
 	statusText: string
 }
+
+const TEMP_DISPLAY_LABELS: Record<string, string> = {
+	CELL_OVER_TEMP_PROTECT_C: 'MOS高温保护温度',
+	CELL_OVER_TEMP_RELEASE_C: 'MOS高温保护解除温度',
+	MOS_OVER_TEMP_PROTECT_DELAY_S: 'MOS高温保护延时',
+	MOS_OVER_TEMP_RELEASE_DELAY_S: 'MOS高温保护解除延时',
+	CELL_UNDER_TEMP_PROTECT_C: '充电低温保护温度',
+	CELL_UNDER_TEMP_RELEASE_C: '充电低温保护解除温度',
+	CHARGE_OVER_TEMP_PROTECT_C: '充电高温保护温度',
+	CHARGE_OVER_TEMP_RELEASE_C: '充电高温保护解除温度',
+	CHARGE_OVER_TEMP_PROTECT_DELAY_S: '充电高温保护延时',
+	CHARGE_OVER_TEMP_RELEASE_DELAY_S: '充电高温保护解除延时',
+	DISCHARGE_UNDER_TEMP_PROTECT_C: '放电低温保护温度',
+	DISCHARGE_UNDER_TEMP_RELEASE_C: '放电低温保护解除温度',
+	DISCHARGE_OVER_TEMP_PROTECT_C: '放电高温保护温度',
+	DISCHARGE_OVER_TEMP_RELEASE_C: '放电高温保护解除温度',
+	DISCHARGE_OVER_TEMP_PROTECT_DELAY_S: '放电高温保护延时',
+	DISCHARGE_OVER_TEMP_RELEASE_DELAY_S: '放电高温保护解除延时',
+}
+
+const BATTERY_TYPE_OPTIONS = [
+	{ text: '默认保留', value: 0x00 },
+	{ text: '磷酸铁锂', value: 0x01 },
+	{ text: '锰酸锂', value: 0x02 },
+	{ text: '三元锂', value: 0x03 },
+	{ text: '钴酸锂', value: 0x04 },
+	{ text: '聚合锂', value: 0x05 },
+	{ text: '钛酸锂', value: 0x06 },
+	{ text: '铅酸', value: 0x07 },
+	{ text: '镍氢', value: 0x08 },
+	{ text: '钠离子', value: 0x09 },
+] as const
 
 const props = defineProps<{
 	battery: AppBatteryDetail | null
@@ -352,6 +359,15 @@ const canAccessParamKey = (actualKey: string) => {
 	return deviceParamPermSet.value.has(permKey)
 }
 
+const canAccessPermissionKey = (permissionKey: string) => {
+	if (deviceParamPerm.allowAll) return true
+	return deviceParamPermSet.value.has(permissionKey)
+}
+
+const canAccessFunctionControl = (flagKey: FunctionConfigFlagKey) => canAccessPermissionKey(getFunctionPermissionKey(flagKey))
+
+const canAccessFactoryAction = (actionKey: string) => canAccessPermissionKey(getFactoryPermissionKey(actionKey))
+
 const filterParamEntries = <T extends string | { displayKey: string; actualKey: string }>(entries: T[]) =>
 	entries.filter((entry) => {
 		const actualKey = typeof entry === 'string' ? entry : entry.actualKey
@@ -359,12 +375,31 @@ const filterParamEntries = <T extends string | { displayKey: string; actualKey: 
 	})
 
 const labelOf = (key: string) => {
+	if (TEMP_DISPLAY_LABELS[key]) return TEMP_DISPLAY_LABELS[key]
 	const i18nKey = `bmsParam.${key}`
 	if (te(i18nKey)) return t(i18nKey) as string
 	return PARAM_DEF_BY_KEY[key]?.label || key
 }
 
 const unitOf = (key: string) => String(PARAM_DEF_BY_KEY[key]?.unit || '')
+const isBatteryTypeKey = (key: string) => key === BMS_PARAM.BATTERY_TYPE
+
+const formatDisplayNumber = (value: number, decimals: number) => {
+	if (!Number.isFinite(value)) return '-'
+	if (decimals <= 0) return String(Math.round(value))
+	const factor = 10 ** decimals
+	const normalized = Math.round((value + Number.EPSILON) * factor) / factor
+	return normalized
+		.toFixed(decimals)
+		.replace(/(\.\d*?[1-9])0+$/u, '$1')
+		.replace(/\.0+$/u, '')
+}
+
+const getBatteryTypeLabel = (value: unknown) => {
+	const n = typeof value === 'number' ? value : Number(value)
+	if (!Number.isFinite(n)) return '-'
+	return BATTERY_TYPE_OPTIONS.find((item) => item.value === n)?.text || `未知类型(${Math.trunc(n)})`
+}
 
 const getScaleDecimals = (scale?: number) => {
 	if (typeof scale !== 'number' || !Number.isFinite(scale) || scale <= 0) return 0
@@ -391,17 +426,18 @@ const formatEditableValue = (key: string, value: unknown) => {
 	return normalizeEditableNumber(n, getScaleDecimals((def as any)?.scale))
 }
 
-const formatValue = (v: unknown, unit: string) => {
-	if (v == null || v === '') return '-'
-	if (typeof v === 'string') return v
-	const n = typeof v === 'number' ? v : Number(v)
+const formatParamValue = (key: string, value: unknown) => {
+	if (isBatteryTypeKey(key)) return getBatteryTypeLabel(value)
+	const def = PARAM_DEF_BY_KEY[key]
+	const unit = String(def?.unit || '')
+	if (value == null || value === '') return '-'
+	if (typeof value === 'string') return value
+	const n = typeof value === 'number' ? value : Number(value)
 	if (!Number.isFinite(n)) return '-'
-	if (unit === 'V') return `${n.toFixed(2)}V`
-	if (unit === 'A') return `${n.toFixed(1)}A`
-	if (unit === '°C') return `${n.toFixed(0)}°C`
-	if (unit.toLowerCase() === 's') return `${n.toFixed(0)}S`
-	if (unit.toLowerCase() === 'min') return `${n.toFixed(0)}MIN`
-	return `${n}${unit}`
+	if (unit) {
+		return `${formatDisplayNumber(n, getScaleDecimals((def as any)?.scale))}${unit}`
+	}
+	return formatDisplayNumber(n, getScaleDecimals((def as any)?.scale))
 }
 
 const loadDeviceParamPermissions = async () => {
@@ -421,13 +457,15 @@ const mkItems = (keys: Array<string | { displayKey: string; actualKey: string }>
 		const key = typeof entry === 'string' ? entry : entry.displayKey
 		const actualKey = typeof entry === 'string' ? entry : entry.actualKey
 		const unit = unitOf(actualKey)
+		const value = paramValues[actualKey]
 		return {
 			key,
 			actualKey,
 			label: labelOf(key),
 			unit,
-			valueText: formatValue(paramValues[actualKey], unit),
+			valueText: formatParamValue(actualKey, value),
 			valueType: PARAM_DEF_BY_KEY[actualKey]?.valueType || 'u16',
+			rawValue: value,
 		}
 	})
 
@@ -444,21 +482,79 @@ const SINGLE_KEYS = [
 	'NORMAL_CELL_UV_PROTECT_V',
 	'CELL_UV_ALARM_DELAY_S',
 	'CELL_UV_PROTECT_DELAY_S',
+	'CELL_UV_PROTECT_RELEASE_V',
+	'CELL_UV_ALARM_RELEASE_DELAY_S',
+	'CELL_UV_PROTECT_RELEASE_DELAY_S',
 ]
 
-const VOLTAGE_KEYS = ['PACK_OV_ALARM_V', 'PACK_OV_PROTECT_V', 'PACK_OV_ALARM_DELAY_S', 'PACK_OV_PROTECT_DELAY_S', 'PACK_UV_ALARM_DELAY_S', 'PACK_UV_PROTECT_DELAY_S']
-const CURRENT_KEYS = ['CHARGE_OC_PROTECT_SMALL_A', 'CHARGE_OC_PROTECT_LARGE_A', 'CHARGE_OC_ALARM_DELAY_S', 'DISCHARGE_OC_ALARM_A', 'DISCHARGE_OC_PROTECT_SMALL_A', 'DISCHARGE_OC_PROTECT_LARGE_A']
+const VOLTAGE_KEYS = [
+	'PACK_OV_ALARM_V',
+	'PACK_OV_PROTECT_V',
+	'PACK_OV_ALARM_DELAY_S',
+	'PACK_OV_PROTECT_DELAY_S',
+	'PACK_OV_ALARM_RELEASE_V',
+	'PACK_OV_PROTECT_RELEASE_V',
+	'PACK_OV_ALARM_RELEASE_DELAY_S',
+	'PACK_OV_PROTECT_RELEASE_DELAY_S',
+	'NORMAL_PACK_UV_ALARM_V',
+	'NORMAL_PACK_UV_PROTECT_V',
+	'LOW_TEMP_PACK_UV_ALARM_V',
+	'LOW_TEMP_PACK_UV_PROTECT_V',
+	'PACK_UV_ALARM_DELAY_S',
+	'PACK_UV_PROTECT_DELAY_S',
+	'PACK_UV_ALARM_RELEASE_V',
+	'PACK_UV_PROTECT_RELEASE_V',
+	'PACK_UV_ALARM_RELEASE_DELAY_S',
+	'PACK_UV_PROTECT_RELEASE_DELAY_S',
+]
+const CURRENT_KEYS = [
+	'CHARGE_OC_PROTECT_SMALL_A',
+	'CHARGE_OC_PROTECT_LARGE_A',
+	'CHARGE_OC_ALARM_DELAY_S',
+	'CHARGE_OC_PROTECT_SMALL_DELAY_S',
+	'CHARGE_OC_PROTECT_LARGE_DELAY_S',
+	'DISCHARGE_OC_ALARM_A',
+	'DISCHARGE_OC_PROTECT_SMALL_A',
+	'DISCHARGE_OC_PROTECT_LARGE_A',
+	'DISCHARGE_OC_ALARM_DELAY_S',
+	'DISCHARGE_OC_PROTECT_SMALL_DELAY_S',
+	'DISCHARGE_OC_PROTECT_LARGE_DELAY_S',
+]
 const TEMP_KEYS = [
 	{ displayKey: 'CELL_OVER_TEMP_PROTECT_C', actualKey: 'MOS_OT_PROTECT_C' },
 	{ displayKey: 'CELL_OVER_TEMP_RELEASE_C', actualKey: 'MOS_OT_PROTECT_RELEASE_C' },
+	{ displayKey: 'MOS_OVER_TEMP_PROTECT_DELAY_S', actualKey: 'MOS_OT_PROTECT_DELAY_S' },
+	{ displayKey: 'MOS_OVER_TEMP_RELEASE_DELAY_S', actualKey: 'MOS_OT_PROTECT_RELEASE_DELAY_S' },
 	{ displayKey: 'CELL_UNDER_TEMP_PROTECT_C', actualKey: 'CHARGE_UT_PROTECT_C' },
 	{ displayKey: 'CELL_UNDER_TEMP_RELEASE_C', actualKey: 'CHARGE_UT_PROTECT_RELEASE_C' },
+	{ displayKey: 'CHARGE_OVER_TEMP_PROTECT_C', actualKey: 'CHARGE_OT_PROTECT_C' },
+	{ displayKey: 'CHARGE_OVER_TEMP_RELEASE_C', actualKey: 'CHARGE_OT_PROTECT_RELEASE_C' },
+	{ displayKey: 'CHARGE_OVER_TEMP_PROTECT_DELAY_S', actualKey: 'CHARGE_OT_PROTECT_DELAY_S' },
+	{ displayKey: 'CHARGE_OVER_TEMP_RELEASE_DELAY_S', actualKey: 'CHARGE_OT_PROTECT_RELEASE_DELAY_S' },
+	{ displayKey: 'DISCHARGE_UNDER_TEMP_PROTECT_C', actualKey: 'DISCHARGE_UT_PROTECT_C' },
+	{ displayKey: 'DISCHARGE_UNDER_TEMP_RELEASE_C', actualKey: 'DISCHARGE_UT_PROTECT_RELEASE_C' },
+	{ displayKey: 'DISCHARGE_OVER_TEMP_PROTECT_C', actualKey: 'DISCHARGE_OT_PROTECT_C' },
+	{ displayKey: 'DISCHARGE_OVER_TEMP_RELEASE_C', actualKey: 'DISCHARGE_OT_PROTECT_RELEASE_C' },
+	{ displayKey: 'DISCHARGE_OVER_TEMP_PROTECT_DELAY_S', actualKey: 'DISCHARGE_OT_PROTECT_DELAY_S' },
+	{ displayKey: 'DISCHARGE_OVER_TEMP_RELEASE_DELAY_S', actualKey: 'DISCHARGE_OT_PROTECT_RELEASE_DELAY_S' },
 ]
 
 const singleItems = computed(() => mkItems(filterParamEntries(SINGLE_KEYS)))
 const voltageItems = computed(() => mkItems(filterParamEntries(VOLTAGE_KEYS)))
 const currentItems = computed(() => mkItems(filterParamEntries(CURRENT_KEYS)))
 const temperatureItems = computed(() => mkItems(filterParamEntries(TEMP_KEYS)))
+const hasSingleItems = computed(() => singleItems.value.length > 0)
+const hasVoltageItems = computed(() => voltageItems.value.length > 0)
+const hasCurrentItems = computed(() => currentItems.value.length > 0)
+const hasTemperatureItems = computed(() => temperatureItems.value.length > 0)
+const visibleBasicSectionCount = computed(
+	() =>
+		Number(hasSingleItems.value) +
+		Number(hasVoltageItems.value) +
+		Number(hasCurrentItems.value) +
+		Number(hasTemperatureItems.value)
+)
+const hasBasicSections = computed(() => visibleBasicSectionCount.value > 0)
 
 const OTHER_KEYS = listParamsByCategory(PARAM_CATEGORIES.OTHER)
 const NUMBERING_KEYS = listParamsByCategory(PARAM_CATEGORIES.STRING)
@@ -468,15 +564,19 @@ const SYSTEM_LOAD_KEYS = [...SYSTEM_KEYS, BMS_PARAM.FUNCTION_CONFIG]
 const otherItems = computed(() => mkItems(filterParamEntries(OTHER_KEYS)))
 const numberingItems = computed(() => mkItems(filterParamEntries(NUMBERING_KEYS)))
 const systemItems = computed(() => mkItems(filterParamEntries(SYSTEM_KEYS)))
+const hasOtherItems = computed(() => otherItems.value.length > 0)
+const hasNumberingItems = computed(() => numberingItems.value.length > 0)
+const hasSystemItems = computed(() => systemItems.value.length > 0)
 const functionConfigFlags = computed(() => parseFunctionConfigFlags(paramValues[BMS_PARAM.FUNCTION_CONFIG]))
 const functionControlItems = computed<FunctionControlItem[]>(() =>
-	FUNCTION_CONFIG_ITEMS.map((item) => ({
+	FUNCTION_CONFIG_ITEMS.filter((item) => canAccessFunctionControl(item.key)).map((item) => ({
 		...item,
 		enabled: functionConfigFlags.value[item.key],
 		statusText: functionConfigFlags.value[item.key] ? item.enabledLabel : item.disabledLabel,
 	}))
 )
-const canManageFunctionConfig = computed(() => canAccessParamKey(BMS_PARAM.FUNCTION_CONFIG))
+const hasFunctionControlItems = computed(() => functionControlItems.value.length > 0)
+const hasSystemSection = computed(() => hasSystemItems.value || hasFunctionControlItems.value)
 
 const FACTORY_ACTIONS = [
 	// 以下 raw 值按协议示例帧整理（0x57A~0x57B，共 32bit），确保与设备端一致
@@ -494,10 +594,14 @@ const FACTORY_ACTIONS = [
 ]
 
 const factoryItems = computed(() =>
-	FACTORY_ACTIONS.map((item) => ({
+	FACTORY_ACTIONS.filter((item) => canAccessFactoryAction(item.key)).map((item) => ({
 		...item,
 		label: (t(`deviceDetail.params.factory.${item.key}`) as string) || item.key,
 	}))
+)
+const hasFactoryItems = computed(() => factoryItems.value.length > 0)
+const hasAdvancedSections = computed(
+	() => hasOtherItems.value || hasNumberingItems.value || hasSystemSection.value || hasFactoryItems.value
 )
 
 const editPopup = reactive({
@@ -518,6 +622,13 @@ const otaState = reactive({
 
 const advancedPopup = reactive({
 	show: false,
+})
+
+const batteryTypePicker = reactive({
+	show: false,
+	title: '',
+	key: BMS_PARAM.BATTERY_TYPE,
+	index: 0,
 })
 
 const safeBottom = (() => {
@@ -568,6 +679,11 @@ const openEdit = (item: ParamItem) => {
 	if (!canAccessParamKey(item.actualKey || item.key)) {
 		return
 	}
+	if (isBatteryTypeKey(item.actualKey || item.key)) {
+		applyPollingState()
+		openBatteryTypeSelector(item.actualKey || item.key, item.label, item.rawValue)
+		return
+	}
 	editPopup.title = item.label
 	editPopup.key = item.actualKey || item.key
 	editPopup.unit = item.unit || ''
@@ -578,6 +694,45 @@ const openEdit = (item: ParamItem) => {
 	applyPollingState()
 }
 
+const writeParamValue = async (key: string, value: string | number) => {
+	const c = props.client
+	if (!c) return
+	await c.writeParam(key, value)
+	paramValues[key] = await c.readParam(key)
+}
+
+const openBatteryTypeSelector = (key: string, title: string, currentValue: unknown) => {
+	const current = typeof currentValue === 'number' ? currentValue : Number(currentValue)
+	batteryTypePicker.key = key
+	batteryTypePicker.title = title
+	batteryTypePicker.index = Math.max(
+		0,
+		BATTERY_TYPE_OPTIONS.findIndex((item) => item.value === current)
+	)
+	batteryTypePicker.show = true
+}
+
+const closeBatteryTypePicker = () => {
+	batteryTypePicker.show = false
+	applyPollingState()
+}
+
+const confirmBatteryTypePicker = async (payload: { value?: Array<{ value: number; text: string }> }) => {
+	const selected = payload?.value?.[0]
+	if (!selected) {
+		closeBatteryTypePicker()
+		return
+	}
+	try {
+		await writeParamValue(batteryTypePicker.key, selected.value)
+		uni.showToast({ title: `${batteryTypePicker.title}已更新`, icon: 'none' })
+	} catch (e) {
+		uni.showToast({ title: t('deviceDetail.toast.saveFailed') as string, icon: 'none' })
+	} finally {
+		closeBatteryTypePicker()
+	}
+}
+
 const setFunctionControl = async (key: FunctionConfigFlagKey, enabled: boolean) => {
 	const c = props.client
 	if (!c || props.connType === 'offline') {
@@ -585,7 +740,7 @@ const setFunctionControl = async (key: FunctionConfigFlagKey, enabled: boolean) 
 		return
 	}
 	if (functionConfigFlags.value[key] === enabled) return
-	if (!canManageFunctionConfig.value) {
+	if (!canAccessFunctionControl(key)) {
 		uni.showToast({ title: '当前账号无权限操作功能配置', icon: 'none' })
 		return
 	}
@@ -605,16 +760,14 @@ const confirmEdit = async () => {
 	const raw = String(editPopup.input || '').trim()
 	try {
 		if (editPopup.valueType === 'str') {
-			await c.writeParam(editPopup.key, raw)
-			paramValues[editPopup.key] = await c.readParam(editPopup.key)
+			await writeParamValue(editPopup.key, raw)
 		} else {
 			const num = Number(raw)
 			if (!raw || !Number.isFinite(num)) {
 				uni.showToast({ title: t('deviceDetail.toast.invalidInput') as string, icon: 'none' })
 				return
 			}
-			await c.writeParam(editPopup.key, num)
-			paramValues[editPopup.key] = await c.readParam(editPopup.key)
+			await writeParamValue(editPopup.key, num)
 		}
 		editPopup.show = false
 		uni.showToast({ title: t('deviceDetail.toast.saved') as string, icon: 'none' })
@@ -644,6 +797,10 @@ const confirmModal = (content: string) =>
 const runFactory = async (item: { key: string; raw: number; confirm?: boolean }) => {
 	if (!props.client || props.connType === 'offline') {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	if (!canAccessFactoryAction(item.key)) {
+		uni.showToast({ title: '当前账号无权限执行工厂命令', icon: 'none' })
 		return
 	}
 	if (item.confirm) {
@@ -1005,39 +1162,11 @@ const loadSection = (k: keyof typeof opened) => {
 	color: #8e95a2;
 }
 
-.function-item__actions {
+.function-item__switch {
 	margin-top: 14rpx;
 	display: flex;
-	gap: 16rpx;
-}
-
-.function-btn {
-	flex: 1;
-	height: 68rpx;
-	border-radius: 14rpx;
-	display: flex;
+	justify-content: flex-end;
 	align-items: center;
-	justify-content: center;
-	font-size: 24rpx;
-	font-weight: 600;
-}
-
-.function-btn--primary {
-	background: rgba(11, 59, 255, 0.1);
-	color: #0b3bff;
-}
-
-.function-btn--warning {
-	background: rgba(255, 149, 0, 0.12);
-	color: #ff9500;
-}
-
-.function-btn--disabled {
-	opacity: 0.45;
-}
-
-.function-btn--hover {
-	opacity: 0.9;
 }
 
 .edit {

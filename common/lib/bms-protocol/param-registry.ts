@@ -791,6 +791,14 @@ export function getParamPermissionKey(paramKey: string): string | null {
 	return getParamPermissionKeyByDef(PARAM_DEF_BY_KEY[normalized]);
 }
 
+export function getFunctionPermissionKey(flagKey: string): string {
+	return `function:${String(flagKey || '').trim()}`;
+}
+
+export function getFactoryPermissionKey(actionKey: string): string {
+	return `factory:${String(actionKey || '').trim()}`;
+}
+
 export function buildDeviceParamPermissionTree(): DeviceParamPermissionNode[] {
 	const categoryLabels: Record<string, string> = {
 		[PARAM_CATEGORIES.VOLTAGE]: '电压配置',
