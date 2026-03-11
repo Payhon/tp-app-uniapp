@@ -77,6 +77,42 @@
 		</view>
 
 		<view class="panel panel--actions">
+			<view class="section section--static">
+				<view class="section__left">
+					<image class="section__icon" src="/static/image/device/icon-guard@2x.png" mode="aspectFit" />
+					<text class="section__title">功能控制</text>
+				</view>
+				<view class="section__tips">基于地址 62 的位定义，按功能项直接操作</view>
+			</view>
+			<view class="list">
+				<view v-for="item in functionControlItems" :key="item.key" class="function-item">
+					<view class="function-item__main">
+						<text class="item__label">{{ item.label }}</text>
+						<text class="function-item__status">{{ item.statusText }}</text>
+					</view>
+					<view class="function-item__actions">
+						<view
+							class="function-btn function-btn--primary"
+							:class="{ 'function-btn--disabled': item.enabled || !canManageFunctionConfig }"
+							hover-class="function-btn--hover"
+							@tap="setFunctionControl(item.key, true)"
+						>
+							{{ item.enabledLabel }}
+						</view>
+						<view
+							class="function-btn function-btn--warning"
+							:class="{ 'function-btn--disabled': !item.enabled || !canManageFunctionConfig }"
+							hover-class="function-btn--hover"
+							@tap="setFunctionControl(item.key, false)"
+						>
+							{{ item.disabledLabel }}
+						</view>
+					</view>
+				</view>
+			</view>
+
+			<view class="divider"></view>
+
 			<view class="action" hover-class="action--hover" @tap="openAdvanced">
 				<view class="action__left">
 					<image class="action__icon" src="/static/image/device/icon-advance-setting@2x.png" mode="aspectFit" />
@@ -106,7 +142,7 @@
 					<u-input
 						v-model="editPopup.input"
 						:placeholder="$t('deviceDetail.params.inputPlaceholder')"
-						:type="editPopup.valueType === 'str' ? 'text' : 'number'"
+						:type="editPopup.valueType === 'str' ? 'text' : 'digit'"
 						border="none"
 					></u-input>
 					<text class="edit__unit">{{ editPopup.unit }}</text>
@@ -166,6 +202,32 @@
 
 					<view class="advanced__section">
 						<text class="advanced__section-title">{{ $t('deviceDetail.params.systemConfig') }}</text>
+						<view class="function-list function-list--popup">
+							<view v-for="item in functionControlItems" :key="item.key" class="function-item">
+								<view class="function-item__main">
+									<text class="item__label">{{ item.label }}</text>
+									<text class="function-item__status">{{ item.statusText }}</text>
+								</view>
+								<view class="function-item__actions">
+									<view
+										class="function-btn function-btn--primary"
+										:class="{ 'function-btn--disabled': item.enabled || !canManageFunctionConfig }"
+										hover-class="function-btn--hover"
+										@tap="setFunctionControl(item.key, true)"
+									>
+										{{ item.enabledLabel }}
+									</view>
+									<view
+										class="function-btn function-btn--warning"
+										:class="{ 'function-btn--disabled': !item.enabled || !canManageFunctionConfig }"
+										hover-class="function-btn--hover"
+										@tap="setFunctionControl(item.key, false)"
+									>
+										{{ item.disabledLabel }}
+									</view>
+								</view>
+							</view>
+						</view>
 						<view class="list list--popup">
 							<view v-for="item in systemItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
 								<text class="item__label">{{ item.label }}</text>
@@ -202,7 +264,14 @@ import { appBatteryOtaCheck, type AppBatteryDetail } from '@/service/app-battery
 import { fetchCurrentDeviceParamPermissions } from '@/service/permissions'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import type { BmsClient } from '@/common/lib/bms-protocol'
-import { bootOtaUpgrade } from '@/common/lib/bms-protocol'
+import {
+	BMS_PARAM,
+	FUNCTION_CONFIG_ITEMS,
+	bootOtaUpgrade,
+	parseFunctionConfigFlags,
+	setFunctionConfigFlag,
+	type FunctionConfigFlagKey,
+} from '@/common/lib/bms-protocol'
 import { PARAM_CATEGORIES, PARAM_DEF_BY_KEY, getParamPermissionKey, listParamsByCategory } from '@/common/lib/bms-protocol/param-registry'
 
 type ParamItem = {
@@ -212,6 +281,11 @@ type ParamItem = {
 	valueText: string
 	unit: string
 	valueType: string
+}
+
+type FunctionControlItem = (typeof FUNCTION_CONFIG_ITEMS)[number] & {
+	enabled: boolean
+	statusText: string
 }
 
 const props = defineProps<{
@@ -292,6 +366,31 @@ const labelOf = (key: string) => {
 
 const unitOf = (key: string) => String(PARAM_DEF_BY_KEY[key]?.unit || '')
 
+const getScaleDecimals = (scale?: number) => {
+	if (typeof scale !== 'number' || !Number.isFinite(scale) || scale <= 0) return 0
+	const s = scale.toString()
+	if (!s.includes('.')) return 0
+	return s.split('.')[1]?.length || 0
+}
+
+const normalizeEditableNumber = (value: number, decimals: number) => {
+	if (!Number.isFinite(value)) return ''
+	if (decimals <= 0) return String(Math.round(value))
+	return value
+		.toFixed(decimals)
+		.replace(/(\.\d*?[1-9])0+$/u, '$1')
+		.replace(/\.0+$/u, '')
+}
+
+const formatEditableValue = (key: string, value: unknown) => {
+	if (value == null || value === '') return ''
+	if (typeof value === 'string') return value
+	const n = typeof value === 'number' ? value : Number(value)
+	if (!Number.isFinite(n)) return ''
+	const def = PARAM_DEF_BY_KEY[key]
+	return normalizeEditableNumber(n, getScaleDecimals((def as any)?.scale))
+}
+
 const formatValue = (v: unknown, unit: string) => {
 	if (v == null || v === '') return '-'
 	if (typeof v === 'string') return v
@@ -363,11 +462,21 @@ const temperatureItems = computed(() => mkItems(filterParamEntries(TEMP_KEYS)))
 
 const OTHER_KEYS = listParamsByCategory(PARAM_CATEGORIES.OTHER)
 const NUMBERING_KEYS = listParamsByCategory(PARAM_CATEGORIES.STRING)
-const SYSTEM_KEYS = listParamsByCategory(PARAM_CATEGORIES.SYSTEM)
+const SYSTEM_KEYS = listParamsByCategory(PARAM_CATEGORIES.SYSTEM).filter((key) => key !== BMS_PARAM.FUNCTION_CONFIG)
+const SYSTEM_LOAD_KEYS = [...SYSTEM_KEYS, BMS_PARAM.FUNCTION_CONFIG]
 
 const otherItems = computed(() => mkItems(filterParamEntries(OTHER_KEYS)))
 const numberingItems = computed(() => mkItems(filterParamEntries(NUMBERING_KEYS)))
 const systemItems = computed(() => mkItems(filterParamEntries(SYSTEM_KEYS)))
+const functionConfigFlags = computed(() => parseFunctionConfigFlags(paramValues[BMS_PARAM.FUNCTION_CONFIG]))
+const functionControlItems = computed<FunctionControlItem[]>(() =>
+	FUNCTION_CONFIG_ITEMS.map((item) => ({
+		...item,
+		enabled: functionConfigFlags.value[item.key],
+		statusText: functionConfigFlags.value[item.key] ? item.enabledLabel : item.disabledLabel,
+	}))
+)
+const canManageFunctionConfig = computed(() => canAccessParamKey(BMS_PARAM.FUNCTION_CONFIG))
 
 const FACTORY_ACTIONS = [
 	// 以下 raw 值按协议示例帧整理（0x57A~0x57B，共 32bit），确保与设备端一致
@@ -464,9 +573,30 @@ const openEdit = (item: ParamItem) => {
 	editPopup.unit = item.unit || ''
 	editPopup.valueType = item.valueType || 'u16'
 	const current = paramValues[item.actualKey || item.key]
-	editPopup.input = current == null ? '' : String(current)
+	editPopup.input = formatEditableValue(editPopup.key, current)
 	editPopup.show = true
 	applyPollingState()
+}
+
+const setFunctionControl = async (key: FunctionConfigFlagKey, enabled: boolean) => {
+	const c = props.client
+	if (!c || props.connType === 'offline') {
+		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	if (functionConfigFlags.value[key] === enabled) return
+	if (!canManageFunctionConfig.value) {
+		uni.showToast({ title: '当前账号无权限操作功能配置', icon: 'none' })
+		return
+	}
+	const nextWord = setFunctionConfigFlag(paramValues[BMS_PARAM.FUNCTION_CONFIG], key, enabled)
+	try {
+		await c.writeParam(BMS_PARAM.FUNCTION_CONFIG, nextWord)
+		paramValues[BMS_PARAM.FUNCTION_CONFIG] = await c.readParam(BMS_PARAM.FUNCTION_CONFIG)
+		uni.showToast({ title: t('deviceDetail.toast.saved') as string, icon: 'none' })
+	} catch (e) {
+		uni.showToast({ title: t('deviceDetail.toast.saveFailed') as string, icon: 'none' })
+	}
 }
 
 const confirmEdit = async () => {
@@ -699,7 +829,7 @@ const openAdvanced = () => {
 		setTimeout(() => {
 			loadKeysCached('other', OTHER_KEYS)
 			loadKeysCached('numbering', NUMBERING_KEYS)
-			loadKeysCached('system', SYSTEM_KEYS)
+			loadKeysCached('system', SYSTEM_LOAD_KEYS)
 		}, 50)
 		applyPollingState()
 	} catch (e) {
@@ -720,6 +850,16 @@ const loadKeys = async (keys: string[]) => {
 		}
 	}
 }
+
+watch(
+	() => [props.client, props.connType, props.active],
+	([clientRef, connTypeRef, activeRef]) => {
+		if (clientRef && connTypeRef !== 'offline' && activeRef !== false) {
+			void loadKeys([BMS_PARAM.FUNCTION_CONFIG])
+		}
+	},
+	{ immediate: true }
+)
 
 const loadKeysCached = async (section: keyof typeof loaded, keys: string[]) => {
 	if (loaded[section]) return
@@ -751,6 +891,10 @@ const loadSection = (k: keyof typeof opened) => {
 
 .panel--actions {
 	margin-top: 18rpx;
+}
+
+.section--static {
+	align-items: flex-start;
 }
 
 .section,
@@ -792,6 +936,14 @@ const loadSection = (k: keyof typeof opened) => {
 	color: #8e95a2;
 }
 
+.section__tips {
+	max-width: 340rpx;
+	font-size: 22rpx;
+	line-height: 1.5;
+	color: #8e95a2;
+	text-align: right;
+}
+
 .divider {
 	height: 1px;
 	background: #f2f3f5;
@@ -831,6 +983,61 @@ const loadSection = (k: keyof typeof opened) => {
 .item__value {
 	font-size: 26rpx;
 	color: #8e95a2;
+}
+
+.function-list--popup {
+	padding-bottom: 8rpx;
+}
+
+.function-item {
+	padding: 18rpx 24rpx;
+}
+
+.function-item__main {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16rpx;
+}
+
+.function-item__status {
+	font-size: 24rpx;
+	color: #8e95a2;
+}
+
+.function-item__actions {
+	margin-top: 14rpx;
+	display: flex;
+	gap: 16rpx;
+}
+
+.function-btn {
+	flex: 1;
+	height: 68rpx;
+	border-radius: 14rpx;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 24rpx;
+	font-weight: 600;
+}
+
+.function-btn--primary {
+	background: rgba(11, 59, 255, 0.1);
+	color: #0b3bff;
+}
+
+.function-btn--warning {
+	background: rgba(255, 149, 0, 0.12);
+	color: #ff9500;
+}
+
+.function-btn--disabled {
+	opacity: 0.45;
+}
+
+.function-btn--hover {
+	opacity: 0.9;
 }
 
 .edit {

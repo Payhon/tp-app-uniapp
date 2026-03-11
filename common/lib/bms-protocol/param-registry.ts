@@ -295,6 +295,8 @@ export const BMS_PARAM = Object.freeze({
 	// 系统寄存器（doc/oriigin/device_comm_protocol_write.md 四、系统寄存器）
 	// 0x0001 高低串数配置（H：高串数；L：低串数）
 	SERIES_COUNT_CONFIG: 'SERIES_COUNT_CONFIG',
+	// 0x0004(H) 电池类型（L 保留）
+	BATTERY_TYPE: 'BATTERY_TYPE',
 	// 0x0030~0x0031（48~49）设计容量（0.001Ah）
 	DESIGN_CAPACITY_AH: 'DESIGN_CAPACITY_AH',
 	// 0x0032~0x0033（50~51）满充容量（0.001Ah）
@@ -583,7 +585,7 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_PARAM.CELL_OC_PROTECT_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充保护延时', access: 'RW', valueType: 'u8', address: 0x402, byte: 'H', scale: 0.1, unit: 's' }),
 	def(BMS_PARAM.NORMAL_LOW_TEMP_THRESHOLD_C, PARAM_CATEGORIES.VOLTAGE, { label: '常温低温阀值温度', access: 'RW', valueType: 'u8', address: 0x403, byte: 'H', offset: -40, scale: 1, unit: '°C' }),
 	def(BMS_PARAM.CELL_OV_PROTECT_RELEASE_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过压保护解除电压', access: 'RW', valueType: 'u16', address: 0x404, scale: 0.001, unit: 'V' }),
-	def(BMS_PARAM.CELL_OC_ALARM_RELEASE_DELTA_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充告警解除电压差', access: 'RW', valueType: 'u16', address: 0x405, scale: 0.001, unit: 'V' }),
+	def(BMS_PARAM.CELL_OC_ALARM_RELEASE_DELTA_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充告警解除电压', access: 'RW', valueType: 'u16', address: 0x405, scale: 0.001, unit: 'V' }),
 	def(BMS_PARAM.CAPACITY_RELEASE_SOC_PCT, PARAM_CATEGORIES.VOLTAGE, { label: '容量解除', access: 'RW', valueType: 'u16', address: 0x406, scale: 1, unit: '%' }),
 	def(BMS_PARAM.OV_DISCHARGE_RELEASE_A, PARAM_CATEGORIES.VOLTAGE, { label: '过压放电解除电流', access: 'RW', valueType: 'u8', address: 0x407, byte: 'L', scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.UV_CHARGE_RELEASE_A, PARAM_CATEGORIES.VOLTAGE, { label: '欠压充电解除电流', access: 'RW', valueType: 'u8', address: 0x407, byte: 'H', scale: 0.1, unit: 'A' }),
@@ -618,8 +620,8 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_PARAM.PACK_UV_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '总压过放保护解除延时', access: 'RW', valueType: 'u8', address: 0x41e, byte: 'H', scale: 0.1, unit: 's' }),
 
 	// --- Current (0x420~)
-	def(BMS_PARAM.CHARGE_OC_PROTECT_SMALL_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流保护小电流', access: 'RW', valueType: 'u16', address: 0x420, scale: 0.1, unit: 'A' }),
-	def(BMS_PARAM.CHARGE_OC_PROTECT_LARGE_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流保护大电流', access: 'RW', valueType: 'u16', address: 0x421, scale: 0.1, unit: 'A' }),
+	def(BMS_PARAM.CHARGE_OC_PROTECT_SMALL_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流小电流保护电流', access: 'RW', valueType: 'u16', address: 0x420, scale: 0.1, unit: 'A' }),
+	def(BMS_PARAM.CHARGE_OC_PROTECT_LARGE_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流大电流保护电流', access: 'RW', valueType: 'u16', address: 0x421, scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.CHARGE_OC_ALARM_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '充电过流告警延时', access: 'RW', valueType: 'u8', address: 0x422, byte: 'L', scale: 1, unit: 's' }),
 	def(BMS_PARAM.CHARGE_OC_PROTECT_LARGE_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '充电过流保护大电流延时', access: 'RW', valueType: 'u8', address: 0x422, byte: 'H', scale: 1, unit: 's' }),
 	def(BMS_PARAM.CHARGE_OC_PROTECT_SMALL_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '充电过流保护小电流延时', access: 'RW', valueType: 'u8', address: 0x423, byte: 'L', scale: 1, unit: 's' }),
@@ -726,6 +728,7 @@ export const PARAM_DEFS = Object.freeze([
 
 	// --- System
 	def(BMS_PARAM.SERIES_COUNT_CONFIG, PARAM_CATEGORIES.SYSTEM, { label: '高低串数配置', access: 'RW', valueType: 'u16', address: 0x0001 }),
+	def(BMS_PARAM.BATTERY_TYPE, PARAM_CATEGORIES.SYSTEM, { label: '电池类型', access: 'RW', valueType: 'u8', address: 0x0004, byte: 'H' }),
 	def(BMS_PARAM.DESIGN_CAPACITY_AH, PARAM_CATEGORIES.SYSTEM, { label: '设计容量', access: 'RW', valueType: 'u32', address: 0x0030, scale: 0.001, unit: 'Ah' }), // 48~49
 	def(BMS_PARAM.FULL_CAPACITY_AH, PARAM_CATEGORIES.SYSTEM, { label: '满充容量', access: 'RW', valueType: 'u32', address: 0x0032, scale: 0.001, unit: 'Ah' }), // 50~51
 	def(BMS_PARAM.REMAIN_CAPACITY_AH, PARAM_CATEGORIES.SYSTEM, { label: '剩余容量', access: 'RW', valueType: 'u32', address: 0x0034, scale: 0.001, unit: 'Ah' }), // 52~53

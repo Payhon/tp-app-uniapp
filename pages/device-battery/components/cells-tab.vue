@@ -10,7 +10,7 @@
 				v-for="(v, idx) in cellVoltages"
 				:key="idx"
 				class="cell"
-				:class="{ 'cell--hi': idx + 1 === highestIdx }"
+				:class="{ 'cell--hi': idx + 1 === highestIdx, 'cell--low': idx + 1 === lowestIdx }"
 			>
 				<text class="cell__name">{{ cellNoText(idx + 1) }}</text>
 				<text class="cell__v">{{ v }}</text>
@@ -51,6 +51,7 @@ const cellNoText = (n: number) => {
 }
 
 const highestIdx = computed(() => Number(props.status?.electrical?.cellVoltageIndex?.highest || 0))
+const lowestIdx = computed(() => Number(props.status?.electrical?.cellVoltageIndex?.lowest || 0))
 
 const cellVoltages = computed(() => {
 	const list = props.status?.cell?.voltagesMv || []
@@ -117,5 +118,9 @@ const cellVoltages = computed(() => {
 
 .cell--hi .cell__v {
 	color: #ff4d4f;
+}
+
+.cell--low .cell__v {
+	color: #0b3bff;
 }
 </style>

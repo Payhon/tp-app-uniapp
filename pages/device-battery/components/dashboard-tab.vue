@@ -54,6 +54,13 @@
 				</view>
 				<text class="card__value">{{ chargeTimeText }}</text>
 			</view>
+			<view class="card">
+				<view class="card__head">
+					<image class="card__icon" src="/static/image/device/icon-currency@2x.png" mode="aspectFit" />
+					<text class="card__label">{{ $t('deviceDetail.dashboard.current') }}</text>
+				</view>
+				<text class="card__value">{{ currentText }}</text>
+			</view>
 		</view>
 
 		<view class="switch-grid">
@@ -96,19 +103,30 @@
 
 		<view class="temp-card">
 			<view class="temp-row">
-				<text class="temp-row__name">MOS</text>
+				<text class="temp-row__name">{{ $t('deviceDetail.dashboard.mosTemp') }}</text>
 				<text class="temp-row__value">{{ mosText }}</text>
 			</view>
 			<view class="divider"></view>
 			<view class="temp-row">
-				<text class="temp-row__name">T1</text>
+				<text class="temp-row__name">{{ $t('deviceDetail.dashboard.ambientTemp') }}</text>
 				<text class="temp-row__value">{{ t1Text }}</text>
 			</view>
 			<view class="divider"></view>
 			<view class="temp-row">
-				<text class="temp-row__name">T2</text>
+				<text class="temp-row__name">{{ $t('deviceDetail.dashboard.cellTemp') }}</text>
 				<text class="temp-row__value">{{ t2Text }}</text>
 			</view>
+		</view>
+
+		<view class="protect-card">
+			<view class="protect-card__head">
+				<text class="protect-card__title">{{ $t('deviceDetail.dashboard.protectDetail') }}</text>
+				<text class="protect-card__desc">{{ protectSummaryText }}</text>
+			</view>
+			<view v-if="protectStatusItems.length" class="protect-tags">
+				<text v-for="item in protectStatusItems" :key="item" class="protect-tag">{{ item }}</text>
+			</view>
+			<text v-else class="protect-empty">{{ $t('common.none') }}</text>
 		</view>
 
 		<u-popup :show="flagPopup.show" mode="center" @close="closeFlagPopup">
@@ -293,16 +311,38 @@ const cycleCountText = computed(() => {
 	if (isInvalidU16(v)) return '-'
 	return formatWithParams('deviceDetail.unit.times', { n: Number(v || 0) })
 })
+
 const chargeTimeText = computed(() => {
 	const v = props.status?.timing?.chargeRemainingMin
 	if (isInvalidU16(v)) return '-'
 	return formatWithParams('deviceDetail.unit.perMinute', { n: Number(v || 0) })
 })
 
+const formatSignedCurrent = (value: unknown) => {
+	const n = typeof value === 'number' ? value : Number(value)
+	if (!Number.isFinite(n)) return '-'
+	const normalized = Math.abs(n) < 0.005 ? 0 : n
+	const sign = normalized > 0 ? '+' : ''
+	const text = normalized.toFixed(2).replace(/\.?0+$/, '')
+	return `${sign}${text}A`
+}
+
+const currentText = computed(() => formatSignedCurrent(props.status?.electrical?.currentA))
+
 const chargeOn = computed(() => Boolean((indicator.value as any).chargeFetOn))
 const dischargeOn = computed(() => Boolean((indicator.value as any).dischargeFetOn))
 const balancingOn = computed(() => Boolean((props.status?.cell?.balancing || []).some((x) => x)))
 const protectOn = computed(() => Boolean(Object.values(protect.value as Record<string, boolean>).some((x) => x)))
+
+const protectStatusItems = computed(() => {
+	const obj = protect.value as Record<string, boolean>
+	return Object.keys(obj).filter((k) => obj[k]).map(labelForStatus)
+})
+
+const protectSummaryText = computed(() => {
+	if (!protectStatusItems.value.length) return t('common.none') as string
+	return formatWithParams('deviceDetail.dashboard.protectCount', { n: protectStatusItems.value.length })
+})
 
 const toV = (mv: unknown) => {
 	const n = typeof mv === 'number' ? mv : Number(mv)
@@ -322,7 +362,7 @@ const cToFText = (c: number | null | undefined) => {
 }
 
 const mosText = computed(() => cToFText(props.status?.temperature?.chargeMosC))
-const t1Text = computed(() => cToFText(props.status?.temperature?.dischargeMosC))
+const t1Text = computed(() => cToFText(props.status?.temperature?.ambientC))
 const t2Text = computed(() => {
 	const cellTemps = props.status?.temperature?.cellTempsC || []
 	const v =
@@ -448,12 +488,12 @@ const t2Text = computed(() => {
 
 .cards {
 	margin-top: 22rpx;
-	display: flex;
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 18rpx;
 }
 
 .card {
-	flex: 1;
 	background: #ffffff;
 	border-radius: 22rpx;
 	padding: 18rpx 20rpx;
@@ -563,6 +603,54 @@ const t2Text = computed(() => {
 .divider {
 	height: 1px;
 	background: #f2f3f5;
+}
+
+.protect-card {
+	margin-top: 18rpx;
+	background: #ffffff;
+	border-radius: 22rpx;
+	padding: 22rpx 24rpx;
+	box-shadow: 0 8rpx 30rpx rgba(0, 0, 0, 0.06);
+}
+
+.protect-card__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16rpx;
+}
+
+.protect-card__title {
+	font-size: 26rpx;
+	font-weight: 600;
+	color: #333333;
+}
+
+.protect-card__desc {
+	font-size: 22rpx;
+	color: #9aa0a6;
+}
+
+.protect-tags {
+	margin-top: 18rpx;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12rpx;
+}
+
+.protect-tag {
+	padding: 8rpx 18rpx;
+	border-radius: 999rpx;
+	font-size: 22rpx;
+	color: #8b5e00;
+	background: #fff7e6;
+}
+
+.protect-empty {
+	display: block;
+	margin-top: 18rpx;
+	font-size: 24rpx;
+	color: #9aa0a6;
 }
 
 .flag-popup {

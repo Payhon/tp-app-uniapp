@@ -80,6 +80,7 @@ const buildCoreReport = (s: BmsStatus): Record<string, unknown> => {
 	return {
 		soc: s.energy?.socPct,
 		soh: s.energy?.sohPct,
+		packCellSumVoltageV: s.electrical?.packCellSumVoltageV,
 		vPackV: s.electrical?.vPackV,
 		currentA: s.electrical?.currentA,
 		avgCellVoltageMv: s.electrical?.avgCellVoltageMv,

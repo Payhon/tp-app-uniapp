@@ -1,6 +1,7 @@
 export * from './types';
 export * from './crc16modbus';
 export * from './frame';
+export * from './function-config';
 export * from './ble-uuids';
 export * from './param-registry';
 export * from './register-view';
