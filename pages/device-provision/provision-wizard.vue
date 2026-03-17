@@ -205,7 +205,8 @@ async function runProvision() {
 
 		// 先查云端是否存在该设备（设备未注册则不继续写入/绑定）
 		const infoRsp = await getDeviceProvisionInfo(uuid)
-		if ((infoRsp as any)?.code !== 200) {
+		const infoCode = Number((infoRsp as any)?.code || 0)
+		if (infoCode !== 200 && infoCode !== 100404) {
 			throw new Error(String((infoRsp as any)?.message || t('pages.deviceProvision.unknownError')))
 		}
 		const provisionInfo = ((infoRsp as any)?.data || {}) as {
@@ -213,8 +214,10 @@ async function runProvision() {
 			can_auto_register?: boolean
 			bms_comm_type?: number
 		}
-		const exists = provisionInfo.exists !== false
-		const canAutoRegister = provisionInfo.can_auto_register === true
+		// 兼容旧后端：未升级 FEAT-0016 时，info 接口在查无设备时直接返回 100404。
+		// 此时前端不要在这里终止，让 bind 接口去决定是否允许自动补建。
+		const exists = infoCode === 100404 ? false : provisionInfo.exists !== false
+		const canAutoRegister = infoCode === 100404 ? true : provisionInfo.can_auto_register === true
 		if (!exists && !canAutoRegister) {
 			throw new Error(t('pages.deviceProvision.deviceNotFound') as string)
 		}
