@@ -205,16 +205,26 @@ async function runProvision() {
 
 		// 先查云端是否存在该设备（设备未注册则不继续写入/绑定）
 		const infoRsp = await getDeviceProvisionInfo(uuid)
-		if ((infoRsp as any)?.code === 100404) {
-			throw new Error(t('pages.deviceProvision.deviceNotFound') as string)
-		}
 		if ((infoRsp as any)?.code !== 200) {
 			throw new Error(String((infoRsp as any)?.message || t('pages.deviceProvision.unknownError')))
+		}
+		const provisionInfo = ((infoRsp as any)?.data || {}) as {
+			exists?: boolean
+			can_auto_register?: boolean
+			bms_comm_type?: number
+		}
+		const exists = provisionInfo.exists !== false
+		const canAutoRegister = provisionInfo.can_auto_register === true
+		if (!exists && !canAutoRegister) {
+			throw new Error(t('pages.deviceProvision.deviceNotFound') as string)
+		}
+		if (!exists && canAutoRegister) {
+			uni.showToast({ title: t('pages.deviceProvision.autoRegisteringHint'), icon: 'none', duration: 2200 })
 		}
 
 		// 根据 bms_comm_type 判断是否需要写 DTU；只有 2/3 代表带 4G 通讯。
 		// TODO: 若后续规则变化（例如 null 也代表 4G），在这里调整默认值。
-		const commType = Number((infoRsp as any)?.data?.bms_comm_type || 0)
+		const commType = Number(provisionInfo.bms_comm_type || 0)
 		const needWriteDtu = commType === 2 || commType === 3
 		setStep('readUuid', 'done')
 

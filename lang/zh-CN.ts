@@ -219,6 +219,7 @@ export default {
       goHome: '返回首页',
       invalidCode: '无效二维码',
       deviceNotFound: '该设备未在云平台注册，请联系经销商。',
+      autoRegisteringHint: '检测到遗留设备，系统将自动注册后继续绑定',
       deviceAlreadyAdded: '该设备已添加到我的设备',
       deviceIdMissing: '缺少蓝牙设备标识',
       bindSuccess: '添加成功',

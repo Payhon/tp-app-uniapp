@@ -11,6 +11,9 @@ const apiRequest = (api as unknown as { apiRequest: ApiRequest }).apiRequest
 
 export type DeviceProvisionConfig = { dtu_domain_port: string }
 export type DeviceProvisionInfo = {
+	exists?: boolean
+	can_auto_register?: boolean
+	auto_register_reason?: string
 	device_id: string
 	device_number: string
 	device_name?: string
