@@ -272,14 +272,14 @@ const TEMP_DISPLAY_LABELS: Record<string, string> = {
 	CELL_UNDER_TEMP_RELEASE_C: '充电低温保护解除温度',
 	CHARGE_OVER_TEMP_PROTECT_C: '充电高温保护温度',
 	CHARGE_OVER_TEMP_RELEASE_C: '充电高温保护解除温度',
-	CHARGE_OVER_TEMP_PROTECT_DELAY_S: '充电高温保护延时',
-	CHARGE_OVER_TEMP_RELEASE_DELAY_S: '充电高温保护解除延时',
+	CHARGE_OVER_TEMP_PROTECT_DELAY_S: '充电高低温保护延时',
+	CHARGE_OVER_TEMP_RELEASE_DELAY_S: '充电高低温保护解除延时',
 	DISCHARGE_UNDER_TEMP_PROTECT_C: '放电低温保护温度',
 	DISCHARGE_UNDER_TEMP_RELEASE_C: '放电低温保护解除温度',
 	DISCHARGE_OVER_TEMP_PROTECT_C: '放电高温保护温度',
 	DISCHARGE_OVER_TEMP_RELEASE_C: '放电高温保护解除温度',
-	DISCHARGE_OVER_TEMP_PROTECT_DELAY_S: '放电高温保护延时',
-	DISCHARGE_OVER_TEMP_RELEASE_DELAY_S: '放电高温保护解除延时',
+	DISCHARGE_OVER_TEMP_PROTECT_DELAY_S: '放电高低温保护延时',
+	DISCHARGE_OVER_TEMP_RELEASE_DELAY_S: '放电高低温保护解除延时',
 }
 
 const BATTERY_TYPE_OPTIONS = [
@@ -474,6 +474,7 @@ const SINGLE_KEYS = [
 	'CELL_OC_PROTECT_V',
 	'CELL_OC_ALARM_DELAY_S',
 	'CELL_OC_PROTECT_DELAY_S',
+	'FEEDBACK_OC_PROTECT_DELAY_S',
 	'CELL_OV_PROTECT_RELEASE_V',
 	'CELL_OC_ALARM_RELEASE_DELTA_V',
 	'CELL_OV_ALARM_RELEASE_DELAY_S',
@@ -482,6 +483,7 @@ const SINGLE_KEYS = [
 	'NORMAL_CELL_UV_PROTECT_V',
 	'CELL_UV_ALARM_DELAY_S',
 	'CELL_UV_PROTECT_DELAY_S',
+	'CELL_UV_ALARM_RELEASE_V',
 	'CELL_UV_PROTECT_RELEASE_V',
 	'CELL_UV_ALARM_RELEASE_DELAY_S',
 	'CELL_UV_PROTECT_RELEASE_DELAY_S',
@@ -508,6 +510,7 @@ const VOLTAGE_KEYS = [
 	'PACK_UV_PROTECT_RELEASE_DELAY_S',
 ]
 const CURRENT_KEYS = [
+	'CHARGE_OC_ALARM_A',
 	'CHARGE_OC_PROTECT_SMALL_A',
 	'CHARGE_OC_PROTECT_LARGE_A',
 	'CHARGE_OC_ALARM_DELAY_S',
@@ -537,6 +540,18 @@ const TEMP_KEYS = [
 	{ displayKey: 'DISCHARGE_OVER_TEMP_RELEASE_C', actualKey: 'DISCHARGE_OT_PROTECT_RELEASE_C' },
 	{ displayKey: 'DISCHARGE_OVER_TEMP_PROTECT_DELAY_S', actualKey: 'DISCHARGE_OT_PROTECT_DELAY_S' },
 	{ displayKey: 'DISCHARGE_OVER_TEMP_RELEASE_DELAY_S', actualKey: 'DISCHARGE_OT_PROTECT_RELEASE_DELAY_S' },
+	'CELL_OT_ALARM_C',
+	'CELL_OT_ALARM_RELEASE_C',
+	'CELL_OT_ALARM_DELAY_S',
+	'CELL_OT_ALARM_RELEASE_DELAY_S',
+	'HEAT_CELL_ON_C',
+	'HEAT_CELL_OFF_C',
+	'HEAT_FILM_PROTECT_C',
+	'HEAT_FILM_PROTECT_RELEASE_C',
+	'HEAT_ON_DELAY_S',
+	'HEAT_OFF_DELAY_S',
+	'POLE_TEMP_PROTECT_C',
+	'POLE_TEMP_PROTECT_RELEASE_C',
 ]
 
 const singleItems = computed(() => mkItems(filterParamEntries(SINGLE_KEYS)))
@@ -579,18 +594,29 @@ const hasFunctionControlItems = computed(() => functionControlItems.value.length
 const hasSystemSection = computed(() => hasSystemItems.value || hasFunctionControlItems.value)
 
 const FACTORY_ACTIONS = [
-	// 以下 raw 值按协议示例帧整理（0x57A~0x57B，共 32bit），确保与设备端一致
 	{ key: 'enterTestMode', raw: 0x00000400, confirm: true },
 	{ key: 'exitTestMode', raw: 0x00000800, confirm: true },
 	{ key: 'balanceAllOn', raw: 0x00001000, confirm: true },
 	{ key: 'balanceAllOff', raw: 0x00002000, confirm: true },
+	{ key: 'function1On', raw: 0x00400000, confirm: true },
+	{ key: 'function1Off', raw: 0x00800000, confirm: true },
+	{ key: 'function2On', raw: 0x01000000, confirm: true },
+	{ key: 'function2Off', raw: 0x02000000, confirm: true },
+	{ key: 'function3On', raw: 0x04000000, confirm: true },
+	{ key: 'function3Off', raw: 0x08000000, confirm: true },
+	{ key: 'function4On', raw: 0x10000000, confirm: true },
+	{ key: 'function4Off', raw: 0x20000000, confirm: true },
+	{ key: 'resetProtectionBoard', raw: 0x00200000, confirm: true },
+	{ key: 'mcuProtectionOn', raw: 0x00004000, confirm: true },
+	{ key: 'mcuProtectionOff', raw: 0x00008000, confirm: true },
+	{ key: 'manualChargeDischargeOn', raw: 0x00000100, confirm: true },
+	{ key: 'manualChargeDischargeOff', raw: 0x00000200, confirm: true },
+	{ key: 'manualHeatingOn', raw: 0x00000040, confirm: true },
+	{ key: 'manualHeatingOff', raw: 0x00000080, confirm: true },
+	{ key: 'gpsPowerOn', raw: 0x00000010, confirm: true },
+	{ key: 'gpsPowerOff', raw: 0x00000020, confirm: true },
 	{ key: 'sleep', raw: 0x00000004, confirm: true },
 	{ key: 'powerOff', raw: 0x00000001, confirm: true },
-	// 下面按文档 bit 位定义补充（如设备端不支持，可按需移除）
-	{ key: 'restoreDefaults', raw: 0x00010000, confirm: true },
-	{ key: 'clearHistory', raw: 0x00020000, confirm: true },
-	{ key: 'clearCycles', raw: 0x00040000, confirm: true },
-	{ key: 'clearProtection', raw: 0x00080000, confirm: true },
 ]
 
 const factoryItems = computed(() =>

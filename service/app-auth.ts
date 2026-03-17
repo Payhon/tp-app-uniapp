@@ -33,10 +33,28 @@ export const sendVerifyCode = (identifier: string, scene: string | number) => {
 	)
 }
 
-export const loginByPassword = (identifier: string, password: string) => {
+export const fetchLoginCaptcha = () => {
+	return apiRequest<{ captcha_id?: string; captcha_image?: string; expires_in?: number }>(
+		'/api/v1/login/captcha',
+		{},
+		'GET'
+	)
+}
+
+export const loginByPassword = (
+	identifier: string,
+	password: string,
+	captchaId: string,
+	captchaCode: string
+) => {
 	return apiRequest<unknown>(
 		'/api/v1/login',
-		{ email: normalizeIdentifier(identifier), password: String(password || '') },
+		{
+			email: normalizeIdentifier(identifier),
+			password: String(password || ''),
+			captcha_id: String(captchaId || '').trim(),
+			captcha_code: String(captchaCode || '').trim()
+		},
 		'POST'
 	)
 }

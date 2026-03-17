@@ -16,19 +16,31 @@
 						</view>
 					</view>
 
-					<view class="setting-btn" hover-class="setting-btn--hover" @tap="goSetting">
-						<image class="setting-icon" src="/static/image/my/icon-setting@2x.png" mode="aspectFit" />
+					<view class="header-actions">
+						<view
+							v-if="isOrgUser"
+							class="header-icon-btn"
+							hover-class="header-icon-btn--hover"
+							@tap="openHomeViewModeSheet"
+						>
+							<u-icon name="grid" size="18" color="#FFFFFF"></u-icon>
+						</view>
+						<view class="header-icon-btn" hover-class="header-icon-btn--hover" @tap="goSetting">
+							<image class="setting-icon" src="/static/image/my/icon-setting@2x.png" mode="aspectFit" />
+						</view>
 					</view>
 				</view>
 
 				<view class="stats">
 					<view class="stat">
 						<text class="stat-value">{{ deviceCountText }}</text>
-						<text class="stat-label">{{ $t('pages.my.boundDeviceCountLabel') }}</text>
+						<text class="stat-label">{{ deviceCountLabel }}</text>
 					</view>
 					<view class="stat stat--right">
-						<text class="stat-value">{{ registeredAtText }}</text>
-						<text class="stat-label">{{ $t('pages.my.registeredAtLabel') }}</text>
+						<text class="stat-value">{{ isOrgUser ? currentHomeViewModeLabel : registeredAtText }}</text>
+						<text class="stat-label">{{
+							isOrgUser ? $t('pages.my.currentHomeViewMode') : $t('pages.my.registeredAtLabel')
+						}}</text>
 					</view>
 				</view>
 			</view>
@@ -133,6 +145,12 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
+import {
+	getStoredHomeDeviceViewMode,
+	isOrgUserLike,
+	setStoredHomeDeviceViewMode,
+	type HomeDeviceViewMode
+} from '@/common/device-view-mode'
 import { useUserStore } from '@/store/user'
 import { useInjected } from '@/common/composables/useInjected'
 import { appBoundDeviceList } from '@/service/device'
@@ -168,15 +186,19 @@ const refreshLoginState = () => {
 }
 
 const userInfo = computed(() => userStore.userInfo)
-const isOrgUser = computed(() => {
-	const u = userInfo.value as any
-	const kind = String(u?.user_kind || '').toUpperCase()
-	if (kind === 'ORG_USER') return true
-	const authority = String(u?.authority || '').toUpperCase()
-	if (authority === 'TENANT_ADMIN' || authority === 'SYS_ADMIN') return true
-	const orgID = String(u?.org_id || '').trim()
-	const orgType = String(u?.org_type || '').trim()
-	return Boolean(orgID || orgType)
+const isOrgUser = computed(() => isOrgUserLike(userInfo.value))
+const currentHomeViewMode = ref<HomeDeviceViewMode>('self_bound')
+
+const currentHomeViewModeLabel = computed(() => {
+	if (currentHomeViewMode.value === 'org_added') return t('pages.my.homeViewModeOrgAdded') as string
+	if (currentHomeViewMode.value === 'end_user_bound') return t('pages.my.homeViewModeEndUserBound') as string
+	return t('pages.my.homeViewModeSelfBound') as string
+})
+
+const deviceCountLabel = computed(() => {
+	if (!isOrgUser.value) return t('pages.my.boundDeviceCountLabel') as string
+	if (currentHomeViewMode.value === 'end_user_bound') return t('pages.my.endUserBoundDeviceCountLabel') as string
+	return t('pages.my.addedDeviceCountLabel') as string
 })
 
 const avatarUrl = computed(() => {
@@ -292,7 +314,11 @@ const loadDeviceCount = async () => {
 	}
 	loadingDeviceCount.value = true
 	try {
-		const rsp = await appBoundDeviceList({ page: 1, page_size: 1 })
+		const rsp = await appBoundDeviceList({
+			page: 1,
+			page_size: 1,
+			view_mode: isOrgUser.value ? currentHomeViewMode.value : 'self_bound'
+		})
 		if (!rsp || (rsp as any).code !== 200) {
 			deviceCount.value = 0
 			return
@@ -320,6 +346,7 @@ const loadUserInfo = async () => {
 		const res = await apiRequest<Record<string, unknown>>('/api/v1/user/detail', {}, 'get')
 		if (res && (res as any).code === 200 && (res as any).data) {
 			userStore.setUserInfo((res as any).data as any)
+			currentHomeViewMode.value = getStoredHomeDeviceViewMode((res as any).data as any)
 		}
 	} catch {}
 }
@@ -348,14 +375,18 @@ onLoad(() => {
 
 	const raw = uni.getStorageSync(STORAGE_BT_AUTO_CONNECT)
 	bluetoothAutoConnect.value = parseBooleanStorage(raw, true)
+	currentHomeViewMode.value = getStoredHomeDeviceViewMode(userStore.userInfo)
 })
 
 onShow(() => {
 	uni.setStorageSync('__last_tab_url__', '/pages/my/my')
 	refreshLoginState()
 	setMpTabSelected()
-	loadUserInfo()
-	loadDeviceCount()
+	currentHomeViewMode.value = getStoredHomeDeviceViewMode(userStore.userInfo)
+	void (async () => {
+		await loadUserInfo()
+		loadDeviceCount()
+	})()
 })
 
 const handleUserClick = () => {
@@ -368,6 +399,20 @@ const handleUserClick = () => {
 
 const goSetting = () => {
 	uni.navigateTo({ url: '/pages/my/setting/index' })
+}
+
+const openHomeViewModeSheet = () => {
+	if (!isOrgUser.value) return
+	uni.showActionSheet({
+		itemList: [t('pages.my.homeViewModeOrgAdded') as string, t('pages.my.homeViewModeEndUserBound') as string],
+		success: (res) => {
+			const nextMode: HomeDeviceViewMode = res.tapIndex === 1 ? 'end_user_bound' : 'org_added'
+			currentHomeViewMode.value = nextMode
+			setStoredHomeDeviceViewMode(nextMode)
+			loadDeviceCount()
+			uni.showToast({ title: t('pages.my.homeViewModeSwitched') as string, icon: 'none' })
+		}
+	})
 }
 
 const goBluetooth = () => {
@@ -503,6 +548,12 @@ export default {
 	justify-content: space-between;
 }
 
+.header-actions {
+	display: flex;
+	align-items: center;
+	gap: 8rpx;
+}
+
 .user {
 	display: flex;
 	align-items: center;
@@ -540,15 +591,17 @@ export default {
 	color: rgba(255, 255, 255, 0.85);
 }
 
-.setting-btn {
+.header-icon-btn {
 	width: 64rpx;
 	height: 64rpx;
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	border-radius: 32rpx;
+	background: rgba(255, 255, 255, 0.08);
 }
 
-.setting-btn--hover {
+.header-icon-btn--hover {
 	opacity: 0.9;
 }
 

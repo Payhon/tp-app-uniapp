@@ -1,8 +1,9 @@
 <template>
-	<view :style="{ height: pageHeight, background: '#f5f5f5' }">
+	<view class="page-shell" :style="{ height: pageHeight, background: '#f5f5f5' }">
 		<customNav :pageTitle="$t('pages.deviceProvision.bleSearchTitle')" iconColor="#fff" background="#246FDD" fontColor="#fff" />
 
 		<view class="wrap" :style="{ marginTop: marginTopHeight }">
+			<view class="top-panel">
 				<view class="radar-card">
 					<view class="radar" :class="{ running: isScanning }">
 						<view class="radar-pulse p1"></view>
@@ -17,9 +18,9 @@
 					</view>
 				</view>
 
-			<view class="hint" v-if="targetMac">
-				<text class="hint-text">{{ $t('pages.deviceProvision.matchingMac', { mac: targetMacDisplay }) }}</text>
-			</view>
+				<view class="hint" v-if="targetMac">
+					<text class="hint-text">{{ $t('pages.deviceProvision.matchingMac', { mac: targetMacDisplay }) }}</text>
+				</view>
 
 				<view class="actions">
 					<u-button
@@ -36,11 +37,13 @@
 					</u-button>
 				</view>
 
-			<view class="status" v-if="errorMsg">
-				<text class="status-error">{{ errorMsg }}</text>
+				<view class="status" v-if="errorMsg">
+					<text class="status-error">{{ errorMsg }}</text>
+				</view>
 			</view>
 
-			<scroll-view scroll-y class="list">
+			<view class="list-panel">
+				<scroll-view scroll-y class="list" :show-scrollbar="false">
 					<view v-for="d in visibleDevices" :key="d.deviceId" class="item" @click="selectDevice(d)">
 						<view class="item-main">
 							<text class="item-name">{{ d.displayName }}</text>
@@ -62,7 +65,8 @@
 				<view v-if="!visibleDevices.length" class="empty">
 					<text class="empty-text">{{ $t('pages.deviceProvision.emptyDeviceList') }}</text>
 				</view>
-			</scroll-view>
+				</scroll-view>
+			</view>
 		</view>
 	</view>
 </template>
@@ -500,8 +504,39 @@ onUnload(() => {
 </script>
 
 <style scoped>
+.page-shell {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
 .wrap {
 	padding: 24rpx;
+	box-sizing: border-box;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.top-panel {
+	flex-shrink: 0;
+	padding-bottom: 12rpx;
+	margin-bottom: 12rpx;
+	position: relative;
+	z-index: 2;
+}
+
+.top-panel::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 24rpx;
+	pointer-events: none;
+	background: linear-gradient(180deg, rgba(245, 245, 245, 0) 0%, rgba(205, 214, 226, 0.32) 100%);
 }
 
 .radar-card {
@@ -633,8 +668,17 @@ onUnload(() => {
 	font-size: 26rpx;
 }
 
+.list-panel {
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+	background: #f5f5f5;
+}
+
 .list {
-	height: 70vh;
+	height: 100%;
+	box-sizing: border-box;
+	padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
 }
 
 .item {

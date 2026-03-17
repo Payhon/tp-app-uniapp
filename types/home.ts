@@ -7,4 +7,5 @@ export type HomeDeviceCardModel = {
 	batteryPercent: number
 	bleMac?: string | null
 	bmsCommType?: number | null
+	relationType?: 'BINDING' | 'ORG_ADDED' | 'END_USER_BOUND' | string
 }

@@ -33,6 +33,19 @@
 						v-model="password" />
 				</view>
 
+				<view class="captcha-row">
+					<view class="ipt captcha-input">
+						<uni-icons type="image-filled" size="20" color="#9ca3af" />
+						<input class="ipt-input" type="text"
+							:placeholder="$t('auth.login.placeholderCaptcha')" placeholder-class="ipt-placeholder"
+							v-model="captchaCode" />
+					</view>
+					<view class="captcha-box" @tap="refreshCaptcha">
+						<image v-if="captchaImage" class="captcha-image" :src="captchaImage" mode="aspectFit" />
+						<text v-else class="captcha-text">{{ $t('auth.login.captchaRefresh') }}</text>
+					</view>
+				</view>
+
 				<view class="policy-row">
 					<checkbox-group @change="onAgreeChange">
 						<label class="policy-label">
@@ -70,10 +83,11 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
-import { loginByPassword, wxmpLogin } from '@/service/app-auth'
+import { fetchLoginCaptcha, loginByPassword, wxmpLogin } from '@/service/app-auth'
 import api from '@/API/'
 import type { ApiResponse } from '@/types/api'
 import { useUserStore } from '@/store/user'
@@ -96,10 +110,16 @@ const userStore = useUserStore()
 const activeTab = ref<LoginTab>('phone')
 const identifier = ref<string>('')
 const password = ref<string>('')
+const captchaId = ref<string>('')
+const captchaCode = ref<string>('')
+const captchaImage = ref<string>('')
 const agree = ref<boolean>(true)
 const loading = ref<boolean>(false)
+const captchaLoading = ref<boolean>(false)
 
-const canSubmit = computed<boolean>(() => !!identifier.value && !!password.value && !!agree.value && !loading.value)
+const canSubmit = computed<boolean>(() => {
+	return !!identifier.value && !!password.value && !!captchaCode.value && !!agree.value && !loading.value
+})
 
 const onAgreeChange = (e: { detail: { value: unknown } }) => {
 	agree.value = Array.isArray(e.detail.value) && (e.detail.value as string[]).includes('1')
@@ -126,6 +146,35 @@ const validateIdentifier = () => {
 const validatePassword = () => {
 	if (!String(password.value || '').trim()) return { ok: false as const, msg: t('auth.login.placeholderPassword') as string }
 	return { ok: true as const }
+}
+
+const validateCaptcha = () => {
+	if (!String(captchaId.value || '').trim()) return { ok: false as const, msg: t('auth.login.captchaLoadFailed') as string }
+	if (!String(captchaCode.value || '').trim()) return { ok: false as const, msg: t('auth.login.placeholderCaptcha') as string }
+	return { ok: true as const }
+}
+
+const refreshCaptcha = async () => {
+	if (captchaLoading.value) return
+	captchaLoading.value = true
+	try {
+		const resp = (await fetchLoginCaptcha()) as ApiResponse<{ captcha_id?: string; captcha_image?: string }>
+		if (resp && resp.code === 200 && resp.data) {
+			captchaId.value = String(resp.data.captcha_id || '').trim()
+			captchaImage.value = String(resp.data.captcha_image || '').trim()
+			captchaCode.value = ''
+			return
+		}
+		captchaId.value = ''
+		captchaImage.value = ''
+		uni.showToast({ title: (resp && (resp.message as string)) || (t('auth.login.captchaLoadFailed') as string), icon: 'none' })
+	} catch (e) {
+		captchaId.value = ''
+		captchaImage.value = ''
+		uni.showToast({ title: t('auth.login.captchaLoadFailed') as string, icon: 'none' })
+	} finally {
+		captchaLoading.value = false
+	}
 }
 
 const openContent = (key: string) => {
@@ -201,22 +250,38 @@ const doLogin = async () => {
 		uni.showToast({ title: pwdRes.msg, icon: 'none' })
 		return
 	}
+	const captchaRes = validateCaptcha()
+	if (!captchaRes.ok) {
+		uni.showToast({ title: captchaRes.msg, icon: 'none' })
+		return
+	}
 
 	loading.value = true
 	try {
-		const resp = (await loginByPassword(identifier.value, password.value)) as ApiResponse<{ token?: string }>
+		const resp = (await loginByPassword(
+			identifier.value,
+			password.value,
+			captchaId.value,
+			captchaCode.value
+		)) as ApiResponse<{ token?: string }>
 		if (resp && resp.code === 200 && resp.data && resp.data.token) {
 			await afterLoginSuccess(resp.data.token)
 			uni.showToast({ title: t('auth.login.success') as string, icon: 'none' })
 		} else {
 			uni.showToast({ title: (resp && (resp.message as string)) || (t('auth.login.failed') as string), icon: 'none' })
+			await refreshCaptcha()
 		}
 	} catch (e) {
 		uni.showToast({ title: t('auth.toast.networkError') as string, icon: 'none' })
+		await refreshCaptcha()
 	} finally {
 		loading.value = false
 	}
 }
+
+onShow(() => {
+	void refreshCaptcha()
+})
 
 // #ifdef MP-WEIXIN
 const doWxmpLogin = async () => {
@@ -356,6 +421,39 @@ page {
 	display: flex;
 	align-items: center;
 	gap: 18rpx;
+}
+
+.captcha-row {
+	display: flex;
+	align-items: center;
+	gap: 16rpx;
+}
+
+.captcha-input {
+	flex: 1;
+}
+
+.captcha-box {
+	width: 220rpx;
+	height: 86rpx;
+	border-radius: 18rpx;
+	background: #f4f6fb;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	padding: 8rpx 12rpx;
+	box-sizing: border-box;
+}
+
+.captcha-image {
+	width: 100%;
+	height: 100%;
+}
+
+.captcha-text {
+	font-size: 24rpx;
+	color: #64748b;
 }
 
 .ipt-input {

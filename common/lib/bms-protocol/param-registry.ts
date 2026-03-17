@@ -11,12 +11,14 @@ export const BMS_PARAM = Object.freeze({
 	CELL_OC_ALARM_DELAY_S: 'CELL_OC_ALARM_DELAY_S',
 	// 0x402(H) 单体过充保护延时（单位 S，分辨率 0.1）
 	CELL_OC_PROTECT_DELAY_S: 'CELL_OC_PROTECT_DELAY_S',
+	// 0x403(L) 回馈过充保护延时（单位 S，分辨率 0.1）
+	FEEDBACK_OC_PROTECT_DELAY_S: 'FEEDBACK_OC_PROTECT_DELAY_S',
 	// 0x403(H) 常温低温阀值温度（单位 ℃，偏移 -40）
 	NORMAL_LOW_TEMP_THRESHOLD_C: 'NORMAL_LOW_TEMP_THRESHOLD_C',
-	// 0x404 单体过压保护解除电压（单位 V，分辨率 0.001）
-	CELL_OV_PROTECT_RELEASE_V: 'CELL_OV_PROTECT_RELEASE_V',
-	// 0x405 单体过充告警解除电压差（单位 V，分辨率 0.001）
+	// 0x404 单体过充告警解除电压差（单位 V，分辨率 0.001）
 	CELL_OC_ALARM_RELEASE_DELTA_V: 'CELL_OC_ALARM_RELEASE_DELTA_V',
+	// 0x405 单体过充保护解除电压（单位 V，分辨率 0.001）
+	CELL_OV_PROTECT_RELEASE_V: 'CELL_OV_PROTECT_RELEASE_V',
 	// 0x406 容量解除（单位 1%SOC）
 	CAPACITY_RELEASE_SOC_PCT: 'CAPACITY_RELEASE_SOC_PCT',
 	// 0x407(L) 过压放电解除电流（单位 A，分辨率 0.1，偏移 1）
@@ -37,9 +39,11 @@ export const BMS_PARAM = Object.freeze({
 	LOW_TEMP_CELL_UV_PROTECT_V: 'LOW_TEMP_CELL_UV_PROTECT_V',
 	// 0x40D(L) 单体过放告警延时（单位 S，分辨率 0.1，偏移 1）
 	CELL_UV_ALARM_DELAY_S: 'CELL_UV_ALARM_DELAY_S',
-	// 0x40E(H) 单体过放保护延时（单位 S，分辨率 0.1，偏移 1）
+	// 0x40D(H) 单体过放保护延时（单位 S，分辨率 0.1，偏移 1）
 	CELL_UV_PROTECT_DELAY_S: 'CELL_UV_PROTECT_DELAY_S',
-	// 0x40F 单体过放保护解除电压（doc 同地址亦有“单体过放告警解除电压”描述）
+	// 0x40E 单体过放告警解除电压（单位 V，分辨率 0.001）
+	CELL_UV_ALARM_RELEASE_V: 'CELL_UV_ALARM_RELEASE_V',
+	// 0x40F 单体过放保护解除电压（单位 V，分辨率 0.001）
 	CELL_UV_PROTECT_RELEASE_V: 'CELL_UV_PROTECT_RELEASE_V',
 	// 0x410(L) 单体过放告警解除延时（单位 S，分辨率 0.1，偏移 1）
 	CELL_UV_ALARM_RELEASE_DELAY_S: 'CELL_UV_ALARM_RELEASE_DELAY_S',
@@ -83,6 +87,8 @@ export const BMS_PARAM = Object.freeze({
 	PACK_UV_PROTECT_RELEASE_DELAY_S: 'PACK_UV_PROTECT_RELEASE_DELAY_S',
 
 	// 电流配置（doc/oriigin/device_comm_protocol_write.md 3.2，0x420~）
+	// 0x41F 充电过流告警电流（单位 A，分辨率 0.1，偏移 1）
+	CHARGE_OC_ALARM_A: 'CHARGE_OC_ALARM_A',
 	// 0x420 充电过流保护小电流（单位 A，分辨率 0.1，偏移 1）
 	CHARGE_OC_PROTECT_SMALL_A: 'CHARGE_OC_PROTECT_SMALL_A',
 	// 0x421 充电过流保护大电流（单位 A，分辨率 0.1，偏移 1）
@@ -97,7 +103,7 @@ export const BMS_PARAM = Object.freeze({
 	CHARGE_OC_ALARM_RELEASE_DELAY_S: 'CHARGE_OC_ALARM_RELEASE_DELAY_S',
 	// 0x424(H) 自动解除时间（单位 MIN）
 	AUTO_RELEASE_TIME_MIN: 'AUTO_RELEASE_TIME_MIN',
-	// 0x425 充电过流告警解电流（单位 A，分辨率 0.1）
+	// 0x425 充电过流告警解除电流（单位 A，分辨率 0.1）
 	CHARGE_OC_ALARM_RELEASE_A: 'CHARGE_OC_ALARM_RELEASE_A',
 	// 0x426(L) 放电解除电流（单位 A，分辨率 0.1）
 	DISCHARGE_RELEASE_A: 'DISCHARGE_RELEASE_A',
@@ -119,7 +125,7 @@ export const BMS_PARAM = Object.freeze({
 	DISCHARGE_OC_AUTO_RELEASE_TIME_MIN: 'DISCHARGE_OC_AUTO_RELEASE_TIME_MIN',
 	// 0x42C 放电过流告警解除电流（单位 A，分辨率 0.1）
 	DISCHARGE_OC_ALARM_RELEASE_A: 'DISCHARGE_OC_ALARM_RELEASE_A',
-	// 0x42D(L) 充电解除电流（单位 A，分辨率 0.1）
+	// 0x42D(L) 充电解除（单位 A，分辨率 0.1）
 	CHARGE_RELEASE_A: 'CHARGE_RELEASE_A',
 	// 0x42D(H) 锁定次数
 	CHARGE_LOCK_COUNT: 'CHARGE_LOCK_COUNT',
@@ -215,76 +221,84 @@ export const BMS_PARAM = Object.freeze({
 	DISCHARGE_OT_PROTECT_C: 'DISCHARGE_OT_PROTECT_C',
 	// 0x44B 放电高温警告解除温度（doc 未标注 H/L，本实现按 L 处理）
 	DISCHARGE_OT_ALARM_RELEASE_C: 'DISCHARGE_OT_ALARM_RELEASE_C',
-	// 0x44C 放电高温保护解除温度（doc 未标注 H/L，本实现按 L 处理）
+	// 0x44B(H) 放电高温保护解除温度
 	DISCHARGE_OT_PROTECT_RELEASE_C: 'DISCHARGE_OT_PROTECT_RELEASE_C',
-	// 0x44D 放电高温告警延时
+	// 0x44C(L) 放电高低温告警延时
 	DISCHARGE_OT_ALARM_DELAY_S: 'DISCHARGE_OT_ALARM_DELAY_S',
-	// 0x44E 放电高温保护延时
+	// 0x44C(H) 放电高低温保护延时
 	DISCHARGE_OT_PROTECT_DELAY_S: 'DISCHARGE_OT_PROTECT_DELAY_S',
-	// 0x44F 放电高温告警解除延时
+	// 0x44D(L) 放电高低温告警解除延时
 	DISCHARGE_OT_ALARM_RELEASE_DELAY_S: 'DISCHARGE_OT_ALARM_RELEASE_DELAY_S',
-	// 0x450 放电高温保护解除延时
+	// 0x44D(H) 放电高低温保护解除延时
 	DISCHARGE_OT_PROTECT_RELEASE_DELAY_S: 'DISCHARGE_OT_PROTECT_RELEASE_DELAY_S',
-	// 0x451 电芯高温告警温度（doc 同地址亦有“热失控电芯温度”描述，本实现将二者映射为 L/H）
+	// 0x44E(L) 电芯高温告警
 	CELL_OT_ALARM_C: 'CELL_OT_ALARM_C',
-	// 0x451 热失控电芯温度（同寄存器另一字节）
-	CELL_THERMAL_RUNAWAY_C: 'CELL_THERMAL_RUNAWAY_C',
-	// 0x452 电芯高温告警解除温度
+	// 0x44E(H) 电芯高温告警解除
 	CELL_OT_ALARM_RELEASE_C: 'CELL_OT_ALARM_RELEASE_C',
-	// 0x452 高温告警延时（doc 未标注 H/L，本实现按 H 处理）
+	// 0x44F(L) 高温告警延时
 	CELL_OT_ALARM_DELAY_S: 'CELL_OT_ALARM_DELAY_S',
-	// 0x453 高温告警解除延时（doc 未标注 H/L，本实现按 L 处理）
+	// 0x44F(H) 高温告警解除延时
 	CELL_OT_ALARM_RELEASE_DELAY_S: 'CELL_OT_ALARM_RELEASE_DELAY_S',
-	// 0x453 加热电芯开启温度（同寄存器另一字节）
+	// 0x450(L) 加热电芯开启温度
 	HEAT_CELL_ON_C: 'HEAT_CELL_ON_C',
-	// 0x454 加热电芯关闭温度
+	// 0x450(H) 加热电芯关闭温度
 	HEAT_CELL_OFF_C: 'HEAT_CELL_OFF_C',
-	// 0x454 加热膜温度保护温度（同寄存器另一字节）
+	// 0x451(L) 加热膜温度保护
 	HEAT_FILM_PROTECT_C: 'HEAT_FILM_PROTECT_C',
-	// 0x455 加热膜温度保护恢复温度
+	// 0x451(H) 加热膜温度保护恢复
 	HEAT_FILM_PROTECT_RELEASE_C: 'HEAT_FILM_PROTECT_RELEASE_C',
-	// 0x455 加热开启延时（同寄存器另一字节）
+	// 0x452(L) 开启延时
 	HEAT_ON_DELAY_S: 'HEAT_ON_DELAY_S',
-	// 0x456 加热关闭延时
+	// 0x452(H) 关闭延时
 	HEAT_OFF_DELAY_S: 'HEAT_OFF_DELAY_S',
-	// 0x456 极柱温度保护温度（同寄存器另一字节）
+	// 0x453(L) 极柱温度保护
 	POLE_TEMP_PROTECT_C: 'POLE_TEMP_PROTECT_C',
-	// 0x457 极柱温度保护恢复温度
+	// 0x453(H) 极柱温度保护恢复
 	POLE_TEMP_PROTECT_RELEASE_C: 'POLE_TEMP_PROTECT_RELEASE_C',
 
-	// 其他配置（doc/oriigin/device_comm_protocol_write.md 3.4，0x458~）
-	// 0x458 均衡开启电压（单位 V，分辨率 0.001）
+	// 其他配置（doc/oriigin/device_comm_protocol_write_v2.md 3.4，0x454~）
+	// 0x454 均衡开启电压（单位 V，分辨率 0.001）
 	BALANCE_START_V: 'BALANCE_START_V',
-	// 0x459 开启压差（单位 V，分辨率 0.001）
+	// 0x455(L) 开启压差（单位 V，分辨率 0.001）
 	BALANCE_START_DELTA_V: 'BALANCE_START_DELTA_V',
-	// 0x45A 停止压差（单位 V，分辨率 0.001）
+	// 0x455(H) 停止压差（单位 V，分辨率 0.001）
 	BALANCE_STOP_DELTA_V: 'BALANCE_STOP_DELTA_V',
-	// 0x45A 均衡功能高温禁止温度（单位 ℃，偏移 -40）
+	// 0x456(L) 高温禁止（单位 ℃，偏移 -40）
 	BALANCE_DISABLE_HIGH_TEMP_C: 'BALANCE_DISABLE_HIGH_TEMP_C',
-	// 0x45B 均衡功能低温禁止温度（单位 ℃，偏移 -40）
+	// 0x456(H) 低温禁止（单位 ℃，偏移 -40）
 	BALANCE_DISABLE_LOW_TEMP_C: 'BALANCE_DISABLE_LOW_TEMP_C',
-	// 0x45B 压差报警压差（单位 10mV，分辨率 0.01V）
+	// 0x457(L) 压差报警压差（单位 10mV，分辨率 0.01V）
 	DELTA_V_ALARM_THRESHOLD_V: 'DELTA_V_ALARM_THRESHOLD_V',
-	// 0x45C 压差报警恢复压差（单位 10mV，分辨率 0.01V）
+	// 0x457(H) 压差报警恢复压差（单位 10mV，分辨率 0.01V）
 	DELTA_V_ALARM_RELEASE_V: 'DELTA_V_ALARM_RELEASE_V',
-	// 0x45C 压差保护压差（单位 10mV，分辨率 0.01V）
+	// 0x458(L) 压差保护压差（单位 10mV，分辨率 0.01V）
 	DELTA_V_PROTECT_THRESHOLD_V: 'DELTA_V_PROTECT_THRESHOLD_V',
-	// 0x45D 压差保护恢复压差（单位 10mV，分辨率 0.01V）
+	// 0x458(H) 压差保护恢复压差（单位 10mV，分辨率 0.01V）
 	DELTA_V_PROTECT_RELEASE_V: 'DELTA_V_PROTECT_RELEASE_V',
-	// 0x45D 压差保护延时（单位 S）
+	// 0x459(L) 压差保护延时（单位 S）
 	DELTA_V_PROTECT_DELAY_S: 'DELTA_V_PROTECT_DELAY_S',
-	// 0x45E 压差解除延时（单位 S）
+	// 0x459(H) 压差解除延时（单位 S）
 	DELTA_V_RELEASE_DELAY_S: 'DELTA_V_RELEASE_DELAY_S',
-	// 0x45E 温差报警阈值（单位 ℃）
+	// 0x45A(L) 温差报警（单位 ℃）
 	TEMP_DIFF_ALARM_THRESHOLD_C: 'TEMP_DIFF_ALARM_THRESHOLD_C',
-	// 0x45F 温差报警恢复阈值（单位 ℃）
+	// 0x45A(H) 温差报警恢复（单位 ℃）
 	TEMP_DIFF_ALARM_RELEASE_C: 'TEMP_DIFF_ALARM_RELEASE_C',
-	// 0x45F 温差保护阈值（单位 ℃）
+	// 0x45B(L) 温差保护（单位 ℃）
 	TEMP_DIFF_PROTECT_THRESHOLD_C: 'TEMP_DIFF_PROTECT_THRESHOLD_C',
-	// 0x460 温差保护恢复阈值（单位 ℃）
+	// 0x45B(H) 温差保护恢复（单位 ℃）
 	TEMP_DIFF_PROTECT_RELEASE_C: 'TEMP_DIFF_PROTECT_RELEASE_C',
-	// 0x460 温差保护延时（单位 S；doc 同地址亦有“温差解除延时(H)”描述）
+	// 0x45C(L) 温差保护延时（单位 S）
 	TEMP_DIFF_PROTECT_DELAY_S: 'TEMP_DIFF_PROTECT_DELAY_S',
+	// 0x45C(H) 温差解除延时（单位 S）
+	TEMP_DIFF_RELEASE_DELAY_S: 'TEMP_DIFF_RELEASE_DELAY_S',
+	// 0x45D(L) 电量低告警门槛（单位 1%）
+	LOW_SOC_ALARM_THRESHOLD_PCT: 'LOW_SOC_ALARM_THRESHOLD_PCT',
+	// 0x45E 满电判断 >= 总压（单位 V，分辨率 0.1）
+	FULL_CHARGE_PACK_V: 'FULL_CHARGE_PACK_V',
+	// 0x45F 满电判断小于电流（单位 A，分辨率 0.1）
+	FULL_CHARGE_CURRENT_A: 'FULL_CHARGE_CURRENT_A',
+	// 0x460(L) 持续时间（单位 S）
+	FULL_CHARGE_DURATION_S: 'FULL_CHARGE_DURATION_S',
 
 	// 编号配置（doc/oriigin/device_comm_protocol_write.md 3.5）
 	// 0x500~0x50F 电池组编号（ASCII 字符串，32字节）
@@ -388,7 +402,7 @@ export const PARAM_CATEGORIES = Object.freeze({
 	CURRENT: 'current',
 	// 温度配置类（0x438~）
 	TEMPERATURE: 'temperature',
-	// 其他配置类（0x458~）
+	// 其他配置类（0x454~）
 	OTHER: 'other',
 	// 字符串/编号配置类（0x500~、0x53A~）
 	STRING: 'string',
@@ -583,9 +597,10 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_PARAM.CELL_OC_PROTECT_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充保护电压', access: 'RW', valueType: 'u16', address: 0x401, scale: 0.001, unit: 'V' }),
 	def(BMS_PARAM.CELL_OC_ALARM_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充告警延时', access: 'RW', valueType: 'u8', address: 0x402, byte: 'L', scale: 0.1, unit: 's' }),
 	def(BMS_PARAM.CELL_OC_PROTECT_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充保护延时', access: 'RW', valueType: 'u8', address: 0x402, byte: 'H', scale: 0.1, unit: 's' }),
+	def(BMS_PARAM.FEEDBACK_OC_PROTECT_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '回馈过充保护延时', access: 'RW', valueType: 'u8', address: 0x403, byte: 'L', scale: 0.1, unit: 's' }),
 	def(BMS_PARAM.NORMAL_LOW_TEMP_THRESHOLD_C, PARAM_CATEGORIES.VOLTAGE, { label: '常温低温阀值温度', access: 'RW', valueType: 'u8', address: 0x403, byte: 'H', offset: -40, scale: 1, unit: '°C' }),
-	def(BMS_PARAM.CELL_OV_PROTECT_RELEASE_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过压保护解除电压', access: 'RW', valueType: 'u16', address: 0x404, scale: 0.001, unit: 'V' }),
-	def(BMS_PARAM.CELL_OC_ALARM_RELEASE_DELTA_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充告警解除电压', access: 'RW', valueType: 'u16', address: 0x405, scale: 0.001, unit: 'V' }),
+	def(BMS_PARAM.CELL_OV_PROTECT_RELEASE_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充保护解除电压', access: 'RW', valueType: 'u16', address: 0x405, scale: 0.001, unit: 'V' }),
+	def(BMS_PARAM.CELL_OC_ALARM_RELEASE_DELTA_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过充告警解除电压差', access: 'RW', valueType: 'u16', address: 0x404, scale: 0.001, unit: 'V' }),
 	def(BMS_PARAM.CAPACITY_RELEASE_SOC_PCT, PARAM_CATEGORIES.VOLTAGE, { label: '容量解除', access: 'RW', valueType: 'u16', address: 0x406, scale: 1, unit: '%' }),
 	def(BMS_PARAM.OV_DISCHARGE_RELEASE_A, PARAM_CATEGORIES.VOLTAGE, { label: '过压放电解除电流', access: 'RW', valueType: 'u8', address: 0x407, byte: 'L', scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.UV_CHARGE_RELEASE_A, PARAM_CATEGORIES.VOLTAGE, { label: '欠压充电解除电流', access: 'RW', valueType: 'u8', address: 0x407, byte: 'H', scale: 0.1, unit: 'A' }),
@@ -596,7 +611,8 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_PARAM.LOW_TEMP_CELL_UV_ALARM_V, PARAM_CATEGORIES.VOLTAGE, { label: '低温单体过放告警电压', access: 'RW', valueType: 'u16', address: 0x40b, scale: 0.001, unit: 'V' }),
 	def(BMS_PARAM.LOW_TEMP_CELL_UV_PROTECT_V, PARAM_CATEGORIES.VOLTAGE, { label: '低温单体过放保护电压', access: 'RW', valueType: 'u16', address: 0x40c, scale: 0.001, unit: 'V' }),
 	def(BMS_PARAM.CELL_UV_ALARM_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '单体过放告警延时', access: 'RW', valueType: 'u8', address: 0x40d, byte: 'L', scale: 0.1, unit: 's' }),
-	def(BMS_PARAM.CELL_UV_PROTECT_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '单体过放保护延时', access: 'RW', valueType: 'u8', address: 0x40e, byte: 'H', scale: 0.1, unit: 's' }),
+	def(BMS_PARAM.CELL_UV_PROTECT_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '单体过放保护延时', access: 'RW', valueType: 'u8', address: 0x40d, byte: 'H', scale: 0.1, unit: 's' }),
+	def(BMS_PARAM.CELL_UV_ALARM_RELEASE_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过放告警解除电压', access: 'RW', valueType: 'u16', address: 0x40e, scale: 0.001, unit: 'V' }),
 	def(BMS_PARAM.CELL_UV_PROTECT_RELEASE_V, PARAM_CATEGORIES.VOLTAGE, { label: '单体过放保护解除电压', access: 'RW', valueType: 'u16', address: 0x40f, scale: 0.001, unit: 'V' }),
 	def(BMS_PARAM.CELL_UV_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '单体过放告警解除延时', access: 'RW', valueType: 'u8', address: 0x410, byte: 'L', scale: 0.1, unit: 's' }),
 	def(BMS_PARAM.CELL_UV_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '单体过放保护解除延时', access: 'RW', valueType: 'u8', address: 0x410, byte: 'H', scale: 0.1, unit: 's' }),
@@ -620,6 +636,7 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_PARAM.PACK_UV_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '总压过放保护解除延时', access: 'RW', valueType: 'u8', address: 0x41e, byte: 'H', scale: 0.1, unit: 's' }),
 
 	// --- Current (0x420~)
+	def(BMS_PARAM.CHARGE_OC_ALARM_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流告警电流', access: 'RW', valueType: 'u16', address: 0x41f, scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.CHARGE_OC_PROTECT_SMALL_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流小电流保护电流', access: 'RW', valueType: 'u16', address: 0x420, scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.CHARGE_OC_PROTECT_LARGE_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流大电流保护电流', access: 'RW', valueType: 'u16', address: 0x421, scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.CHARGE_OC_ALARM_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '充电过流告警延时', access: 'RW', valueType: 'u8', address: 0x422, byte: 'L', scale: 1, unit: 's' }),
@@ -627,20 +644,18 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_PARAM.CHARGE_OC_PROTECT_SMALL_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '充电过流保护小电流延时', access: 'RW', valueType: 'u8', address: 0x423, byte: 'L', scale: 1, unit: 's' }),
 	def(BMS_PARAM.CHARGE_OC_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '充电过流告警解除延时', access: 'RW', valueType: 'u8', address: 0x424, byte: 'L', scale: 1, unit: 's' }),
 	def(BMS_PARAM.AUTO_RELEASE_TIME_MIN, PARAM_CATEGORIES.CURRENT, { label: '自动解除时间', access: 'RW', valueType: 'u8', address: 0x424, byte: 'H', scale: 1, unit: 'min' }),
-	def(BMS_PARAM.CHARGE_OC_ALARM_RELEASE_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流告警解电流', access: 'RW', valueType: 'u16', address: 0x425, scale: 0.1, unit: 'A' }),
+	def(BMS_PARAM.CHARGE_OC_ALARM_RELEASE_A, PARAM_CATEGORIES.CURRENT, { label: '充电过流告警解除电流', access: 'RW', valueType: 'u16', address: 0x425, scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.DISCHARGE_RELEASE_A, PARAM_CATEGORIES.CURRENT, { label: '放电解除电流', access: 'RW', valueType: 'u8', address: 0x426, byte: 'L', scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.AUTO_RELEASE_LOCK_COUNT, PARAM_CATEGORIES.CURRENT, { label: '自动解除锁定次数', access: 'RW', valueType: 'u8', address: 0x426, byte: 'H', scale: 1, unit: 'count' }),
 	def(BMS_PARAM.DISCHARGE_OC_ALARM_A, PARAM_CATEGORIES.CURRENT, { label: '放电过流告警电流', access: 'RW', valueType: 'u16', address: 0x427, scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.DISCHARGE_OC_PROTECT_SMALL_A, PARAM_CATEGORIES.CURRENT, { label: '放电过流小电流保护电流', access: 'RW', valueType: 'u16', address: 0x428, scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.DISCHARGE_OC_PROTECT_LARGE_A, PARAM_CATEGORIES.CURRENT, { label: '放电过流大电流保护电流', access: 'RW', valueType: 'u16', address: 0x429, scale: 0.1, unit: 'A' }),
-	// NOTE: The doc lists "放电过流告警延时" at 0x429 L, which conflicts with the 2-byte current at 0x429.
-	// In practice it is commonly paired with the "大电流保护延时" register at 0x42A (L/H). This mapping uses 0x42A L.
 	def(BMS_PARAM.DISCHARGE_OC_ALARM_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '放电过流告警延时', access: 'RW', valueType: 'u8', address: 0x42a, byte: 'L', scale: 1, unit: 's' }),
 	def(BMS_PARAM.DISCHARGE_OC_PROTECT_LARGE_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '放电过流大电流保护延时', access: 'RW', valueType: 'u8', address: 0x42a, byte: 'H', scale: 1, unit: 's' }),
 	def(BMS_PARAM.DISCHARGE_OC_PROTECT_SMALL_DELAY_S, PARAM_CATEGORIES.CURRENT, { label: '放电过流小电流保护延时', access: 'RW', valueType: 'u8', address: 0x42b, byte: 'L', scale: 1, unit: 's' }),
 	def(BMS_PARAM.DISCHARGE_OC_AUTO_RELEASE_TIME_MIN, PARAM_CATEGORIES.CURRENT, { label: '自动解除时间', access: 'RW', valueType: 'u8', address: 0x42b, byte: 'H', scale: 1, unit: 'min' }),
 	def(BMS_PARAM.DISCHARGE_OC_ALARM_RELEASE_A, PARAM_CATEGORIES.CURRENT, { label: '放电过流告警解除电流', access: 'RW', valueType: 'u16', address: 0x42c, scale: 0.1, unit: 'A' }),
-	def(BMS_PARAM.CHARGE_RELEASE_A, PARAM_CATEGORIES.CURRENT, { label: '充电解除电流', access: 'RW', valueType: 'u8', address: 0x42d, byte: 'L', scale: 0.1, unit: 'A' }),
+	def(BMS_PARAM.CHARGE_RELEASE_A, PARAM_CATEGORIES.CURRENT, { label: '充电解除', access: 'RW', valueType: 'u8', address: 0x42d, byte: 'L', scale: 0.1, unit: 'A' }),
 	def(BMS_PARAM.CHARGE_LOCK_COUNT, PARAM_CATEGORIES.CURRENT, { label: '锁定次数', access: 'RW', valueType: 'u8', address: 0x42d, byte: 'H', scale: 1, unit: 'count' }),
 
 	// --- Temperature (0x438~)
@@ -672,55 +687,57 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_PARAM.CHARGE_OT_PROTECT_C, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高温保护温度', access: 'RW', valueType: 'u8', address: 0x444, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
 	def(BMS_PARAM.CHARGE_OT_ALARM_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高温告警解除温度', access: 'RW', valueType: 'u8', address: 0x445, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
 	def(BMS_PARAM.CHARGE_OT_PROTECT_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高温保护解除温度', access: 'RW', valueType: 'u8', address: 0x445, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.CHARGE_OT_ALARM_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高温告警延时', access: 'RW', valueType: 'u8', address: 0x446, byte: 'L', scale: 1, unit: 's' }),
-	def(BMS_PARAM.CHARGE_OT_PROTECT_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高温保护延时', access: 'RW', valueType: 'u8', address: 0x446, byte: 'H', scale: 1, unit: 's' }),
-	def(BMS_PARAM.CHARGE_OT_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高温告警解除延时', access: 'RW', valueType: 'u8', address: 0x447, byte: 'L', scale: 1, unit: 's' }),
-	def(BMS_PARAM.CHARGE_OT_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高温保护解除延时', access: 'RW', valueType: 'u8', address: 0x447, byte: 'H', scale: 1, unit: 's' }),
+	def(BMS_PARAM.CHARGE_OT_ALARM_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高低温告警延时', access: 'RW', valueType: 'u8', address: 0x446, byte: 'L', scale: 1, unit: 's' }),
+	def(BMS_PARAM.CHARGE_OT_PROTECT_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高低温保护延时', access: 'RW', valueType: 'u8', address: 0x446, byte: 'H', scale: 1, unit: 's' }),
+	def(BMS_PARAM.CHARGE_OT_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高低温告警解除延时', access: 'RW', valueType: 'u8', address: 0x447, byte: 'L', scale: 1, unit: 's' }),
+	def(BMS_PARAM.CHARGE_OT_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '充电高低温保护解除延时', access: 'RW', valueType: 'u8', address: 0x447, byte: 'H', scale: 1, unit: 's' }),
 	def(BMS_PARAM.DISCHARGE_UT_ALARM_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电低温告警温度', access: 'RW', valueType: 'u8', address: 0x448, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
 	def(BMS_PARAM.DISCHARGE_UT_PROTECT_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电低温保护温度', access: 'RW', valueType: 'u8', address: 0x448, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
 	def(BMS_PARAM.DISCHARGE_UT_ALARM_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电低温告警解除温度', access: 'RW', valueType: 'u8', address: 0x449, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
 	def(BMS_PARAM.DISCHARGE_UT_PROTECT_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电低温保护解除温度', access: 'RW', valueType: 'u8', address: 0x449, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
 	def(BMS_PARAM.DISCHARGE_OT_ALARM_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温告警温度', access: 'RW', valueType: 'u8', address: 0x44a, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
 	def(BMS_PARAM.DISCHARGE_OT_PROTECT_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温保护温度', access: 'RW', valueType: 'u8', address: 0x44a, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.DISCHARGE_OT_ALARM_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温警告解除温度', access: 'RW', valueType: 'u8', address: 0x44b, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.DISCHARGE_OT_PROTECT_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温保护解除温度', access: 'RW', valueType: 'u8', address: 0x44c, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.DISCHARGE_OT_ALARM_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温告警延时', access: 'RW', valueType: 'u8', address: 0x44d, byte: 'L', scale: 1, unit: 's' }),
-	def(BMS_PARAM.DISCHARGE_OT_PROTECT_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温保护延时', access: 'RW', valueType: 'u8', address: 0x44e, byte: 'L', scale: 1, unit: 's' }),
-	def(BMS_PARAM.DISCHARGE_OT_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温告警解除延时', access: 'RW', valueType: 'u8', address: 0x44f, byte: 'L', scale: 1, unit: 's' }),
-	def(BMS_PARAM.DISCHARGE_OT_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温保护解除延时', access: 'RW', valueType: 'u8', address: 0x450, byte: 'L', scale: 1, unit: 's' }),
-	// The doc repeats addresses for the following 1-byte fields without explicit H/L;
-	// here we map them as L then H within the same register.
-	def(BMS_PARAM.CELL_OT_ALARM_C, PARAM_CATEGORIES.TEMPERATURE, { label: '电芯高温告警温度', access: 'RW', valueType: 'u8', address: 0x451, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.CELL_THERMAL_RUNAWAY_C, PARAM_CATEGORIES.TEMPERATURE, { label: '热失控电芯温度', access: 'RW', valueType: 'u8', address: 0x451, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.CELL_OT_ALARM_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '电芯高温告警解除温度', access: 'RW', valueType: 'u8', address: 0x452, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.CELL_OT_ALARM_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '高温告警延时', access: 'RW', valueType: 'u8', address: 0x452, byte: 'H', scale: 1, unit: 's' }),
-	def(BMS_PARAM.CELL_OT_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '高温告警解除延时', access: 'RW', valueType: 'u8', address: 0x453, byte: 'L', scale: 1, unit: 's' }),
-	def(BMS_PARAM.HEAT_CELL_ON_C, PARAM_CATEGORIES.TEMPERATURE, { label: '加热电芯开启温度', access: 'RW', valueType: 'u8', address: 0x453, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.HEAT_CELL_OFF_C, PARAM_CATEGORIES.TEMPERATURE, { label: '加热电芯关闭温度', access: 'RW', valueType: 'u8', address: 0x454, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.HEAT_FILM_PROTECT_C, PARAM_CATEGORIES.TEMPERATURE, { label: '加热膜温度保护温度', access: 'RW', valueType: 'u8', address: 0x454, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.HEAT_FILM_PROTECT_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '加热膜温度保护恢复温度', access: 'RW', valueType: 'u8', address: 0x455, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.HEAT_ON_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '加热开启延时', access: 'RW', valueType: 'u8', address: 0x455, byte: 'H', scale: 1, unit: 's' }),
-	def(BMS_PARAM.HEAT_OFF_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '加热关闭延时', access: 'RW', valueType: 'u8', address: 0x456, byte: 'L', scale: 1, unit: 's' }),
-	def(BMS_PARAM.POLE_TEMP_PROTECT_C, PARAM_CATEGORIES.TEMPERATURE, { label: '极柱温度保护温度', access: 'RW', valueType: 'u8', address: 0x456, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.POLE_TEMP_PROTECT_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '极柱温度保护恢复温度', access: 'RW', valueType: 'u8', address: 0x457, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.DISCHARGE_OT_ALARM_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温告警解除温度', access: 'RW', valueType: 'u8', address: 0x44b, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.DISCHARGE_OT_PROTECT_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高温保护解除温度', access: 'RW', valueType: 'u8', address: 0x44b, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.DISCHARGE_OT_ALARM_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高低温告警延时', access: 'RW', valueType: 'u8', address: 0x44c, byte: 'L', scale: 1, unit: 's' }),
+	def(BMS_PARAM.DISCHARGE_OT_PROTECT_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高低温保护延时', access: 'RW', valueType: 'u8', address: 0x44c, byte: 'H', scale: 1, unit: 's' }),
+	def(BMS_PARAM.DISCHARGE_OT_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高低温告警解除延时', access: 'RW', valueType: 'u8', address: 0x44d, byte: 'L', scale: 1, unit: 's' }),
+	def(BMS_PARAM.DISCHARGE_OT_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '放电高低温保护解除延时', access: 'RW', valueType: 'u8', address: 0x44d, byte: 'H', scale: 1, unit: 's' }),
+	def(BMS_PARAM.CELL_OT_ALARM_C, PARAM_CATEGORIES.TEMPERATURE, { label: '电芯高温告警', access: 'RW', valueType: 'u8', address: 0x44e, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.CELL_OT_ALARM_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '电芯高温告警解除', access: 'RW', valueType: 'u8', address: 0x44e, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.CELL_OT_ALARM_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '高温告警延时', access: 'RW', valueType: 'u8', address: 0x44f, byte: 'L', scale: 1, unit: 's' }),
+	def(BMS_PARAM.CELL_OT_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '高温告警解除延时', access: 'RW', valueType: 'u8', address: 0x44f, byte: 'H', scale: 1, unit: 's' }),
+	def(BMS_PARAM.HEAT_CELL_ON_C, PARAM_CATEGORIES.TEMPERATURE, { label: '加热电芯开启温度', access: 'RW', valueType: 'u8', address: 0x450, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.HEAT_CELL_OFF_C, PARAM_CATEGORIES.TEMPERATURE, { label: '加热电芯关闭温度', access: 'RW', valueType: 'u8', address: 0x450, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.HEAT_FILM_PROTECT_C, PARAM_CATEGORIES.TEMPERATURE, { label: '加热膜温度保护', access: 'RW', valueType: 'u8', address: 0x451, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.HEAT_FILM_PROTECT_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '加热膜温度保护恢复', access: 'RW', valueType: 'u8', address: 0x451, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.HEAT_ON_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '开启延时', access: 'RW', valueType: 'u8', address: 0x452, byte: 'L', scale: 1, unit: 's' }),
+	def(BMS_PARAM.HEAT_OFF_DELAY_S, PARAM_CATEGORIES.TEMPERATURE, { label: '关闭延时', access: 'RW', valueType: 'u8', address: 0x452, byte: 'H', scale: 1, unit: 's' }),
+	def(BMS_PARAM.POLE_TEMP_PROTECT_C, PARAM_CATEGORIES.TEMPERATURE, { label: '极柱温度保护', access: 'RW', valueType: 'u8', address: 0x453, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.POLE_TEMP_PROTECT_RELEASE_C, PARAM_CATEGORIES.TEMPERATURE, { label: '极柱温度保护恢复', access: 'RW', valueType: 'u8', address: 0x453, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
 
-	// --- Other (0x458~)
-	def(BMS_PARAM.BALANCE_START_V, PARAM_CATEGORIES.OTHER, { label: '均衡开启电压', access: 'RW', valueType: 'u16', address: 0x458, scale: 0.001, unit: 'V' }),
-	def(BMS_PARAM.BALANCE_START_DELTA_V, PARAM_CATEGORIES.OTHER, { label: '开启压差', access: 'RW', valueType: 'u8', address: 0x459, byte: 'L', scale: 0.001, unit: 'V' }),
-	def(BMS_PARAM.BALANCE_STOP_DELTA_V, PARAM_CATEGORIES.OTHER, { label: '停止压差', access: 'RW', valueType: 'u8', address: 0x45a, byte: 'L', scale: 0.001, unit: 'V' }),
-	def(BMS_PARAM.BALANCE_DISABLE_HIGH_TEMP_C, PARAM_CATEGORIES.OTHER, { label: '均衡功能高温禁止温度', access: 'RW', valueType: 'u8', address: 0x45a, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.BALANCE_DISABLE_LOW_TEMP_C, PARAM_CATEGORIES.OTHER, { label: '均衡功能低温禁止温度', access: 'RW', valueType: 'u8', address: 0x45b, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
-	def(BMS_PARAM.DELTA_V_ALARM_THRESHOLD_V, PARAM_CATEGORIES.OTHER, { label: '压差报警压差', access: 'RW', valueType: 'u8', address: 0x45b, byte: 'H', scale: 0.01, unit: 'V' }),
-	def(BMS_PARAM.DELTA_V_ALARM_RELEASE_V, PARAM_CATEGORIES.OTHER, { label: '压差报警恢复压差', access: 'RW', valueType: 'u8', address: 0x45c, byte: 'L', scale: 0.01, unit: 'V' }),
-	def(BMS_PARAM.DELTA_V_PROTECT_THRESHOLD_V, PARAM_CATEGORIES.OTHER, { label: '压差保护压差', access: 'RW', valueType: 'u8', address: 0x45c, byte: 'H', scale: 0.01, unit: 'V' }),
-	def(BMS_PARAM.DELTA_V_PROTECT_RELEASE_V, PARAM_CATEGORIES.OTHER, { label: '压差保护恢复压差', access: 'RW', valueType: 'u8', address: 0x45d, byte: 'L', scale: 0.01, unit: 'V' }),
-	def(BMS_PARAM.DELTA_V_PROTECT_DELAY_S, PARAM_CATEGORIES.OTHER, { label: '压差保护延时', access: 'RW', valueType: 'u8', address: 0x45d, byte: 'H', scale: 1, unit: 's' }),
-	def(BMS_PARAM.DELTA_V_RELEASE_DELAY_S, PARAM_CATEGORIES.OTHER, { label: '压差解除延时', access: 'RW', valueType: 'u8', address: 0x45e, byte: 'L', scale: 1, unit: 's' }),
-	def(BMS_PARAM.TEMP_DIFF_ALARM_THRESHOLD_C, PARAM_CATEGORIES.OTHER, { label: '温差报警阈值', access: 'RW', valueType: 'u8', address: 0x45e, byte: 'H', scale: 1, unit: '°C' }),
-	def(BMS_PARAM.TEMP_DIFF_ALARM_RELEASE_C, PARAM_CATEGORIES.OTHER, { label: '温差报警恢复阈值', access: 'RW', valueType: 'u8', address: 0x45f, byte: 'L', scale: 1, unit: '°C' }),
-	def(BMS_PARAM.TEMP_DIFF_PROTECT_THRESHOLD_C, PARAM_CATEGORIES.OTHER, { label: '温差保护阈值', access: 'RW', valueType: 'u8', address: 0x45f, byte: 'H', scale: 1, unit: '°C' }),
-	def(BMS_PARAM.TEMP_DIFF_PROTECT_RELEASE_C, PARAM_CATEGORIES.OTHER, { label: '温差保护恢复阈值', access: 'RW', valueType: 'u8', address: 0x460, byte: 'L', scale: 1, unit: '°C' }),
-	def(BMS_PARAM.TEMP_DIFF_PROTECT_DELAY_S, PARAM_CATEGORIES.OTHER, { label: '温差保护延时', access: 'RW', valueType: 'u8', address: 0x460, byte: 'H', scale: 1, unit: 's' }),
+	// --- Other (0x454~)
+	def(BMS_PARAM.BALANCE_START_V, PARAM_CATEGORIES.OTHER, { label: '均衡开启电压', access: 'RW', valueType: 'u16', address: 0x454, scale: 0.001, unit: 'V' }),
+	def(BMS_PARAM.BALANCE_START_DELTA_V, PARAM_CATEGORIES.OTHER, { label: '开启压差', access: 'RW', valueType: 'u8', address: 0x455, byte: 'L', scale: 0.001, unit: 'V' }),
+	def(BMS_PARAM.BALANCE_STOP_DELTA_V, PARAM_CATEGORIES.OTHER, { label: '停止压差', access: 'RW', valueType: 'u8', address: 0x455, byte: 'H', scale: 0.001, unit: 'V' }),
+	def(BMS_PARAM.BALANCE_DISABLE_HIGH_TEMP_C, PARAM_CATEGORIES.OTHER, { label: '高温禁止', access: 'RW', valueType: 'u8', address: 0x456, byte: 'L', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.BALANCE_DISABLE_LOW_TEMP_C, PARAM_CATEGORIES.OTHER, { label: '低温禁止', access: 'RW', valueType: 'u8', address: 0x456, byte: 'H', scale: 1, offset: -40, unit: '°C' }),
+	def(BMS_PARAM.DELTA_V_ALARM_THRESHOLD_V, PARAM_CATEGORIES.OTHER, { label: '压差报警压差', access: 'RW', valueType: 'u8', address: 0x457, byte: 'L', scale: 0.01, unit: 'V' }),
+	def(BMS_PARAM.DELTA_V_ALARM_RELEASE_V, PARAM_CATEGORIES.OTHER, { label: '压差报警恢复压差', access: 'RW', valueType: 'u8', address: 0x457, byte: 'H', scale: 0.01, unit: 'V' }),
+	def(BMS_PARAM.DELTA_V_PROTECT_THRESHOLD_V, PARAM_CATEGORIES.OTHER, { label: '压差保护压差', access: 'RW', valueType: 'u8', address: 0x458, byte: 'L', scale: 0.01, unit: 'V' }),
+	def(BMS_PARAM.DELTA_V_PROTECT_RELEASE_V, PARAM_CATEGORIES.OTHER, { label: '压差保护恢复压差', access: 'RW', valueType: 'u8', address: 0x458, byte: 'H', scale: 0.01, unit: 'V' }),
+	def(BMS_PARAM.DELTA_V_PROTECT_DELAY_S, PARAM_CATEGORIES.OTHER, { label: '压差保护延时', access: 'RW', valueType: 'u8', address: 0x459, byte: 'L', scale: 1, unit: 's' }),
+	def(BMS_PARAM.DELTA_V_RELEASE_DELAY_S, PARAM_CATEGORIES.OTHER, { label: '压差解除延时', access: 'RW', valueType: 'u8', address: 0x459, byte: 'H', scale: 1, unit: 's' }),
+	def(BMS_PARAM.TEMP_DIFF_ALARM_THRESHOLD_C, PARAM_CATEGORIES.OTHER, { label: '温差报警', access: 'RW', valueType: 'u8', address: 0x45a, byte: 'L', scale: 1, unit: '°C' }),
+	def(BMS_PARAM.TEMP_DIFF_ALARM_RELEASE_C, PARAM_CATEGORIES.OTHER, { label: '温差报警恢复', access: 'RW', valueType: 'u8', address: 0x45a, byte: 'H', scale: 1, unit: '°C' }),
+	def(BMS_PARAM.TEMP_DIFF_PROTECT_THRESHOLD_C, PARAM_CATEGORIES.OTHER, { label: '温差保护', access: 'RW', valueType: 'u8', address: 0x45b, byte: 'L', scale: 1, unit: '°C' }),
+	def(BMS_PARAM.TEMP_DIFF_PROTECT_RELEASE_C, PARAM_CATEGORIES.OTHER, { label: '温差保护恢复', access: 'RW', valueType: 'u8', address: 0x45b, byte: 'H', scale: 1, unit: '°C' }),
+	def(BMS_PARAM.TEMP_DIFF_PROTECT_DELAY_S, PARAM_CATEGORIES.OTHER, { label: '温差保护延时', access: 'RW', valueType: 'u8', address: 0x45c, byte: 'L', scale: 1, unit: 's' }),
+	def(BMS_PARAM.TEMP_DIFF_RELEASE_DELAY_S, PARAM_CATEGORIES.OTHER, { label: '温差解除延时', access: 'RW', valueType: 'u8', address: 0x45c, byte: 'H', scale: 1, unit: 's' }),
+	def(BMS_PARAM.LOW_SOC_ALARM_THRESHOLD_PCT, PARAM_CATEGORIES.OTHER, { label: '电量低告警门槛', access: 'RW', valueType: 'u8', address: 0x45d, byte: 'L', scale: 1, unit: '%' }),
+	def(BMS_PARAM.FULL_CHARGE_PACK_V, PARAM_CATEGORIES.OTHER, { label: '>=总压', access: 'RW', valueType: 'u16', address: 0x45e, scale: 0.1, unit: 'V' }),
+	def(BMS_PARAM.FULL_CHARGE_CURRENT_A, PARAM_CATEGORIES.OTHER, { label: '小于电流', access: 'RW', valueType: 'u16', address: 0x45f, scale: 0.1, unit: 'A' }),
+	def(BMS_PARAM.FULL_CHARGE_DURATION_S, PARAM_CATEGORIES.OTHER, { label: '持续时间', access: 'RW', valueType: 'u8', address: 0x460, byte: 'L', scale: 1, unit: 's' }),
 
 	// --- Strings
 	def(BMS_PARAM.BATTERY_GROUP_ID, PARAM_CATEGORIES.STRING, { label: '电池组编号', access: 'RW', valueType: 'str', startAddress: 0x500, byteLength: 32, encoding: 'ascii' }),

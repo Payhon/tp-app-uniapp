@@ -228,9 +228,34 @@ export const appUnbindDevice = (deviceId: string) => {
 	return apiRequest<unknown>('/api/v1/app/device/unbind', { device_id: deviceId }, 'POST')
 }
 
+// APP 端：机构用户移除“我添加的设备”
+export const appRemoveDevice = (deviceId: string) => {
+	return apiRequest<unknown>('/api/v1/app/device/remove', { device_id: deviceId }, 'POST')
+}
+
 // APP 端：获取当前用户绑定设备列表（用于“我的设备”）
-export const appBoundDeviceList = (params: { page: number; page_size: number; user_id?: string; device_number?: string }) => {
-	return apiRequest<unknown>('/api/v1/app/device/list', params, 'GET')
+export const appBoundDeviceList = (params: {
+	page: number
+	page_size: number
+	user_id?: string
+	view_mode?: string
+	device_name?: string
+	device_number?: string
+	ble_mac?: string
+	added_start_at?: string
+	added_end_at?: string
+}) => {
+	const sanitized = Object.fromEntries(
+		Object.entries(params).filter(([, value]) => {
+			if (value === undefined || value === null) return false
+			if (typeof value === 'string') {
+				const text = value.trim().toLowerCase()
+				return text !== '' && text !== 'undefined' && text !== 'null'
+			}
+			return true
+		})
+	)
+	return apiRequest<unknown>('/api/v1/app/device/list', sanitized, 'GET')
 }
 
 // APP 端：组织范围设备列表
@@ -241,7 +266,17 @@ export const appOrgDeviceList = (params: {
 	owner_org_id?: string | null
 	owner_org_type?: string | null
 }) => {
-	return apiRequest<unknown>('/api/v1/app/device/org/list', params, 'GET')
+	const sanitized = Object.fromEntries(
+		Object.entries(params).filter(([, value]) => {
+			if (value === undefined || value === null) return false
+			if (typeof value === 'string') {
+				const text = value.trim().toLowerCase()
+				return text !== '' && text !== 'undefined' && text !== 'null'
+			}
+			return true
+		})
+	)
+	return apiRequest<unknown>('/api/v1/app/device/org/list', sanitized, 'GET')
 }
 
 // APP 端：组织选项（按类型）
