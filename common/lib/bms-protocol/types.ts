@@ -92,6 +92,7 @@ export type BmsStatus = {
 		sohPct: number
 		cycleCount: number
 		totalChargeCapacityRaw: number
+		totalDischargeCapacityRaw: number
 	}
 	timing: {
 		maxChargeIntervalHours: number

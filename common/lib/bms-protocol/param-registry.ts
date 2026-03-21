@@ -61,7 +61,7 @@ export const BMS_PARAM = Object.freeze({
 	PACK_OV_ALARM_RELEASE_V: 'PACK_OV_ALARM_RELEASE_V',
 	// 0x415 总压过压保护解除电压（单位 V，分辨率 0.01，偏移 1）
 	PACK_OV_PROTECT_RELEASE_V: 'PACK_OV_PROTECT_RELEASE_V',
-	// 0x416(L) 总压过压解除延时（单位 S，分辨率 0.1，偏移 1）
+	// 0x416(L) 总压过压保护解除延时（单位 S，分辨率 0.1，偏移 1）
 	PACK_OV_PROTECT_RELEASE_DELAY_S: 'PACK_OV_PROTECT_RELEASE_DELAY_S',
 	// 0x416(H) 总压过压告警解除延时（单位 S，分辨率 0.1，偏移 1）
 	PACK_OV_ALARM_RELEASE_DELAY_S: 'PACK_OV_ALARM_RELEASE_DELAY_S',
@@ -351,6 +351,7 @@ export const BMS_STATUS_PARAM = Object.freeze({
 	BMS_TIMESTAMP: 'BMS_TIMESTAMP',
 	POWER_ON_WORK_HOURS: 'POWER_ON_WORK_HOURS',
 	TOTAL_CHARGE_CAPACITY_RAW: 'TOTAL_CHARGE_CAPACITY_RAW',
+	TOTAL_DISCHARGE_CAPACITY_RAW: 'TOTAL_DISCHARGE_CAPACITY_RAW',
 
 	PACK_CELL_SUM_VOLTAGE_V: 'PACK_CELL_SUM_VOLTAGE_V',
 	VBAT_VOLTAGE_V: 'VBAT_VOLTAGE_V',
@@ -460,6 +461,7 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_STATUS_PARAM.BMS_TIMESTAMP, PARAM_CATEGORIES.STATUS, { label: 'BMS时间', valueType: 'statusPath', path: 'timing.bmsTimestamp', access: 'R' }),
 	def(BMS_STATUS_PARAM.POWER_ON_WORK_HOURS, PARAM_CATEGORIES.STATUS, { label: '上电工作时间', valueType: 'statusPath', path: 'timing.powerOnWorkHours', access: 'R' }),
 	def(BMS_STATUS_PARAM.TOTAL_CHARGE_CAPACITY_RAW, PARAM_CATEGORIES.STATUS, { label: '总充容量', valueType: 'statusPath', path: 'energy.totalChargeCapacityRaw', access: 'R' }),
+	def(BMS_STATUS_PARAM.TOTAL_DISCHARGE_CAPACITY_RAW, PARAM_CATEGORIES.STATUS, { label: '总放容量', valueType: 'statusPath', path: 'energy.totalDischargeCapacityRaw', access: 'R' }),
 
 	def(BMS_STATUS_PARAM.PACK_CELL_SUM_VOLTAGE_V, PARAM_CATEGORIES.STATUS, { label: '电池组总电压', valueType: 'statusPath', path: 'electrical.packCellSumVoltageV', access: 'R' }),
 	def(BMS_STATUS_PARAM.VBAT_VOLTAGE_V, PARAM_CATEGORIES.STATUS, { label: 'VBat电压', valueType: 'statusPath', path: 'electrical.vBatV', access: 'R' }),
@@ -622,7 +624,7 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_PARAM.PACK_OV_ALARM_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '总压过压告警延时', access: 'RW', valueType: 'u8', address: 0x413, byte: 'H', scale: 0.1, unit: 's' }),
 	def(BMS_PARAM.PACK_OV_ALARM_RELEASE_V, PARAM_CATEGORIES.VOLTAGE, { label: '总压过压告警解除电压', access: 'RW', valueType: 'u16', address: 0x414, scale: 0.01, unit: 'V' }),
 	def(BMS_PARAM.PACK_OV_PROTECT_RELEASE_V, PARAM_CATEGORIES.VOLTAGE, { label: '总压过压保护解除电压', access: 'RW', valueType: 'u16', address: 0x415, scale: 0.01, unit: 'V' }),
-	def(BMS_PARAM.PACK_OV_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '总压过压解除延时', access: 'RW', valueType: 'u8', address: 0x416, byte: 'L', scale: 0.1, unit: 's' }),
+	def(BMS_PARAM.PACK_OV_PROTECT_RELEASE_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '总压过压保护解除延时', access: 'RW', valueType: 'u8', address: 0x416, byte: 'L', scale: 0.1, unit: 's' }),
 	def(BMS_PARAM.PACK_OV_ALARM_RELEASE_DELAY_S, PARAM_CATEGORIES.VOLTAGE, { label: '总压过压告警解除延时', access: 'RW', valueType: 'u8', address: 0x416, byte: 'H', scale: 0.1, unit: 's' }),
 	def(BMS_PARAM.NORMAL_PACK_UV_ALARM_V, PARAM_CATEGORIES.VOLTAGE, { label: '常温总压过放告警电压', access: 'RW', valueType: 'u16', address: 0x417, scale: 0.01, unit: 'V' }),
 	def(BMS_PARAM.NORMAL_PACK_UV_PROTECT_V, PARAM_CATEGORIES.VOLTAGE, { label: '常温总压过放保护电压', access: 'RW', valueType: 'u16', address: 0x418, scale: 0.01, unit: 'V' }),

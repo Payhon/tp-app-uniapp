@@ -76,10 +76,6 @@
 				<text class="switch-item__label">{{ $t('deviceDetail.dashboard.balanceState') }}</text>
 				<u-switch :modelValue="balancingOn" disabled :activeColor="'#0B3BFF'" :inactiveColor="'#E6E7EB'" :size="22"></u-switch>
 			</view>
-			<view class="switch-item">
-				<text class="switch-item__label">{{ $t('deviceDetail.dashboard.protectState') }}</text>
-				<u-switch :modelValue="protectOn" disabled :activeColor="'#0B3BFF'" :inactiveColor="'#E6E7EB'" :size="22"></u-switch>
-			</view>
 		</view>
 
 		<view class="metrics">
@@ -119,14 +115,21 @@
 		</view>
 
 		<view class="protect-card">
-			<view class="protect-card__head">
+			<view class="protect-card__head" @tap="toggleProtectCard">
 				<text class="protect-card__title">{{ $t('deviceDetail.dashboard.protectDetail') }}</text>
-				<text class="protect-card__desc">{{ protectSummaryText }}</text>
+				<view class="protect-card__meta">
+					<text class="protect-card__desc">{{ protectSummaryText }}</text>
+					<text class="protect-card__toggle">{{ protectExpanded ? $t('deviceDetail.dashboard.protectCollapse') : $t('deviceDetail.dashboard.protectExpand') }}</text>
+				</view>
 			</view>
-			<view v-if="protectStatusItems.length" class="protect-tags">
-				<text v-for="item in protectStatusItems" :key="item" class="protect-tag">{{ item }}</text>
+			<view v-if="protectExpanded" class="protect-list">
+				<view v-for="item in protectStatusList" :key="item.key" class="protect-row">
+					<text class="protect-row__label">{{ item.label }}</text>
+					<text class="protect-row__value" :class="{ 'protect-row__value--on': item.enabled }">
+						{{ item.enabled ? $t('deviceDetail.dashboard.protectStatusOn') : $t('deviceDetail.dashboard.protectStatusOff') }}
+					</text>
+				</view>
 			</view>
-			<text v-else class="protect-empty">{{ $t('common.none') }}</text>
 		</view>
 
 		<u-popup :show="flagPopup.show" mode="center" @close="closeFlagPopup">
@@ -144,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import DashboardGauge from '@/components/dashboard-gauge/dashboard-gauge.vue'
@@ -283,6 +286,8 @@ const flagPopup = reactive({
 	items: [] as string[],
 })
 
+const protectExpanded = ref(true)
+
 const openFlag = (type: 'fault' | 'alarm' | 'protect') => {
 	if (type === 'fault') {
 		if (!faultItems.value.length) return
@@ -332,17 +337,28 @@ const currentText = computed(() => formatSignedCurrent(props.status?.electrical?
 const chargeOn = computed(() => Boolean((indicator.value as any).chargeFetOn))
 const dischargeOn = computed(() => Boolean((indicator.value as any).dischargeFetOn))
 const balancingOn = computed(() => Boolean((props.status?.cell?.balancing || []).some((x) => x)))
-const protectOn = computed(() => Boolean(Object.values(protect.value as Record<string, boolean>).some((x) => x)))
-
 const protectStatusItems = computed(() => {
 	const obj = protect.value as Record<string, boolean>
 	return Object.keys(obj).filter((k) => obj[k]).map(labelForStatus)
+})
+
+const protectStatusList = computed(() => {
+	const obj = protect.value as Record<string, boolean>
+	return Object.keys(obj).map((key) => ({
+		key,
+		label: labelForStatus(key),
+		enabled: Boolean(obj[key]),
+	}))
 })
 
 const protectSummaryText = computed(() => {
 	if (!protectStatusItems.value.length) return t('common.none') as string
 	return formatWithParams('deviceDetail.dashboard.protectCount', { n: protectStatusItems.value.length })
 })
+
+const toggleProtectCard = () => {
+	protectExpanded.value = !protectExpanded.value
+}
 
 const toV = (mv: unknown) => {
 	const n = typeof mv === 'number' ? mv : Number(mv)
@@ -620,6 +636,12 @@ const t2Text = computed(() => {
 	gap: 16rpx;
 }
 
+.protect-card__meta {
+	display: flex;
+	align-items: center;
+	gap: 16rpx;
+}
+
 .protect-card__title {
 	font-size: 26rpx;
 	font-weight: 600;
@@ -631,26 +653,42 @@ const t2Text = computed(() => {
 	color: #9aa0a6;
 }
 
-.protect-tags {
+.protect-card__toggle {
+	font-size: 22rpx;
+	color: #0b3bff;
+}
+
+.protect-list {
 	margin-top: 18rpx;
 	display: flex;
-	flex-wrap: wrap;
+	flex-direction: column;
 	gap: 12rpx;
 }
 
-.protect-tag {
-	padding: 8rpx 18rpx;
-	border-radius: 999rpx;
-	font-size: 22rpx;
-	color: #8b5e00;
-	background: #fff7e6;
+.protect-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16rpx;
+	padding: 18rpx 20rpx;
+	border-radius: 18rpx;
+	background: #f7f8fa;
 }
 
-.protect-empty {
-	display: block;
-	margin-top: 18rpx;
+.protect-row__label {
+	font-size: 24rpx;
+	color: #333333;
+	flex: 1;
+}
+
+.protect-row__value {
 	font-size: 24rpx;
 	color: #9aa0a6;
+}
+
+.protect-row__value--on {
+	color: #d97706;
+	font-weight: 600;
 }
 
 .flag-popup {

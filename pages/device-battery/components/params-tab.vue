@@ -106,7 +106,7 @@
 					<u-input
 						v-model="editPopup.input"
 						:placeholder="$t('deviceDetail.params.inputPlaceholder')"
-						:type="editPopup.valueType === 'str' ? 'text' : 'digit'"
+						:type="editPopup.inputType"
 						border="none"
 					></u-input>
 					<text class="edit__unit">{{ editPopup.unit }}</text>
@@ -637,6 +637,7 @@ const editPopup = reactive({
 	unit: '',
 	input: '',
 	valueType: 'u16',
+	inputType: 'digit' as 'digit' | 'text',
 })
 
 const otaState = reactive({
@@ -714,6 +715,7 @@ const openEdit = (item: ParamItem) => {
 	editPopup.key = item.actualKey || item.key
 	editPopup.unit = item.unit || ''
 	editPopup.valueType = item.valueType || 'u16'
+	editPopup.inputType = isNegativeTemperatureInput(editPopup.key, editPopup.unit, editPopup.valueType) ? 'text' : 'digit'
 	const current = paramValues[item.actualKey || item.key]
 	editPopup.input = formatEditableValue(editPopup.key, current)
 	editPopup.show = true
@@ -741,6 +743,11 @@ const openBatteryTypeSelector = (key: string, title: string, currentValue: unkno
 const closeBatteryTypePicker = () => {
 	batteryTypePicker.show = false
 	applyPollingState()
+}
+
+const isNegativeTemperatureInput = (key: string, unit: string, valueType: string) => {
+	if (valueType === 'str') return false
+	return unit === '℃' || unit === '°C' || key.endsWith('_C')
 }
 
 const confirmBatteryTypePicker = async (payload: { value?: Array<{ value: number; text: string }> }) => {

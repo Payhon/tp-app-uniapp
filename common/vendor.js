@@ -12311,7 +12311,7 @@ var _default = {
     totalVoltageOvervoltageWarningDelay: '总压过压告警延时',
     totalVoltageOvervoltageWarningReleaseVoltage: '总压过压告警解除电压',
     totalVoltageOvervoltageProtectionReleaseVoltage: '总压过压保护解除电压',
-    totalVoltageOvervoltageReleaseDelay: '总压过压解除延时',
+    totalVoltageOvervoltageProtectionReleaseDelay: '总压过压保护解除延时',
     totalVoltageOvervoltageWarningReleaseDelay: '总压过压告警解除延时',
     normalTemperatureTotalVoltageOverdischargeWarningVoltage: '常温总压过放告警电压',
     normalTemperatureTotalVoltageOverdischargeProtectionVoltage: '常温总压过放保护电压',
