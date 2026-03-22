@@ -1,5 +1,7 @@
 import { normalizeHex, normalizeMac } from './ble'
-import { resolveDeviceTypeByMac, type SupportedDeviceType } from './device-prefix'
+import { DEVICE_TYPE_BMS, DEVICE_TYPE_METER, resolveDeviceTypeByMac } from './device-prefix'
+
+type SupportedDeviceType = typeof DEVICE_TYPE_BMS | typeof DEVICE_TYPE_METER
 
 export type AddDeviceScanCode =
 	| { type: 'mac'; value: string; deviceType: SupportedDeviceType | null }
