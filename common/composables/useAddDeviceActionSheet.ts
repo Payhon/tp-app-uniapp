@@ -1,5 +1,6 @@
 import i18n from '@/lang/index'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
+import { DEVICE_TYPE_BMS, DEVICE_TYPE_METER } from '@/common/device-provision/device-prefix'
 
 const t = (key: string) => i18n.global.t(key) as unknown as string
 
@@ -46,6 +47,14 @@ function switchToBaseTab(baseTabUrl: string, next: () => void) {
 	})
 }
 
+function navigateToDetailByBleMac(baseTabUrl: string, bleMac: string) {
+	switchToBaseTab(baseTabUrl, () => {
+		uni.navigateTo({
+			url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(bleMac)}&allow_scan_handoff=1`,
+		})
+	})
+}
+
 export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOptions = {}) {
 	// #ifdef APP-PLUS
 	// 避免某些平台/页面生命周期重复触发导致弹出两次
@@ -76,6 +85,14 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 							return
 						}
 						if (parsed.type === 'mac') {
+							if (parsed.deviceType === DEVICE_TYPE_METER) {
+								navigateToDetailByBleMac(baseTabUrl, parsed.value)
+								return
+							}
+							if (parsed.deviceType !== DEVICE_TYPE_BMS) {
+								uni.showToast({ title: t('pages.deviceProvision.unsupportedDeviceType'), icon: 'none' })
+								return
+							}
 							switchToBaseTab(baseTabUrl, () => {
 								uni.navigateTo({ url: `/pages/device-provision/ble-scan?mode=qr&mac=${parsed.value}` })
 							})

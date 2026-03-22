@@ -218,6 +218,7 @@ export default {
       reRun: '重新执行',
       goHome: '返回首页',
       invalidCode: '无效二维码',
+      unsupportedDeviceType: '暂不支持该设备二维码',
       deviceNotFound: '该设备未在云平台注册，请联系经销商。',
       autoRegisteringHint: '检测到遗留设备，系统将自动注册后继续绑定',
       deviceAlreadyAdded: '该设备已添加到我的设备',
@@ -1009,6 +1010,15 @@ export default {
     cells: {
       cellCount: '电芯串数：{n}',
       cellNo: '电芯{n}',
+    },
+    meter: {
+      deviceName: '仪表设备',
+      sessionTitle: '仪表临时连接',
+      sessionHint: '当前通过蓝牙直连仪表，可继续扫码并把仪表切换到新的 BMS 目标。',
+      scanBindBms: '继续扫码绑定 BMS',
+      onlyBmsMacTip: '请扫描 BMS 设备二维码',
+      bindTargetSuccess: '仪表目标已切换',
+      bindTargetFailed: '仪表目标切换失败',
     },
     params: {
       singleCell: '单体设置',

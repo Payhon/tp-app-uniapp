@@ -18,9 +18,15 @@ import {
 	type UniMqttWsBmsTransport,
 } from '@/common/lib/bms-protocol'
 import { canBleAutoConnect, connectBleClient, disconnectBleClient, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
+import { normalizeMac } from '@/common/device-provision/ble'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
+type DeviceDetailSessionMode = 'cloud' | 'instrument'
+type LoadInstrumentSessionOptions = {
+	bleMac: string
+	deviceName?: string
+}
 
 type MqttTransportLike = UniMqttWsBmsTransport | UniMqttSocketBmsTransport
 
@@ -182,6 +188,7 @@ export const useBatteryDetail = () => {
 	const connType = ref<ConnType>('offline')
 	const connecting = ref(false)
 	const pollingPaused = ref(false)
+	const sessionMode = ref<DeviceDetailSessionMode>('cloud')
 
 	let pollTimer: number | null = null
 	let mqttTransport: MqttTransportLike | null = null
@@ -227,6 +234,15 @@ export const useBatteryDetail = () => {
 
 	const canFlushReportQueue = () => {
 		return connType.value === 'bluetooth' && !!deviceId.value
+	}
+
+	const isInstrumentSession = () => sessionMode.value === 'instrument'
+
+	const hasConnectTarget = () => {
+		if (isInstrumentSession()) {
+			return Boolean(String(battery.value?.ble_mac || '').trim())
+		}
+		return Boolean(deviceId.value)
 	}
 
 	const scheduleReportRetry = (delayMs: number) => {
@@ -547,12 +563,13 @@ export const useBatteryDetail = () => {
 
 	const disconnectAll = async () => {
 		const wasBluetooth = connType.value === 'bluetooth'
-		if (wasBluetooth) {
+		if (wasBluetooth && !isInstrumentSession()) {
 			void reportConnectionStatus(false, 'bluetooth')
 		}
 		stopPolling()
 		closeRelaySocket()
 		client.value = null
+		status.value = null
 		connType.value = 'offline'
 		clearReportRetryTimer()
 		if (bleCacheKey) {
@@ -586,10 +603,12 @@ export const useBatteryDetail = () => {
 			retainBleClient(entry.key)
 			client.value = entry.client
 			connType.value = 'bluetooth'
-			void reportConnectionStatus(true, 'bluetooth')
 			startPolling(entry.client)
-			void flushReportQueue()
-			void connectRelaySocket()
+			if (!isInstrumentSession()) {
+				void reportConnectionStatus(true, 'bluetooth')
+				void flushReportQueue()
+				void connectRelaySocket()
+			}
 			return true
 		} catch (e) {
 			log('ble connect failed', { err: e instanceof Error ? e.message : String(e || '') })
@@ -671,10 +690,19 @@ export const useBatteryDetail = () => {
 	}
 
 	const connectAuto = async () => {
-		if (!deviceId.value || connecting.value) return
+		if (!hasConnectTarget() || connecting.value) return
 		connecting.value = true
 		try {
 			await disconnectAll()
+			if (isInstrumentSession()) {
+				log('connectAuto instrument session', {
+					ble_mac: battery.value?.ble_mac ?? null,
+					device_name: battery.value?.device_name ?? null,
+				})
+				if (await connectBleFirst()) return
+				connType.value = 'offline'
+				return
+			}
 			const commType = Number(battery.value?.bms_comm_type || 0)
 			const bleDecision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
 			const treatBleOnly = commType === 1
@@ -708,10 +736,12 @@ export const useBatteryDetail = () => {
 	const loadById = async (id: string) => {
 		const nextId = String(id || '').trim()
 		if (!nextId) return
-		if (nextId !== deviceId.value) {
+		if (nextId !== deviceId.value || sessionMode.value !== 'cloud') {
 			resetReportState({ clearQueue: true })
 		}
+		sessionMode.value = 'cloud'
 		deviceId.value = nextId
+		status.value = null
 		log('load battery detail start', { deviceId: deviceId.value })
 		const rsp = await appBatteryDetail(deviceId.value)
 		if (rsp && (rsp as any).code === 200) {
@@ -729,6 +759,29 @@ export const useBatteryDetail = () => {
 		}
 	}
 
+	const loadInstrumentSession = ({ bleMac, deviceName }: LoadInstrumentSessionOptions) => {
+		const normalizedMac = normalizeMac(bleMac)
+		if (!normalizedMac) return
+		resetReportState({ clearQueue: true })
+		sessionMode.value = 'instrument'
+		deviceId.value = ''
+		status.value = null
+		battery.value = {
+			device_id: '',
+			device_number: normalizedMac,
+			device_name: String(deviceName || '').trim() || `Meter ${normalizedMac.slice(-4)}`,
+			bms_comm_type: 1,
+			ble_mac: normalizedMac,
+			item_uuid: null,
+			comm_chip_id: null,
+		} as AppBatteryDetail
+		log('load instrument session', {
+			ble_mac: normalizedMac,
+			device_name: battery.value.device_name ?? null,
+		})
+		void connectAuto()
+	}
+
 	return {
 		deviceId,
 		battery,
@@ -736,9 +789,11 @@ export const useBatteryDetail = () => {
 		client,
 		connType,
 		connecting,
+		sessionMode,
 		pausePolling,
 		resumePolling,
 		loadById,
+		loadInstrumentSession,
 		disconnectAll,
 		disconnectBluetooth,
 	}

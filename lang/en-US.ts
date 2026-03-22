@@ -220,6 +220,7 @@ export default {
       reRun: 'Run Again',
       goHome: 'Go Home',
       invalidCode: 'Invalid code',
+      unsupportedDeviceType: 'Unsupported device code',
       deviceNotFound: 'Device is not registered on cloud platform, please contact your dealer.',
       autoRegisteringHint: 'Legacy device detected. It will be auto-registered before binding.',
       deviceAlreadyAdded: 'Device is already in My Devices',
@@ -1002,6 +1003,15 @@ export default {
     cells: {
       cellCount: 'Cell count: {n}',
       cellNo: 'Cell {n}',
+    },
+    meter: {
+      deviceName: 'Meter Device',
+      sessionTitle: 'Temporary Meter Session',
+      sessionHint: 'Connected to the meter over BLE. You can scan a BMS QR code and switch the meter target.',
+      scanBindBms: 'Scan BMS QR',
+      onlyBmsMacTip: 'Please scan a BMS QR code',
+      bindTargetSuccess: 'Meter target updated',
+      bindTargetFailed: 'Failed to update meter target',
     },
     params: {
       singleCell: 'Single Cell',

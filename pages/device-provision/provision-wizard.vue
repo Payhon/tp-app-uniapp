@@ -155,6 +155,16 @@ function goHome() {
 	uni.switchTab({ url: '/pages/home/home' })
 }
 
+function goDeviceDetail(deviceId: string) {
+	const nextId = String(deviceId || '').trim()
+	if (!nextId) return
+	setTimeout(() => {
+		uni.redirectTo({
+			url: `/pages/device-battery/detail?device_id=${encodeURIComponent(nextId)}`,
+		})
+	}, 180)
+}
+
 async function runProvision() {
 	if (!deviceId.value) {
 		errorMsg.value = t('pages.deviceProvision.deviceIdMissing')
@@ -256,8 +266,10 @@ async function runProvision() {
 		}
 		setStep('bind', 'done')
 
+		const boundDeviceId = String((bindRes as any)?.data?.device_id || '').trim()
 		done.value = true
 		uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
+		goDeviceDetail(boundDeviceId)
 	} catch (e) {
 		console.error('[provision] failed', e)
 		const msg = stringifyError(e)

@@ -36,6 +36,15 @@
 		</view>
 
 		<view class="content" :style="{ paddingTop: navHeight + 'px', paddingBottom: contentBottomPadPx + 'px' }">
+			<view v-if="showMeterScanHandoff" class="session-card">
+				<view class="session-card__main">
+					<text class="session-card__title">{{ $t('deviceDetail.meter.sessionTitle') }}</text>
+					<text class="session-card__desc">{{ $t('deviceDetail.meter.sessionHint') }}</text>
+				</view>
+				<u-button type="primary" size="mini" @click="scanAndBindBms">
+					{{ $t('deviceDetail.meter.scanBindBms') }}
+				</u-button>
+			</view>
 			<dashboard-tab
 				v-if="activeTab === 0"
 				:battery="battery"
@@ -50,6 +59,7 @@
 				:client="client"
 				:connType="connType"
 				:active="activeTab === 2"
+				:allowOta="allowOta"
 				:onPausePolling="pausePolling"
 				:onResumePolling="resumePolling"
 			/>
@@ -89,13 +99,17 @@ import DashboardTab from './components/dashboard-tab.vue'
 import CellsTab from './components/cells-tab.vue'
 import ParamsTab from './components/params-tab.vue'
 
+import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
+import { DEVICE_TYPE_BMS } from '@/common/device-provision/device-prefix'
+import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { getWindowInfo } from '@/common/platform'
 import { useBatteryDetail } from './useBatteryDetail'
 
 const { t } = useI18n()
 
 const activeTab = ref<0 | 1 | 2>(0)
-const { battery, status, client, connType, connecting, loadById, disconnectAll, disconnectBluetooth, pausePolling, resumePolling } = useBatteryDetail()
+const allowScanHandoff = ref(false)
+const { battery, status, client, connType, connecting, sessionMode, loadById, loadInstrumentSession, disconnectAll, disconnectBluetooth, pausePolling, resumePolling } = useBatteryDetail()
 
 const statusBarHeight = getWindowInfo().statusBarHeight || 0
 const safeBottom = getWindowInfo().safeAreaInsets?.bottom || 0
@@ -111,6 +125,9 @@ const titleText = computed(() => {
 	const name = String(battery.value?.device_name || '').trim()
 	return name || t('pages.deviceDetailTitle')
 })
+
+const allowOta = computed(() => sessionMode.value !== 'instrument')
+const showMeterScanHandoff = computed(() => sessionMode.value === 'instrument' && allowScanHandoff.value)
 
 const connText = computed(() => {
 	if (connecting.value) return t('deviceDetail.conn.connecting') as string
@@ -135,6 +152,14 @@ const showBleDisconnectBtn = computed(() => connType.value === 'bluetooth' && !c
 
 const goBack = () => uni.navigateBack()
 
+function safeDecodeURIComponent(input: string): string {
+	try {
+		return decodeURIComponent(String(input || ''))
+	} catch (e) {
+		return String(input || '')
+	}
+}
+
 const onDisconnectBluetooth = async () => {
 	if (!showBleDisconnectBtn.value) return
 	const ok = await disconnectBluetooth()
@@ -156,8 +181,59 @@ watch(
 	{ immediate: true }
 )
 
+const scanAndBindBms = async () => {
+	const activeClient = client.value
+	if (!activeClient || connType.value !== 'bluetooth') {
+		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	uni.scanCode({
+		onlyFromCamera: true,
+		scanType: ['qrCode'],
+		success: async (result) => {
+			const parsed = parseAddDeviceScanCode((result as any)?.result)
+			if (!parsed || parsed.type !== 'mac' || parsed.deviceType !== DEVICE_TYPE_BMS) {
+				uni.showToast({ title: t('deviceDetail.meter.onlyBmsMacTip') as string, icon: 'none' })
+				return
+			}
+			uni.showLoading({ title: t('common.loading') as string, mask: true })
+			try {
+				await activeClient.configureMeterMac({ meterAddress: 0xfc, mac: mac12ToColon(parsed.value) })
+				uni.showToast({ title: t('deviceDetail.meter.bindTargetSuccess') as string, icon: 'none' })
+				pausePolling()
+				if (activeTab.value !== 2) {
+					setTimeout(() => {
+						resumePolling()
+					}, 180)
+				}
+			} catch (e) {
+				uni.showToast({ title: t('deviceDetail.meter.bindTargetFailed') as string, icon: 'none' })
+			} finally {
+				uni.hideLoading()
+			}
+		},
+		fail: () => {},
+	})
+}
+
 onLoad((query) => {
-	const id = String((query as any)?.device_id || (query as any)?.id || '').trim()
+	const rawQuery = (query as any) || {}
+	if (String(rawQuery.session_mode || '').trim() === 'instrument') {
+		const bleMac = normalizeMac(String(rawQuery.ble_mac || rawQuery.mac || ''))
+		if (!bleMac) {
+			uni.showToast({ title: t('pages.deviceProvision.invalidCode') as string, icon: 'none' })
+			return
+		}
+		allowScanHandoff.value = String(rawQuery.allow_scan_handoff || '1') !== '0'
+		const deviceName = safeDecodeURIComponent(String(rawQuery.device_name || ''))
+		loadInstrumentSession({
+			bleMac,
+			deviceName: deviceName || (t('deviceDetail.meter.deviceName') as string),
+		})
+		return
+	}
+	allowScanHandoff.value = false
+	const id = String(rawQuery.device_id || rawQuery.id || '').trim()
 	loadById(id)
 })
 
@@ -297,6 +373,38 @@ onUnload(() => {
 	position: relative;
 	z-index: 1;
 	box-sizing: border-box;
+}
+
+.session-card {
+	margin: 0 24rpx 20rpx;
+	padding: 24rpx;
+	border-radius: 24rpx;
+	background: rgba(255, 255, 255, 0.92);
+	box-shadow: 0 10rpx 32rpx rgba(36, 111, 221, 0.08);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16rpx;
+}
+
+.session-card__main {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8rpx;
+}
+
+.session-card__title {
+	font-size: 28rpx;
+	font-weight: 600;
+	color: #1f2937;
+}
+
+.session-card__desc {
+	font-size: 24rpx;
+	line-height: 1.5;
+	color: #5b6472;
 }
 
 .bottom-bar {

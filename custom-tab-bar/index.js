@@ -1,4 +1,9 @@
 const I18N = require('./i18n.js')
+const {
+  resolveDeviceTypeByMac,
+  DEVICE_TYPE_BMS,
+  DEVICE_TYPE_METER
+} = require('../common/device-provision/device-prefix.js')
 
 const normalizeLocale = (raw) => {
   const v = String(raw || '').trim()
@@ -84,6 +89,15 @@ Component({
                   return
                 }
                 if (isMac) {
+                  const deviceType = resolveDeviceTypeByMac(normalized)
+                  if (deviceType === DEVICE_TYPE_METER) {
+                    wx.navigateTo({ url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(normalized)}&allow_scan_handoff=1` })
+                    return
+                  }
+                  if (deviceType !== DEVICE_TYPE_BMS) {
+                    wx.showToast({ title: dict.unsupportedDeviceType, icon: 'none' })
+                    return
+                  }
                   wx.navigateTo({ url: `/pages/device-provision/ble-scan?mode=qr&mac=${normalized}` })
                   return
                 }

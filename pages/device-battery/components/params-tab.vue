@@ -85,9 +85,9 @@
 				<u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
 			</view>
 
-			<view v-if="hasAdvancedSections" class="divider"></view>
+			<view v-if="hasAdvancedSections && allowOtaEnabled" class="divider"></view>
 
-			<view class="action" hover-class="action--hover" @tap="openOta">
+			<view v-if="allowOtaEnabled" class="action" hover-class="action--hover" @tap="openOta">
 				<view class="action__left">
 					<image class="action__icon" src="/static/image/device/icon-ota@2x.png" mode="aspectFit" />
 					<text class="action__title">{{ $t('deviceDetail.params.otaUpgrade') }}</text>
@@ -231,6 +231,7 @@ import { appBatteryOtaCheck, type AppBatteryDetail } from '@/service/app-battery
 import { fetchCurrentDeviceParamPermissions } from '@/service/permissions'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import type { BmsClient } from '@/common/lib/bms-protocol'
+import { isMeterMac } from '@/common/device-provision/device-prefix'
 import {
 	BMS_PARAM,
 	FUNCTION_CONFIG_ITEMS,
@@ -301,6 +302,7 @@ const props = defineProps<{
 	client: BmsClient | null
 	connType: 'bluetooth' | 'mqtt' | 'offline'
 	active?: boolean
+	allowOta?: boolean
 	onPausePolling?: () => void
 	onResumePolling?: () => void
 }>()
@@ -343,6 +345,7 @@ const toggle = (k: keyof typeof opened) => {
 }
 
 const fwVersionText = computed(() => String(props.battery?.fw_version || props.status?.meta?.softwareVersion || '-'))
+const allowOtaEnabled = computed(() => props.allowOta !== false)
 
 const paramValues = reactive<Record<string, unknown>>({})
 
@@ -886,14 +889,11 @@ const otaLogger = {
 	error: (...args: unknown[]) => console.error('[ota]', ...args),
 }
 
-const parseMacFirstByte = (mac: string): number | null => {
-	const hex = String(mac || '').replace(/[^0-9a-fA-F]/g, '')
-	if (hex.length < 2) return null
-	const v = Number.parseInt(hex.slice(0, 2), 16)
-	return Number.isFinite(v) ? v : null
-}
-
 const startOta = async () => {
+	if (props.allowOta === false) {
+		uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
+		return
+	}
 	if (!props.client || props.connType === 'offline') {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
 		return
@@ -939,8 +939,7 @@ const startOta = async () => {
 
 		const { sourceAddress, targetAddress: deviceTarget } = props.client.getAddresses()
 		const macRaw = String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim()
-		const macFirst = parseMacFirstByte(macRaw)
-		const isGaugeDevice = macFirst === 0xaa
+		const isGaugeDevice = isMeterMac(macRaw)
 		const otaTargetAddress = isGaugeDevice ? 0xfc : deviceTarget
 		const rawTransport = props.client.getTransport()
 		const otaTransport = {
