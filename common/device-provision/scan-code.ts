@@ -1,7 +1,7 @@
 import { normalizeHex, normalizeMac } from './ble'
-import { DEVICE_TYPE_BMS, DEVICE_TYPE_METER, resolveDeviceTypeByMac } from './device-prefix'
+import * as devicePrefixModule from './device-prefix.js'
 
-type SupportedDeviceType = typeof DEVICE_TYPE_BMS | typeof DEVICE_TYPE_METER
+type SupportedDeviceType = typeof devicePrefixModule.DEVICE_TYPE_BMS | typeof devicePrefixModule.DEVICE_TYPE_METER
 
 export type AddDeviceScanCode =
 	| { type: 'mac'; value: string; deviceType: SupportedDeviceType | null }
@@ -15,7 +15,7 @@ export type AddDeviceScanCode =
 export function parseAddDeviceScanCode(raw: string): AddDeviceScanCode | null {
 	const hex = normalizeHex(raw)
 	const mac = normalizeMac(hex)
-	if (mac) return { type: 'mac', value: mac, deviceType: resolveDeviceTypeByMac(mac) }
+	if (mac) return { type: 'mac', value: mac, deviceType: devicePrefixModule.resolveDeviceTypeByMac(mac) }
 	if (/^[0-9A-F]{32}$/.test(hex)) return { type: 'uuid', value: hex }
 	return null
 }

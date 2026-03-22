@@ -6,6 +6,8 @@
 					class="gauge"
 					:soc="socPct"
 					:soh="sohPct"
+					:total-voltage-text="totalVoltageText"
+					:total-voltage-label="$t('deviceDetail.dashboard.totalVoltage')"
 					:footer-state-text="stateText"
 					:footer-mac-text="macText"
 				>
@@ -17,11 +19,6 @@
 					</template>
 				</dashboard-gauge>
 			</view>
-		</view>
-
-		<view class="remain">
-			<text class="remain__label">{{ remainLabel }}</text>
-			<text class="remain__value">{{ remainValue }}</text>
 		</view>
 
 		<view v-if="hasFlags" class="flags">
@@ -50,9 +47,9 @@
 			<view class="card">
 				<view class="card__head">
 					<image class="card__icon" src="/static/image/device/icon-charge-time@2x.png" mode="aspectFit" />
-					<text class="card__label">{{ $t('deviceDetail.dashboard.chargeTime') }}</text>
+					<text class="card__label">{{ chargeDischargeTimeLabel }}</text>
 				</view>
-				<text class="card__value">{{ chargeTimeText }}</text>
+				<text class="card__value">{{ chargeDischargeTimeText }}</text>
 			</view>
 			<view class="card">
 				<view class="card__head">
@@ -218,24 +215,10 @@ const macText = computed(() => {
 	return formatMac(props.status?.identity?.bluetoothMac || props.battery?.ble_mac || '-')
 })
 
-const remainLabel = computed(() => {
-	if ((indicator.value as any).charging) return t('deviceDetail.remain.charge') as string
-	if ((indicator.value as any).discharging) return t('deviceDetail.remain.discharge') as string
-	return t('deviceDetail.remain.unknown') as string
-})
-
-const remainValue = computed(() => {
-	if ((indicator.value as any).charging) {
-		const v = props.status?.timing?.chargeRemainingMin
-		if (isInvalidU16(v)) return '-'
-		return formatWithParams('deviceDetail.unit.minutes', { n: Number(v || 0) })
-	}
-	if ((indicator.value as any).discharging) {
-		const v = props.status?.timing?.dischargeRemainingMin
-		if (isInvalidU16(v)) return '-'
-		return formatWithParams('deviceDetail.unit.minutes', { n: Number(v || 0) })
-	}
-	return '-'
+const chargeDischargeTimeLabel = computed(() => {
+	if ((indicator.value as any).charging) return t('deviceDetail.dashboard.chargeRemainingTime') as string
+	if ((indicator.value as any).discharging) return t('deviceDetail.dashboard.dischargeRemainingTime') as string
+	return t('deviceDetail.dashboard.chargeDischargeRemainingTime') as string
 })
 
 const faultCount = computed(() => {
@@ -317,10 +300,25 @@ const cycleCountText = computed(() => {
 	return formatWithParams('deviceDetail.unit.times', { n: Number(v || 0) })
 })
 
-const chargeTimeText = computed(() => {
-	const v = props.status?.timing?.chargeRemainingMin
-	if (isInvalidU16(v)) return '-'
-	return formatWithParams('deviceDetail.unit.perMinute', { n: Number(v || 0) })
+const chargeDischargeTimeText = computed(() => {
+	if ((indicator.value as any).charging) {
+		const v = props.status?.timing?.chargeRemainingMin
+		if (isInvalidU16(v)) return '-'
+		return `${Number(v || 0)}min`
+	}
+	if ((indicator.value as any).discharging) {
+		const v = props.status?.timing?.dischargeRemainingMin
+		if (isInvalidU16(v)) return '-'
+		return `-${Number(v || 0)}min`
+	}
+	return '-'
+})
+
+const totalVoltageText = computed(() => {
+	const v = props.status?.electrical?.packCellSumVoltageV
+	if (typeof v !== 'number' || !Number.isFinite(v)) return '-'
+	if (v >= 1000 || v >= 0xffff) return '-'
+	return `${v.toFixed(1)}V`
 })
 
 const formatSignedCurrent = (value: unknown) => {
@@ -448,22 +446,8 @@ const t2Text = computed(() => {
 	font-family: 'Avenir Next', Helvetica, Arial, sans-serif;
 }
 
-.remain {
-	margin-top: 8rpx;
-	display: flex;
-	align-items: center;
-	gap: 10rpx;
-	padding: 0 18rpx;
-	color: #9aa0a6;
-}
-
-.remain__label,
-.remain__value {
-	font-size: 22rpx;
-}
-
 .flags {
-	margin-top: 18rpx;
+	margin-top: 26rpx;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;

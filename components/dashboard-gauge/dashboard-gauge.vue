@@ -9,6 +9,11 @@
 
 			<!-- #ifndef MP-WEIXIN -->
 			<view class="content-overlay">
+				<view class="top-voltage" v-if="totalVoltageText">
+					<text class="top-voltage__label">{{ totalVoltageLabel }}</text>
+					<text class="top-voltage__value">{{ totalVoltageText }}</text>
+				</view>
+
 				<view class="values-row">
 					<view class="val-item">
 						<view class="num-wrap">
@@ -44,6 +49,8 @@ type Pt = { x: number; y: number }
 type Props = {
 	soc?: number
 	soh?: number
+	totalVoltageText?: string
+	totalVoltageLabel?: string
 	footerStateText?: string
 	footerMacText?: string
 }
@@ -51,6 +58,8 @@ type Props = {
 const props = withDefaults(defineProps<Props>(), {
 	soc: 0,
 	soh: 0,
+	totalVoltageText: '',
+	totalVoltageLabel: '总电压',
 	footerStateText: '',
 	footerMacText: '',
 })
@@ -64,34 +73,82 @@ const cssH = ref(0)
 const socText = computed(() => String(Math.round(props.soc || 0)))
 const sohText = computed(() => String(Math.round(props.soh || 0)))
 
+type CubicSegment = {
+	p0: Pt
+	c1: Pt
+	c2: Pt
+	p1: Pt
+}
+
 // 虚拟画布坐标系 (加高比例)
 const VW = 400
 const VH = 240
 const TRACK_W = 16
 
-/**
- * 轨道点位定义 (从底部到顶部的路径)
- * 左侧：由下往上
- * 右侧：由下往上
- */
-const LEFT_PTS: Pt[] = [
-	{ x: 110, y: 210 },
-	{ x: 60, y: 210 },
-	{ x: 25, y: VH / 2 },
-	{ x: 60, y: 30 },
-	{ x: 110, y: 30 },
+const LEFT_CURVES: CubicSegment[] = [
+	{
+		p0: { x: 104, y: 206 },
+		c1: { x: 62, y: 206 },
+		c2: { x: 34, y: 176 },
+		p1: { x: 28, y: 120 },
+	},
+	{
+		p0: { x: 28, y: 120 },
+		c1: { x: 34, y: 64 },
+		c2: { x: 62, y: 34 },
+		p1: { x: 104, y: 34 },
+	},
 ]
 
-const RIGHT_PTS: Pt[] = [
-	{ x: 290, y: 210 },
-	{ x: 340, y: 210 },
-	{ x: 375, y: VH / 2 },
-	{ x: 340, y: 30 },
-	{ x: 290, y: 30 },
+const RIGHT_CURVES: CubicSegment[] = [
+	{
+		p0: { x: 296, y: 206 },
+		c1: { x: 338, y: 206 },
+		c2: { x: 366, y: 176 },
+		p1: { x: 372, y: 120 },
+	},
+	{
+		p0: { x: 372, y: 120 },
+		c1: { x: 366, y: 64 },
+		c2: { x: 338, y: 34 },
+		p1: { x: 296, y: 34 },
+	},
 ]
 
 // 计算路径段长度
 const getDist = (a: Pt, b: Pt) => Math.hypot(b.x - a.x, b.y - a.y)
+
+const cubicBezierPoint = (seg: CubicSegment, t: number): Pt => {
+	const mt = 1 - t
+	const mt2 = mt * mt
+	const t2 = t * t
+	return {
+		x:
+			mt2 * mt * seg.p0.x +
+			3 * mt2 * t * seg.c1.x +
+			3 * mt * t2 * seg.c2.x +
+			t2 * t * seg.p1.x,
+		y:
+			mt2 * mt * seg.p0.y +
+			3 * mt2 * t * seg.c1.y +
+			3 * mt * t2 * seg.c2.y +
+			t2 * t * seg.p1.y,
+	}
+}
+
+const sampleCurvePath = (curves: CubicSegment[], precision = 24): Pt[] => {
+	const pts: Pt[] = []
+	curves.forEach((seg, segIndex) => {
+		for (let i = 0; i <= precision; i += 1) {
+			if (segIndex > 0 && i === 0) continue
+			pts.push(cubicBezierPoint(seg, i / precision))
+		}
+	})
+	return pts
+}
+
+const LEFT_PTS = sampleCurvePath(LEFT_CURVES)
+const RIGHT_PTS = sampleCurvePath(RIGHT_CURVES)
 
 // 绘制路径逻辑
 const drawPath = (ctx: any, pts: Pt[], limitPct: number = 1) => {
@@ -182,11 +239,22 @@ const draw = () => {
 	// #ifdef MP-WEIXIN
 	const soc = socText.value
 	const soh = sohText.value
+	const totalVoltageText = String(props.totalVoltageText || '')
+	const totalVoltageLabel = String(props.totalVoltageLabel || '')
 	const stateText = String(props.footerStateText || '')
 	const macText = String(props.footerMacText || '')
 
 	ctx.setTextAlign('center')
 	ctx.setTextBaseline('middle')
+
+	if (totalVoltageText) {
+		ctx.setFillStyle('#7A869A')
+		ctx.setFontSize(13)
+		ctx.fillText(totalVoltageLabel, 200, 38)
+		ctx.setFillStyle('#0F172A')
+		ctx.setFontSize(24)
+		ctx.fillText(totalVoltageText, 200, 62)
+	}
 
 	// SOC
 	ctx.setFillStyle('#003399')
@@ -243,7 +311,7 @@ onMounted(() => {
 	setTimeout(measure, 200)
 })
 
-watch(() => [props.soc, props.soh, props.footerStateText, props.footerMacText], draw)
+watch(() => [props.soc, props.soh, props.totalVoltageText, props.totalVoltageLabel, props.footerStateText, props.footerMacText], draw)
 </script>
 
 <style lang="scss" scoped>
@@ -272,11 +340,36 @@ watch(() => [props.soc, props.soh, props.footerStateText, props.footerMacText], 
 	justify-content: center;
 }
 
+.top-voltage {
+	position: absolute;
+	top: 12rpx;
+	left: 50%;
+	transform: translateX(-50%);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6rpx;
+}
+
+.top-voltage__label {
+	font-size: 22rpx;
+	color: #7a869a;
+	font-weight: 600;
+}
+
+.top-voltage__value {
+	font-size: 40rpx;
+	line-height: 1;
+	color: #0f172a;
+	font-weight: 800;
+	font-family: 'Avenir Next', -apple-system, sans-serif;
+}
+
 .values-row {
 	display: flex;
 	justify-content: space-between;
 	padding: 0 20%; // 增大左右间距，避免文字贴进度条太近
-	margin-top: -30rpx;
+	margin-top: 12rpx;
 }
 
 .val-item {

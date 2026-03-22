@@ -979,8 +979,11 @@ export default {
       insulationAlarm: 'Insulation Alarm',
     },
     dashboard: {
+      totalVoltage: 'Pack Voltage',
       cycleCount: 'Cycles',
-      chargeTime: 'Charge Time',
+      chargeDischargeRemainingTime: 'Charge/Discharge Remaining Time',
+      chargeRemainingTime: 'Charge Remaining Time',
+      dischargeRemainingTime: 'Discharge Remaining Time',
       current: 'Charge/Discharge Current',
       chargeSwitch: 'Charge Switch',
       dischargeSwitch: 'Discharge Switch',

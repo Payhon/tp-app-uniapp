@@ -100,12 +100,13 @@ import CellsTab from './components/cells-tab.vue'
 import ParamsTab from './components/params-tab.vue'
 
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
-import { DEVICE_TYPE_BMS } from '@/common/device-provision/device-prefix'
+import * as devicePrefixModule from '@/common/device-provision/device-prefix.js'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { getWindowInfo } from '@/common/platform'
 import { useBatteryDetail } from './useBatteryDetail'
 
 const { t } = useI18n()
+const DEVICE_TYPE_BMS = devicePrefixModule.DEVICE_TYPE_BMS
 
 const activeTab = ref<0 | 1 | 2>(0)
 const allowScanHandoff = ref(false)

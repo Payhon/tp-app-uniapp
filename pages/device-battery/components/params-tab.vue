@@ -231,7 +231,7 @@ import { appBatteryOtaCheck, type AppBatteryDetail } from '@/service/app-battery
 import { fetchCurrentDeviceParamPermissions } from '@/service/permissions'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import type { BmsClient } from '@/common/lib/bms-protocol'
-import { isMeterMac } from '@/common/device-provision/device-prefix'
+import * as devicePrefixModule from '@/common/device-provision/device-prefix.js'
 import {
 	BMS_PARAM,
 	FUNCTION_CONFIG_ITEMS,
@@ -306,6 +306,8 @@ const props = defineProps<{
 	onPausePolling?: () => void
 	onResumePolling?: () => void
 }>()
+
+const isMeterMac = devicePrefixModule.isMeterMac
 
 const { t, te } = useI18n()
 
@@ -382,6 +384,12 @@ const labelOf = (key: string) => {
 	const i18nKey = `bmsParam.${key}`
 	if (te(i18nKey)) return t(i18nKey) as string
 	return PARAM_DEF_BY_KEY[key]?.label || key
+}
+
+const withSingleCellPrefix = (label: string) => {
+	if (!label) return '单体'
+	if (label.includes('单体')) return label
+	return `单体${label}`
 }
 
 const unitOf = (key: string) => String(PARAM_DEF_BY_KEY[key]?.unit || '')
@@ -461,10 +469,11 @@ const mkItems = (keys: Array<string | { displayKey: string; actualKey: string }>
 		const actualKey = typeof entry === 'string' ? entry : entry.actualKey
 		const unit = unitOf(actualKey)
 		const value = paramValues[actualKey]
+		const label = labelOf(key)
 		return {
 			key,
 			actualKey,
-			label: labelOf(key),
+			label: SINGLE_KEY_SET.has(actualKey) ? withSingleCellPrefix(label) : label,
 			unit,
 			valueText: formatParamValue(actualKey, value),
 			valueType: PARAM_DEF_BY_KEY[actualKey]?.valueType || 'u16',
@@ -491,6 +500,7 @@ const SINGLE_KEYS = [
 	'CELL_UV_ALARM_RELEASE_DELAY_S',
 	'CELL_UV_PROTECT_RELEASE_DELAY_S',
 ]
+const SINGLE_KEY_SET = new Set(SINGLE_KEYS)
 
 const VOLTAGE_KEYS = [
 	'PACK_OV_ALARM_V',

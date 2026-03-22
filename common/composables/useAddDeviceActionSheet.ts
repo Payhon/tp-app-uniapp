@@ -1,6 +1,9 @@
 import i18n from '@/lang/index'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
-import { DEVICE_TYPE_BMS, DEVICE_TYPE_METER } from '@/common/device-provision/device-prefix'
+import * as devicePrefixModule from '@/common/device-provision/device-prefix.js'
+
+const DEVICE_TYPE_BMS = devicePrefixModule.DEVICE_TYPE_BMS
+const DEVICE_TYPE_METER = devicePrefixModule.DEVICE_TYPE_METER
 
 const t = (key: string) => i18n.global.t(key) as unknown as string
 
