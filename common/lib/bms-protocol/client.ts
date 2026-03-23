@@ -8,6 +8,7 @@ import {
 	parseSocketReadPayload,
 	splitIntoRegistersBE,
 } from './frame';
+import { parseHistoryProtectionPayload, parseHistoryStatusPayload } from './history-parser';
 import {
 	PARAM_CATEGORIES,
 	PARAM_DEF_BY_KEY,
@@ -18,7 +19,7 @@ import {
 import { RegisterView, decodeAscii, encodeAsciiFixed, swapWordBytes } from './register-view';
 import { parseStatusRegisters } from './status-parser';
 import type { BmsParsedFrame } from './frame'
-import type { BmsParamDef, BmsRequestTransport, BmsStatus, LoggerLike } from './types'
+import type { BmsHistoryProtectionCounters, BmsHistoryStatusRecord, BmsParamDef, BmsRequestOptions, BmsRequestTransport, BmsStatus, LoggerLike } from './types'
 
 type AddressRange = { startAddress: number; quantity: number }
 
@@ -156,8 +157,8 @@ export class BmsClient {
 		return { targetAddress: this.targetAddress, sourceAddress: this.sourceAddress };
 	}
 
-	private async _request(frameBytes: Uint8Array): Promise<BmsParsedFrame> {
-		const respBytes = await this.transport.request(frameBytes);
+	private async _request(frameBytes: Uint8Array, requestOptions?: BmsRequestOptions): Promise<BmsParsedFrame> {
+		const respBytes = await this.transport.request(frameBytes, requestOptions);
 		return parseFrame(respBytes);
 	}
 
@@ -320,7 +321,113 @@ export class BmsClient {
 		// 16 bytes UUID
 		let hex = '';
 		for (let i = 0; i < resp.data.length; i += 1) hex += resp.data[i].toString(16).padStart(2, '0');
-		return hex;
+		return hex.toUpperCase();
+	}
+
+	async readHistoryProtectionCounters(): Promise<BmsHistoryProtectionCounters | null> {
+		const req = buildReadFrame({
+			sourceAddress: this.sourceAddress,
+			targetAddress: this.targetAddress,
+			functionCode: BMS_FUNC.HISTORY_PROTECTION_COUNT,
+			startAddress: 0x0000,
+			quantity: 0x0020,
+		})
+		try {
+			console.log('[bms][history] tx 0x4C', {
+				targetAddress: this.targetAddress,
+				startAddress: 0,
+				quantity: 0x20,
+				hex: bytesToHex(req),
+			})
+			const resp = await this._request(req, { timeoutMs: 8000 })
+			console.log('[bms][history] rx 0x4C', {
+				type: resp.type,
+				functionCode: `0x${resp.functionCode.toString(16).toUpperCase()}`,
+				hex: bytesToHex(resp.raw),
+			})
+			if (resp.type === 'error') return null
+			if (resp.type !== 'read') throw new BmsProtocolError('Unexpected response type', resp)
+			const parsed = parseHistoryProtectionPayload(resp.data)
+			console.log('[bms][history] parsed 0x4C', {
+				currentRecordAddress: parsed?.currentRecordAddress ?? null,
+				currentRecordCount: parsed?.currentRecordCount ?? null,
+				totalChargeSeconds: parsed?.totalChargeSeconds ?? null,
+				totalDischargeSeconds: parsed?.totalDischargeSeconds ?? null,
+			})
+			return parsed
+		} catch (e) {
+			console.log('[bms][history] failed 0x4C', {
+				error: e instanceof Error ? e.message : String(e || ''),
+			})
+			throw e
+		}
+	}
+
+	async readHistoryStatusRecords(startIndex: number, quantity: number): Promise<BmsHistoryStatusRecord[] | null> {
+		const safeStartIndex = Number(startIndex)
+		const safeQuantity = Number(quantity)
+		if (!Number.isInteger(safeStartIndex) || safeStartIndex < 0 || safeStartIndex > 0xffff) {
+			throw new BmsProtocolError('history startIndex out of range', { startIndex })
+		}
+		if (!Number.isInteger(safeQuantity) || safeQuantity < 1 || safeQuantity > 6) {
+			throw new BmsProtocolError('history quantity out of range', { quantity })
+		}
+		try {
+			return await this._readHistoryStatusRecordsOnce(safeStartIndex, safeQuantity)
+		} catch (e) {
+			console.log('[bms][history] failed 0x4D batch', {
+				startIndex: safeStartIndex,
+				quantity: safeQuantity,
+				error: e instanceof Error ? e.message : String(e || ''),
+			})
+			if (safeQuantity <= 1) throw e
+			console.log('[bms][history] fallback 0x4D -> single record requests', {
+				startIndex: safeStartIndex,
+				quantity: safeQuantity,
+			})
+			const merged: BmsHistoryStatusRecord[] = []
+			for (let i = 0; i < safeQuantity; i += 1) {
+				const itemStartIndex = safeStartIndex + i
+				const single = await this._readHistoryStatusRecordsOnce(itemStartIndex, 1)
+				if (single == null) return null
+				merged.push(...single)
+			}
+			return merged
+		}
+	}
+
+	private async _readHistoryStatusRecordsOnce(startIndex: number, quantity: number): Promise<BmsHistoryStatusRecord[] | null> {
+		const req = buildReadFrame({
+			sourceAddress: this.sourceAddress,
+			targetAddress: this.targetAddress,
+			functionCode: BMS_FUNC.HISTORY_STATUS_RECORD,
+			startAddress: startIndex,
+			quantity,
+		})
+		console.log('[bms][history] tx 0x4D', {
+			targetAddress: this.targetAddress,
+			startIndex,
+			quantity,
+			hex: bytesToHex(req),
+		})
+		const resp = await this._request(req, { timeoutMs: 15000 })
+		console.log('[bms][history] rx 0x4D', {
+			type: resp.type,
+			functionCode: `0x${resp.functionCode.toString(16).toUpperCase()}`,
+			startIndex,
+			quantity,
+			hex: bytesToHex(resp.raw),
+		})
+		if (resp.type === 'error') return null
+		if (resp.type !== 'read') throw new BmsProtocolError('Unexpected response type', resp)
+		const parsed = parseHistoryStatusPayload(resp.data, startIndex)
+		console.log('[bms][history] parsed 0x4D', {
+			startIndex,
+			quantity,
+			loaded: parsed?.length ?? 0,
+			indexes: parsed?.map((item) => item.index) ?? [],
+		})
+		return parsed
 	}
 
 	async syncTime(timestampSeconds = Math.floor(Date.now() / 1000)): Promise<void> {

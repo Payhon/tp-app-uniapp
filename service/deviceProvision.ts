@@ -1,4 +1,5 @@
 import api from '@/API/'
+import { normalizeHex } from '@/common/device-provision/ble'
 
 type ApiResponse<T> = { code: number; data: T; message?: string }
 type ApiRequest = <T>(
@@ -8,6 +9,8 @@ type ApiRequest = <T>(
 ) => Promise<ApiResponse<T>>
 
 const apiRequest = (api as unknown as { apiRequest: ApiRequest }).apiRequest
+
+const normalizeProvisionItemUUID = (itemUuid: string) => normalizeHex(itemUuid)
 
 export type DeviceProvisionConfig = { dtu_domain_port: string }
 export type DeviceProvisionInfo = {
@@ -28,9 +31,13 @@ export const getDeviceProvisionConfig = () => {
 }
 
 export const getDeviceProvisionInfo = (itemUuid: string) => {
-	return apiRequest<DeviceProvisionInfo>('/api/v1/app/device/provision/info', { item_uuid: itemUuid }, 'GET')
+	return apiRequest<DeviceProvisionInfo>('/api/v1/app/device/provision/info', { item_uuid: normalizeProvisionItemUUID(itemUuid) }, 'GET')
 }
 
 export const postDeviceProvisionBind = (params: { item_uuid: string; ble_mac?: string }) => {
-	return apiRequest<unknown>('/api/v1/app/device/provision/bind', params, 'POST')
+	return apiRequest<unknown>(
+		'/api/v1/app/device/provision/bind',
+		{ ...params, item_uuid: normalizeProvisionItemUUID(params.item_uuid) },
+		'POST'
+	)
 }
