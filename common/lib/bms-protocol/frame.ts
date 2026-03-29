@@ -20,6 +20,10 @@ export const BMS_FUNC = Object.freeze({
 	WRITE_MULTIPLE_REGISTERS: 0x10,
 	// 0x11：写从机地址/分配地址
 	ASSIGN_SLAVE_ADDR: 0x11,
+	// 0x4C：历史保护次数记录
+	HISTORY_PROTECTION_COUNT: 0x4c,
+	// 0x4D：历史状态记录
+	HISTORY_STATUS_RECORD: 0x4d,
 	// 0xFF：获取 BMS 板 UUID（读指令扩展）
 	READ_UUID: 0xff,
 } as const);
@@ -181,6 +185,8 @@ export function parseFrame(frameBytes: Uint8Array | ArrayLike<number>): BmsParse
 	if (
 		bytes.length >= 10 &&
 		(functionCode === BMS_FUNC.READ_HOLDING_REGISTERS ||
+			functionCode === BMS_FUNC.HISTORY_PROTECTION_COUNT ||
+			functionCode === BMS_FUNC.HISTORY_STATUS_RECORD ||
 			functionCode === BMS_FUNC.READ_UUID ||
 			functionCode === BMS_FUNC.SOCKET_READ)
 	) {

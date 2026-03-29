@@ -95,19 +95,11 @@
 		</view>
 
 		<view class="temp-card">
-			<view class="temp-row">
-				<text class="temp-row__name">{{ $t('deviceDetail.dashboard.mosTemp') }}</text>
-				<text class="temp-row__value">{{ mosText }}</text>
-			</view>
-			<view class="divider"></view>
-			<view class="temp-row">
-				<text class="temp-row__name">{{ $t('deviceDetail.dashboard.ambientTemp') }}</text>
-				<text class="temp-row__value">{{ t1Text }}</text>
-			</view>
-			<view class="divider"></view>
-			<view class="temp-row">
-				<text class="temp-row__name">{{ $t('deviceDetail.dashboard.cellTemp') }}</text>
-				<text class="temp-row__value">{{ t2Text }}</text>
+			<view class="temp-grid">
+				<view v-for="item in temperatureRows" :key="item.key" class="temp-row">
+					<text class="temp-row__name">{{ item.label }}</text>
+					<text class="temp-row__value">{{ item.value }}</text>
+				</view>
 			</view>
 		</view>
 
@@ -269,7 +261,7 @@ const flagPopup = reactive({
 	items: [] as string[],
 })
 
-const protectExpanded = ref(true)
+const protectExpanded = ref(false)
 
 const openFlag = (type: 'fault' | 'alarm' | 'protect') => {
 	if (type === 'fault') {
@@ -377,13 +369,28 @@ const cToFText = (c: number | null | undefined) => {
 
 const mosText = computed(() => cToFText(props.status?.temperature?.chargeMosC))
 const t1Text = computed(() => cToFText(props.status?.temperature?.ambientC))
-const t2Text = computed(() => {
+const temperatureRows = computed(() => {
+	const rows = [
+		{
+			key: 'mos',
+			label: t('deviceDetail.dashboard.mosTemp') as string,
+			value: mosText.value,
+		},
+		{
+			key: 'ambient',
+			label: t('deviceDetail.dashboard.ambientTemp') as string,
+			value: t1Text.value,
+		},
+	]
 	const cellTemps = props.status?.temperature?.cellTempsC || []
-	const v =
-		cellTemps.length > 0
-			? cellTemps[0]
-			: props.status?.temperature?.highestTemp?.valueC ?? props.status?.temperature?.poleC ?? null
-	return cToFText(v)
+	cellTemps.forEach((temp, index) => {
+		rows.push({
+			key: `cell-${index + 1}`,
+			label: formatWithParams('deviceDetail.dashboard.tempIndexed', { n: index + 1 }),
+			value: cToFText(temp),
+		})
+	})
+	return rows
 })
 </script>
 
@@ -579,30 +586,38 @@ const t2Text = computed(() => {
 	margin-top: 18rpx;
 	background: #ffffff;
 	border-radius: 22rpx;
+	padding: 24rpx;
 	box-shadow: 0 8rpx 30rpx rgba(0, 0, 0, 0.06);
-	overflow: hidden;
+}
+
+.temp-grid {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 18rpx;
 }
 
 .temp-row {
-	padding: 22rpx 24rpx;
 	display: flex;
+	flex-direction: column;
 	align-items: center;
-	justify-content: space-between;
+	justify-content: center;
+	gap: 10rpx;
+	padding: 18rpx 20rpx;
+	border-radius: 18rpx;
+	background: #f7f8fa;
+	text-align: center;
 }
 
 .temp-row__name {
-	font-size: 26rpx;
-	color: #333333;
+	font-size: 22rpx;
+	color: #9aa0a6;
 }
 
 .temp-row__value {
-	font-size: 26rpx;
+	font-size: 30rpx;
+	font-weight: 600;
 	color: #333333;
-}
-
-.divider {
-	height: 1px;
-	background: #f2f3f5;
+	text-align: center;
 }
 
 .protect-card {

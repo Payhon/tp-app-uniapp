@@ -6,6 +6,7 @@ export * from './ble-uuids';
 export * from './param-registry';
 export * from './register-view';
 export * from './status-parser';
+export * from './history-parser';
 export * from './transport';
 export * from './boot-frame';
 export * from './boot-ota';

@@ -14,7 +14,11 @@ export type LoggerLike = {
 	error?: (...args: unknown[]) => void
 }
 
-export type BmsTransportRequest = (frameBytes: Uint8Array) => Promise<Uint8Array> | Uint8Array
+export type BmsRequestOptions = {
+	timeoutMs?: number
+}
+
+export type BmsTransportRequest = (frameBytes: Uint8Array, options?: BmsRequestOptions) => Promise<Uint8Array> | Uint8Array
 
 export interface BmsRequestTransport {
 	request: BmsTransportRequest
@@ -147,4 +151,69 @@ export type BmsStatus = {
 		bluetoothMac: string | null
 	}
 	customParams: number[]
+}
+
+export type BmsHistoryProtectionCounters = {
+	protocolVersion: number
+	currentRecordAddress: number
+	currentRecordCount: number
+	chargeHighTempCount: number
+	chargeLowTempCount: number
+	dischargeHighTempCount: number
+	dischargeLowTempCount: number
+	mosHighTempCount: number
+	softOverChargeCount: number
+	softOverDischargeCount: number
+	packOverVoltageCount: number
+	packOverDischargeCount: number
+	fullChargeCount: number
+	hardOverChargeCount: number
+	hardOverDischargeCount: number
+	softChargeOverCurrentCount: number
+	softDischargeOverCurrentCount: number
+	hardOverCurrentCount: number
+	hardShortCircuitCount: number
+	lowVoltagePowerOffCount: number
+	autoPowerOffCount: number
+	keyPowerOffCount: number
+	resetCount: number
+	totalDischargeSeconds: number
+	totalChargeSeconds: number
+}
+
+export type BmsHistoryStatusFlagMap = Record<string, boolean>
+
+export type BmsHistoryStatusFlags = {
+	voltage: BmsHistoryStatusFlagMap
+	current: BmsHistoryStatusFlagMap
+	temperature: BmsHistoryStatusFlagMap
+	chargeDischarge: BmsHistoryStatusFlagMap
+}
+
+export type BmsHistoryStatusRecord = {
+	protocolVersion: number
+	index: number
+	time: {
+		year: number
+		month: number
+		day: number
+		hour: number
+		minute: number
+		second: number
+	}
+	totalVoltageV: number
+	lowestVoltageMv: number
+	highestVoltageMv: number
+	currentA: number
+	lowestCellTempC: number | null
+	highestCellTempC: number | null
+	socPct: number
+	remainingCapacityMah: number
+	cycleCount: number
+	flags: BmsHistoryStatusFlags
+	logCode: number
+	sohPct: number
+	mosTempC: number | null
+	lowestVoltageCellIndex: number
+	highestVoltageCellIndex: number
 }

@@ -229,9 +229,9 @@ import { computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { appBatteryOtaCheck, type AppBatteryDetail } from '@/service/app-battery'
 import { fetchCurrentDeviceParamPermissions } from '@/service/permissions'
+import { isMeterMac } from '@/common/device-provision/device-prefix-shared'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import type { BmsClient } from '@/common/lib/bms-protocol'
-import * as devicePrefixModule from '@/common/device-provision/device-prefix.js'
 import {
 	BMS_PARAM,
 	FUNCTION_CONFIG_ITEMS,
@@ -306,8 +306,6 @@ const props = defineProps<{
 	onPausePolling?: () => void
 	onResumePolling?: () => void
 }>()
-
-const isMeterMac = devicePrefixModule.isMeterMac
 
 const { t, te } = useI18n()
 

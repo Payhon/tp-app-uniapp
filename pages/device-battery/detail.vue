@@ -18,6 +18,9 @@
 						<u-icon name="close" size="12" color="#246FDD"></u-icon>
 						<text class="conn-disconnect__text">{{ $t('deviceDetail.conn.disconnect') }}</text>
 					</view>
+					<view v-if="showMeterPanelTrigger" class="meter-entry" hover-class="meter-entry--hover" @tap="openMeterPanel">
+						<image class="meter-entry__icon" src="/static/image/device/navbar-dashboard-on@2x.png" mode="aspectFit" />
+					</view>
 				</view>
 				<!-- #endif -->
 			</view>
@@ -31,20 +34,54 @@
 					<u-icon name="close" size="12" color="#246FDD"></u-icon>
 					<text class="conn-disconnect__text">{{ $t('deviceDetail.conn.disconnect') }}</text>
 				</view>
+				<view v-if="showMeterPanelTrigger" class="meter-entry" hover-class="meter-entry--hover" @tap="openMeterPanel">
+					<image class="meter-entry__icon" src="/static/image/device/navbar-dashboard-on@2x.png" mode="aspectFit" />
+				</view>
 			</view>
 			<!-- #endif -->
 		</view>
 
 		<view class="content" :style="{ paddingTop: navHeight + 'px', paddingBottom: contentBottomPadPx + 'px' }">
-			<view v-if="showMeterScanHandoff" class="session-card">
-				<view class="session-card__main">
-					<text class="session-card__title">{{ $t('deviceDetail.meter.sessionTitle') }}</text>
-					<text class="session-card__desc">{{ $t('deviceDetail.meter.sessionHint') }}</text>
+			<!-- #ifdef MP-WEIXIN -->
+			<cover-view v-if="showMeterFloatingPanel" class="session-float session-float--mp" :style="{ top: sessionFloatTopPx + 'px' }">
+				<cover-view class="session-card session-card--mp">
+					<cover-view class="session-card__head session-card__head--mp">
+						<cover-view class="session-card__main session-card__main--mp">
+							<cover-view class="session-card__title session-card__title--mp">{{ $t('deviceDetail.meter.sessionTitle') }}</cover-view>
+							<cover-view class="session-card__desc session-card__desc--mp">{{ $t('deviceDetail.meter.sessionHint') }}</cover-view>
+						</cover-view>
+						<cover-view class="session-card__collapse session-card__collapse--mp" hover-class="session-card__collapse--hover" @tap="closeMeterPanel">
+							<cover-view class="session-card__collapse-text">×</cover-view>
+						</cover-view>
+					</cover-view>
+					<cover-view class="session-card__action session-card__action--mp">
+						<cover-view class="session-card__cta" hover-class="session-card__cta--hover" @tap="scanAndBindBms">
+							{{ $t('deviceDetail.meter.scanBindBms') }}
+						</cover-view>
+					</cover-view>
+				</cover-view>
+			</cover-view>
+			<!-- #endif -->
+			<!-- #ifndef MP-WEIXIN -->
+			<view v-if="showMeterFloatingPanel" class="session-float" :style="{ top: sessionFloatTopPx + 'px' }">
+				<view class="session-card">
+					<view class="session-card__head">
+						<view class="session-card__main">
+							<view class="session-card__title">{{ $t('deviceDetail.meter.sessionTitle') }}</view>
+							<view class="session-card__desc">{{ $t('deviceDetail.meter.sessionHint') }}</view>
+						</view>
+						<view class="session-card__collapse" hover-class="session-card__collapse--hover" @tap="closeMeterPanel">
+							<u-icon name="close" size="16" color="#6B7280"></u-icon>
+						</view>
+					</view>
+					<view class="session-card__action">
+						<u-button type="primary" :customStyle="sessionActionButtonStyle" @click="scanAndBindBms">
+							{{ $t('deviceDetail.meter.scanBindBms') }}
+						</u-button>
+					</view>
 				</view>
-				<u-button type="primary" size="mini" @click="scanAndBindBms">
-					{{ $t('deviceDetail.meter.scanBindBms') }}
-				</u-button>
 			</view>
+			<!-- #endif -->
 			<dashboard-tab
 				v-if="activeTab === 0"
 				:battery="battery"
@@ -53,13 +90,24 @@
 			/>
 			<cells-tab v-else-if="activeTab === 1" :status="status" />
 			<params-tab
-				v-else
+				v-else-if="activeTab === 2"
 				:battery="battery"
 				:status="status"
 				:client="client"
 				:connType="connType"
 				:active="activeTab === 2"
 				:allowOta="allowOta"
+				:onPausePolling="pausePolling"
+				:onResumePolling="resumePolling"
+			/>
+			<history-tab
+				v-else-if="activeTab === 3 && canShowHistoryTab"
+				ref="historyTabRef"
+				:client="client"
+				:connType="connType"
+				:sessionMode="sessionMode"
+				:active="activeTab === 3"
+				:viewportHeightPx="historyViewportHeightPx"
 				:onPausePolling="pausePolling"
 				:onResumePolling="resumePolling"
 			/>
@@ -79,6 +127,10 @@
 					<image class="tab__icon" :src="activeTab === 2 ? '/static/image/device/navbar-params-on@2x.png' : '/static/image/device/navbar-params@2x.png'" mode="aspectFit" />
 					<text class="tab__text" :class="{ 'tab__text--on': activeTab === 2 }">{{ $t('deviceDetail.tabs.params') }}</text>
 				</view>
+				<view v-if="canShowHistoryTab" class="tab" hover-class="tab--hover" @tap="activeTab = 3">
+					<image class="tab__icon" src="/static/image/device/icon-charge-time@2x.png" mode="aspectFit" :class="{ 'tab__icon--muted': activeTab !== 3 }" />
+					<text class="tab__text" :class="{ 'tab__text--on': activeTab === 3 }">{{ $t('deviceDetail.tabs.history') }}</text>
+				</view>
 			</view>
 		</view>
 
@@ -92,25 +144,40 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onLoad, onUnload } from '@dcloudio/uni-app'
+import { onLoad, onReachBottom, onUnload } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
+import { fetchCurrentMobileUIPermissions } from '@/service/permissions'
 
 import DashboardTab from './components/dashboard-tab.vue'
 import CellsTab from './components/cells-tab.vue'
+import HistoryTab from './components/history-tab.vue'
 import ParamsTab from './components/params-tab.vue'
 
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
-import * as devicePrefixModule from '@/common/device-provision/device-prefix.js'
+import { DEVICE_TYPE_BMS } from '@/common/device-provision/device-prefix-shared'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { getWindowInfo } from '@/common/platform'
 import { useBatteryDetail } from './useBatteryDetail'
-
 const { t } = useI18n()
-const DEVICE_TYPE_BMS = devicePrefixModule.DEVICE_TYPE_BMS
 
-const activeTab = ref<0 | 1 | 2>(0)
+type HistoryTabExposed = {
+	loadMoreStatusRecords?: () => void | Promise<void>
+}
+
+const DEVICE_HISTORY_PERMISSION = 'app_device_detail_history'
+const activeTab = ref<0 | 1 | 2 | 3>(0)
+const canShowHistoryTab = ref(false)
+const historyTabRef = ref<HistoryTabExposed | null>(null)
 const allowScanHandoff = ref(false)
+const meterPanelVisible = ref(true)
 const { battery, status, client, connType, connecting, sessionMode, loadById, loadInstrumentSession, disconnectAll, disconnectBluetooth, pausePolling, resumePolling } = useBatteryDetail()
+const sessionActionButtonStyle = {
+	width: '100%',
+	height: '76rpx',
+	borderRadius: '16rpx',
+	fontSize: '28rpx',
+	fontWeight: 600,
+}
 
 const statusBarHeight = getWindowInfo().statusBarHeight || 0
 const safeBottom = getWindowInfo().safeAreaInsets?.bottom || 0
@@ -121,6 +188,9 @@ mpExtraNavHeight = 32
 const navHeight = 44 + statusBarHeight + mpExtraNavHeight
 const rpx2px = Number(getWindowInfo().windowWidth || getWindowInfo().screenWidth || 375) / 750
 const contentBottomPadPx = Math.round(160 * rpx2px + safeBottom)
+const windowHeight = Number(getWindowInfo().windowHeight || getWindowInfo().screenHeight || 667)
+const historyViewportHeightPx = Math.max(320, Math.floor(windowHeight - navHeight - contentBottomPadPx))
+const sessionFloatTopPx = navHeight + Math.round(16 * rpx2px)
 
 const titleText = computed(() => {
 	const name = String(battery.value?.device_name || '').trim()
@@ -129,6 +199,9 @@ const titleText = computed(() => {
 
 const allowOta = computed(() => sessionMode.value !== 'instrument')
 const showMeterScanHandoff = computed(() => sessionMode.value === 'instrument' && allowScanHandoff.value)
+const showMeterPanelReady = computed(() => showMeterScanHandoff.value && connType.value === 'bluetooth' && !connecting.value)
+const showMeterFloatingPanel = computed(() => showMeterPanelReady.value && meterPanelVisible.value && activeTab.value === 0)
+const showMeterPanelTrigger = computed(() => showMeterPanelReady.value && !meterPanelVisible.value)
 
 const connText = computed(() => {
 	if (connecting.value) return t('deviceDetail.conn.connecting') as string
@@ -151,7 +224,28 @@ const connClass = computed(() => {
 
 const showBleDisconnectBtn = computed(() => connType.value === 'bluetooth' && !connecting.value)
 
+const loadHistoryPermission = async () => {
+	try {
+		const resp = await fetchCurrentMobileUIPermissions()
+		const data = (resp as any)?.data || {}
+		const codes = Array.isArray(data?.ui_codes) ? data.ui_codes.map((item: unknown) => String(item || '').trim()) : []
+		canShowHistoryTab.value = codes.includes(DEVICE_HISTORY_PERMISSION)
+	} catch (e) {
+		canShowHistoryTab.value = false
+		console.warn('[device-detail] load mobile permissions failed', e)
+	}
+}
+
 const goBack = () => uni.navigateBack()
+
+const openMeterPanel = () => {
+	meterPanelVisible.value = true
+	if (activeTab.value !== 0) activeTab.value = 0
+}
+
+const closeMeterPanel = () => {
+	meterPanelVisible.value = false
+}
 
 function safeDecodeURIComponent(input: string): string {
 	try {
@@ -159,6 +253,24 @@ function safeDecodeURIComponent(input: string): string {
 	} catch (e) {
 		return String(input || '')
 	}
+}
+
+const reconnectInstrumentSession = async (options: { meterBleMac: string; meterName: string; reason: string }) => {
+	const { meterBleMac, meterName, reason } = options
+	if (!meterBleMac) return
+	const disconnected = await disconnectBluetooth()
+	console.log('[meter-session] reconnect instrument session', {
+		meter_ble_mac: meterBleMac,
+		disconnected,
+		reason,
+		reconnect_after_ms: 900,
+	})
+	setTimeout(() => {
+		loadInstrumentSession({
+			bleMac: meterBleMac,
+			deviceName: meterName || (t('deviceDetail.meter.deviceName') as string),
+		})
+	}, 450)
 }
 
 const onDisconnectBluetooth = async () => {
@@ -173,7 +285,7 @@ const onDisconnectBluetooth = async () => {
 watch(
 	() => activeTab.value,
 	(tab) => {
-		if (tab === 2) {
+		if (tab === 2 || tab === 3) {
 			pausePolling()
 		} else {
 			resumePolling()
@@ -182,33 +294,79 @@ watch(
 	{ immediate: true }
 )
 
+watch(
+	() => canShowHistoryTab.value,
+	(visible) => {
+		if (!visible && activeTab.value === 3) {
+			activeTab.value = 0
+		}
+	}
+)
+
 const scanAndBindBms = async () => {
 	const activeClient = client.value
 	if (!activeClient || connType.value !== 'bluetooth') {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
 		return
 	}
+	const meterBleMac = String(battery.value?.ble_mac || '').trim()
+	const meterName = String(battery.value?.device_name || '').trim()
 	uni.scanCode({
 		onlyFromCamera: true,
 		scanType: ['qrCode'],
 		success: async (result) => {
 			const parsed = parseAddDeviceScanCode((result as any)?.result)
+			console.log('[meter-session] scan result', {
+				raw: String((result as any)?.result || ''),
+				parsed,
+				meter_ble_mac: meterBleMac || null,
+			})
 			if (!parsed || parsed.type !== 'mac' || parsed.deviceType !== DEVICE_TYPE_BMS) {
 				uni.showToast({ title: t('deviceDetail.meter.onlyBmsMacTip') as string, icon: 'none' })
 				return
 			}
 			uni.showLoading({ title: t('common.loading') as string, mask: true })
+			pausePolling()
+			await new Promise((resolve) => setTimeout(resolve, 160))
 			try {
+				console.log('[meter-session] configure meter target start', {
+					meter_ble_mac: meterBleMac || null,
+					target_bms_mac: parsed.value,
+				})
 				await activeClient.configureMeterMac({ meterAddress: 0xfc, mac: mac12ToColon(parsed.value) })
+				console.log('[meter-session] configure meter target ok', {
+					meter_ble_mac: meterBleMac || null,
+					target_bms_mac: parsed.value,
+				})
 				uni.showToast({ title: t('deviceDetail.meter.bindTargetSuccess') as string, icon: 'none' })
-				pausePolling()
-				if (activeTab.value !== 2) {
-					setTimeout(() => {
-						resumePolling()
-					}, 180)
-				}
+				await reconnectInstrumentSession({
+					meterBleMac,
+					meterName,
+					reason: 'configure_ack',
+				})
 			} catch (e) {
-				uni.showToast({ title: t('deviceDetail.meter.bindTargetFailed') as string, icon: 'none' })
+				console.error('[meter-session] configure meter target failed', e)
+				const errMessage = e instanceof Error ? e.message : String(e || '')
+				const isTimeout = errMessage.includes('BLE request timeout')
+				if (isTimeout) {
+					console.log('[meter-session] configure meter target timeout, treat as ambiguous success and reconnect', {
+						meter_ble_mac: meterBleMac || null,
+						target_bms_mac: parsed.value,
+					})
+					uni.showToast({ title: t('deviceDetail.meter.bindTargetPending') as string, icon: 'none' })
+					await reconnectInstrumentSession({
+						meterBleMac,
+						meterName,
+						reason: 'configure_timeout',
+					})
+				} else {
+					uni.showToast({ title: t('deviceDetail.meter.bindTargetFailed') as string, icon: 'none' })
+					if (activeTab.value !== 2 && activeTab.value !== 3) {
+						setTimeout(() => {
+							resumePolling()
+						}, 300)
+					}
+				}
 			} finally {
 				uni.hideLoading()
 			}
@@ -219,6 +377,7 @@ const scanAndBindBms = async () => {
 
 onLoad((query) => {
 	const rawQuery = (query as any) || {}
+	void loadHistoryPermission()
 	if (String(rawQuery.session_mode || '').trim() === 'instrument') {
 		const bleMac = normalizeMac(String(rawQuery.ble_mac || rawQuery.mac || ''))
 		if (!bleMac) {
@@ -226,6 +385,7 @@ onLoad((query) => {
 			return
 		}
 		allowScanHandoff.value = String(rawQuery.allow_scan_handoff || '1') !== '0'
+		meterPanelVisible.value = true
 		const deviceName = safeDecodeURIComponent(String(rawQuery.device_name || ''))
 		loadInstrumentSession({
 			bleMac,
@@ -234,8 +394,14 @@ onLoad((query) => {
 		return
 	}
 	allowScanHandoff.value = false
+	meterPanelVisible.value = false
 	const id = String(rawQuery.device_id || rawQuery.id || '').trim()
 	loadById(id)
+})
+
+onReachBottom(() => {
+	if (!canShowHistoryTab.value || activeTab.value !== 3) return
+	void historyTabRef.value?.loadMoreStatusRecords?.()
 })
 
 onUnload(() => {
@@ -311,6 +477,7 @@ onUnload(() => {
 .nav__conn-row {
 	padding: 0 24rpx 12rpx;
 	display: flex;
+	align-items: center;
 	justify-content: center;
 	gap: 12rpx;
 }
@@ -370,42 +537,169 @@ onUnload(() => {
 	color: #246fdd;
 }
 
+.meter-entry {
+	width: 44rpx;
+	height: 44rpx;
+	border-radius: 22rpx;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1rpx solid rgba(36, 111, 221, 0.18);
+	background: rgba(255, 255, 255, 0.92);
+	box-shadow: 0 6rpx 16rpx rgba(36, 111, 221, 0.08);
+	flex-shrink: 0;
+}
+
+.meter-entry--hover {
+	opacity: 0.85;
+}
+
+.meter-entry__icon {
+	width: 24rpx;
+	height: 24rpx;
+}
+
 .content {
 	position: relative;
 	z-index: 1;
 	box-sizing: border-box;
 }
 
+.session-float {
+	position: fixed;
+	left: 24rpx;
+	right: 24rpx;
+	z-index: 12;
+}
+
+.session-float--mp {
+	left: 24rpx;
+	right: 24rpx;
+}
+
 .session-card {
-	margin: 0 24rpx 20rpx;
 	padding: 24rpx;
 	border-radius: 24rpx;
-	background: rgba(255, 255, 255, 0.92);
-	box-shadow: 0 10rpx 32rpx rgba(36, 111, 221, 0.08);
+	background: rgba(255, 255, 255, 0.82);
+	backdrop-filter: blur(18rpx);
+	box-shadow: 0 12rpx 32rpx rgba(36, 111, 221, 0.12);
 	display: flex;
-	align-items: center;
-	justify-content: space-between;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 18rpx;
+	border: 1rpx solid rgba(255, 255, 255, 0.6);
+}
+
+.session-card--mp {
+	padding: 24rpx;
+	border-radius: 24rpx;
+	background: rgba(255, 255, 255, 0.88);
+	box-shadow: 0 12rpx 32rpx rgba(36, 111, 221, 0.12);
+	border: 1rpx solid rgba(255, 255, 255, 0.6);
+}
+
+.session-card__head {
+	display: flex;
+	align-items: flex-start;
 	gap: 16rpx;
 }
 
+.session-card__head--mp {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+}
+
 .session-card__main {
-	flex: 1;
-	min-width: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 8rpx;
+	gap: 10rpx;
+	flex: 1;
+	min-width: 0;
+}
+
+.session-card__main--mp {
+	width: 0;
+	flex: 1;
 }
 
 .session-card__title {
 	font-size: 28rpx;
 	font-weight: 600;
 	color: #1f2937;
+	line-height: 1.35;
+	word-break: break-word;
+}
+
+.session-card__title--mp {
+	font-size: 28rpx;
+	font-weight: 600;
+	color: #1f2937;
+	line-height: 40rpx;
 }
 
 .session-card__desc {
 	font-size: 24rpx;
 	line-height: 1.5;
 	color: #5b6472;
+	word-break: break-word;
+}
+
+.session-card__desc--mp {
+	margin-top: 10rpx;
+	font-size: 24rpx;
+	line-height: 36rpx;
+	color: #5b6472;
+}
+
+.session-card__action {
+	width: 100%;
+}
+
+.session-card__action--mp {
+	margin-top: 18rpx;
+}
+
+.session-card__collapse {
+	width: 52rpx;
+	height: 52rpx;
+	border-radius: 26rpx;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(255, 255, 255, 0.78);
+	border: 1rpx solid rgba(107, 114, 128, 0.12);
+	flex-shrink: 0;
+}
+
+.session-card__collapse--mp {
+	margin-left: 16rpx;
+}
+
+.session-card__collapse--hover {
+	opacity: 0.85;
+}
+
+.session-card__collapse-text {
+	font-size: 40rpx;
+	line-height: 40rpx;
+	color: #6b7280;
+	text-align: center;
+}
+
+.session-card__cta {
+	height: 76rpx;
+	border-radius: 16rpx;
+	background: #1d3db7;
+	color: #ffffff;
+	font-size: 28rpx;
+	font-weight: 600;
+	line-height: 76rpx;
+	text-align: center;
+}
+
+.session-card__cta--hover {
+	opacity: 0.88;
 }
 
 .bottom-bar {
@@ -470,6 +764,10 @@ onUnload(() => {
 .tab__icon {
 	width: 44rpx;
 	height: 44rpx;
+}
+
+.tab__icon--muted {
+	opacity: 0.48;
 }
 
 .tab__text {

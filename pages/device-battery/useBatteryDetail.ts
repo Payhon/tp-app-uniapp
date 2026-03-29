@@ -17,7 +17,14 @@ import {
 	type UniMqttSocketBmsTransport,
 	type UniMqttWsBmsTransport,
 } from '@/common/lib/bms-protocol'
-import { canBleAutoConnect, connectBleClient, disconnectBleClient, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
+import {
+	canBleAutoConnect,
+	connectBleClient,
+	disconnectBleClient,
+	invalidateBleConnectAttempts,
+	releaseBleClient,
+	retainBleClient,
+} from '@/common/ble/ble-client-cache'
 import { normalizeMac } from '@/common/device-provision/ble'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 
@@ -36,6 +43,8 @@ const REPORT_QUEUE_MAX = 100
 const REPORT_RETRY_DELAYS_MS = [3_000, 10_000, 30_000]
 const RELAY_HEARTBEAT_MS = 15_000
 const RELAY_RECONNECT_DELAY_MS = 3_000
+const POLL_INTERVAL_MS = 5_000
+const INSTRUMENT_WARMUP_POLL_INTERVAL_MS = 1_200
 
 const log = (event: string, data?: Record<string, unknown>) => {
 	try {
@@ -547,8 +556,20 @@ export const useBatteryDetail = () => {
 				}
 			}
 		}
-		run()
-		pollTimer = setInterval(run, 5000) as unknown as number
+		const scheduleNext = (delayMs: number) => {
+			if (pollingPaused.value || client.value !== c) return
+			pollTimer = setTimeout(async () => {
+				pollTimer = null
+				if (pollingPaused.value || client.value !== c) return
+				await run()
+				const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : POLL_INTERVAL_MS
+				scheduleNext(nextDelay)
+			}, delayMs) as unknown as number
+		}
+		void run().finally(() => {
+			const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : POLL_INTERVAL_MS
+			scheduleNext(nextDelay)
+		})
 	}
 
 	const pausePolling = () => {
@@ -562,6 +583,7 @@ export const useBatteryDetail = () => {
 	}
 
 	const disconnectAll = async () => {
+		invalidateBleConnectAttempts('device-detail disconnectAll')
 		const wasBluetooth = connType.value === 'bluetooth'
 		if (wasBluetooth && !isInstrumentSession()) {
 			void reportConnectionStatus(false, 'bluetooth')

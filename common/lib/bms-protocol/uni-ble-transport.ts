@@ -112,6 +112,10 @@ class FrameCollector {
 		this._buf = merged;
 	}
 
+	reset() {
+		this._buf = new Uint8Array(0);
+	}
+
 	snapshotHex({ headBytes = 24, tailBytes = 24 }: { headBytes?: number; tailBytes?: number } = {}) {
 		const len = this._buf.length;
 		const head = this._buf.slice(0, Math.min(headBytes, len));
@@ -170,7 +174,7 @@ class FrameCollector {
 						}
 					}
 				}
-			} else if (functionCode === 0x03 || functionCode === 0xff) {
+			} else if (functionCode === 0x03 || functionCode === 0x4c || functionCode === 0x4d || functionCode === 0xff) {
 				// read response: 9 + byteCount
 				const byteCount = this._buf[5] & 0xff;
 				const expectedLen = 9 + byteCount;
@@ -688,6 +692,8 @@ export class UniBleBmsTransport {
 				};
 
 		const deferred = defer<Uint8Array>();
+		// 清空上一次请求遗留的残包，避免超时后的半帧污染下一次请求。
+		this._collector.reset();
 		const timer = setTimeout(() => {
 			if (this._pending && this._pending.reject === deferred.reject) this._pending = null;
 			try {
@@ -695,6 +701,7 @@ export class UniBleBmsTransport {
 					this.logger.warn('[ble] request timeout snapshot', { expect, ...this._collector.snapshotHex() });
 				}
 			} catch (e) {}
+			this._collector.reset();
 			deferred.reject(new BmsProtocolError(`BLE request timeout after ${timeoutMs}ms`, { expect }));
 		}, timeoutMs);
 		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot };
@@ -708,9 +715,11 @@ export class UniBleBmsTransport {
 			// 某些设备/运行时不会主动推送 notify，需要通过 read 触发 value change（特征值含 Read 属性时）
 			const pendingRef = this._pending;
 			void (async () => {
-				const delays = [220, 520];
-				for (const ms of delays) {
-					await sleep(ms);
+				const delays = [220, 520, 900, 1400, 2100, 3000, 4200, 5600, 7200, 9000, 11000, 13000];
+				for (let idx = 0; idx < delays.length; idx += 1) {
+					const ms = delays[idx];
+					const prev = idx === 0 ? 0 : delays[idx - 1];
+					await sleep(ms - prev);
 					if (!this._pending || this._pending !== pendingRef) return;
 					if (!this.deviceId || !this.serviceId || !this.notifyCharId) return;
 					try {
@@ -731,6 +740,7 @@ export class UniBleBmsTransport {
 			const pending = this._pending;
 			if (pending) clearTimeout(pending.timer);
 			this._pending = null;
+			this._collector.reset();
 			throw e;
 		}
 	}
