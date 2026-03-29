@@ -56,14 +56,7 @@
                 "push" : {
                     "unipush" : {
                         "version" : "2",
-                        "offline" : true,
-                        "hms" : {},
-                        "oppo" : {},
-                        "vivo" : {},
-                        "mi" : {},
-                        "meizu" : {},
-                        "honor" : {},
-                        "fcm" : {}
+                        "offline" : true
                     }
                 }
             },
@@ -98,6 +91,9 @@
                         "spotlight@3x" : "unpackage/res/icons/120x120.png"
                     }
                 }
+            },
+            "splashscreen" : {
+                "useOriginalMsgbox" : true
             }
         }
     },
