@@ -31,6 +31,7 @@
 import { computed, getCurrentInstance, ref } from 'vue'
 import { onLoad, onReachBottom } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
+import $C from '@/common/config'
 
 declare const plus: { runtime: { appid: string } }
 
@@ -60,7 +61,7 @@ const getAppId = (): string => {
 	// #ifdef APP-PLUS
 	return plus.runtime.appid
 	// #endif
-	return uni.getStorageSync('app_appid') || ''
+	return $C.appId || uni.getStorageSync('app_appid') || ''
 }
 
 const getApiRequest = () => {

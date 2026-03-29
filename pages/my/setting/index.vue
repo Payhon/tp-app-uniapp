@@ -107,6 +107,15 @@
 					<u-icon v-if="!wechatBound" name="arrow-right" size="16" color="#C0C4CC"></u-icon>
 				</view>
 			</view>
+
+			<view class="divider"></view>
+
+			<view class="row row--danger" hover-class="row--hover" @tap="confirmDeleteAccount">
+				<text class="label label--danger">{{ $t('pages.my.settingPage.deleteAccount') }}</text>
+				<view class="right">
+					<u-icon name="arrow-right" size="16" color="#F56C6C"></u-icon>
+				</view>
+			</view>
 		</view>
 
 		<view class="logout-wrap">
@@ -210,6 +219,51 @@
 				</view>
 			</view>
 		</u-popup>
+
+		<u-popup :show="deleteAccountPopupVisible" mode="bottom" :round="16" @close="closeDeleteAccountPopup">
+			<view class="popup">
+				<view class="popup-title">{{ $t('pages.my.settingPage.deleteAccountPasswordTitle') }}</view>
+				<view class="popup-desc popup-desc--danger">{{ $t('pages.my.settingPage.deleteAccountPasswordHint') }}</view>
+				<view class="popup-form">
+					<view class="field">
+						<text class="field-label">{{ $t('pages.my.settingPage.currentPassword') }}</text>
+						<view class="field-input-wrap">
+							<input
+								class="field-input field-input--with-icon"
+								type="text"
+								:password="!showDeletePassword"
+								v-model="deletePassword"
+								:placeholder="$t('pages.my.settingPage.currentPasswordPlaceholder')"
+							/>
+							<view class="field-eye" @tap="showDeletePassword = !showDeletePassword">
+								<u-icon :name="showDeletePassword ? 'eye-fill' : 'eye-off'" size="18" color="#909399"></u-icon>
+							</view>
+						</view>
+					</view>
+				</view>
+				<view class="popup-actions">
+					<view class="popup-actions__cancel">
+						<u-button
+							:customStyle="popupCancelButtonStyle"
+							:text="$t('common.cancel')"
+							shape="circle"
+							@click="closeDeleteAccountPopup"
+						></u-button>
+					</view>
+					<view class="popup-actions__confirm">
+						<u-button
+							:customStyle="popupDangerButtonStyle"
+							:text="$t('pages.my.settingPage.confirmDeleteAccount')"
+							shape="circle"
+							type="error"
+							color="#F56C6C"
+							:loading="deletingAccount"
+							@click="submitDeleteAccount"
+						></u-button>
+					</view>
+				</view>
+			</view>
+		</u-popup>
 	</view>
 </template>
 
@@ -220,6 +274,7 @@ import { useI18n } from 'vue-i18n'
 import $C from '@/common/config'
 import { useInjected } from '@/common/composables/useInjected'
 import { useAppRuntime } from '@/common/composables/useAppRuntime'
+import { deleteCurrentAccount } from '@/service/app-auth'
 import { useUserStore } from '@/store/user'
 
 const { t } = useI18n()
@@ -569,6 +624,11 @@ const popupConfirmButtonStyle = {
 	height: '88rpx'
 }
 
+const popupDangerButtonStyle = {
+	width: '100%',
+	height: '88rpx'
+}
+
 const openBindPopup = (type: BindType) => {
 	if (!ensureLogin()) return
 	if (type === 'phone' && phoneBound.value) {
@@ -695,13 +755,84 @@ const doLogout = () => {
 		confirmText: t('pages.accounts.logoutBtn') as string,
 		success: (res) => {
 			if (!res.confirm) return
-			uni.removeStorageSync('access_token')
-			uni.removeStorageSync('tenant_id')
-			userStore.logout()
+			clearLocalLoginState()
 			uni.navigateTo({ url: '/pages/login/login' })
 			uni.showToast({ title: t('pages.accounts.logoutSuccess') as string, icon: 'none' })
 		}
 	})
+}
+
+const clearLocalLoginState = () => {
+	uni.removeStorageSync('access_token')
+	uni.removeStorageSync('tenant_id')
+	uni.removeStorageSync('push_id')
+	uni.removeStorageSync('accessToken')
+	uni.removeStorageSync('refreshToken')
+	userStore.logout()
+}
+
+const deleteAccountPopupVisible = ref<boolean>(false)
+const deletePassword = ref<string>('')
+const showDeletePassword = ref<boolean>(false)
+const deletingAccount = ref<boolean>(false)
+
+const closeDeleteAccountPopup = () => {
+	if (deletingAccount.value) return
+	deleteAccountPopupVisible.value = false
+	deletePassword.value = ''
+	showDeletePassword.value = false
+}
+
+const confirmDeleteAccount = () => {
+	if (!ensureLogin()) return
+	uni.showModal({
+		title: t('pages.my.settingPage.deleteAccount') as string,
+		content: t('pages.my.settingPage.deleteAccountConfirm') as string,
+		confirmText: t('pages.my.settingPage.confirmDeleteAccount') as string,
+		confirmColor: '#F56C6C',
+		success: (res) => {
+			if (!res.confirm) return
+			deletePassword.value = ''
+			showDeletePassword.value = false
+			deleteAccountPopupVisible.value = true
+		}
+	})
+}
+
+const submitDeleteAccount = async () => {
+	if (deletingAccount.value) return
+	const pwd = String(deletePassword.value || '').trim()
+	if (!pwd) {
+		uni.showToast({ title: t('pages.my.settingPage.currentPasswordPlaceholder') as string, icon: 'none' })
+		return
+	}
+
+	deletingAccount.value = true
+	try {
+		const res = await deleteCurrentAccount(pwd)
+		if (res && (res as any).code === 200) {
+			deleteAccountPopupVisible.value = false
+			deletePassword.value = ''
+			showDeletePassword.value = false
+			clearLocalLoginState()
+			uni.showToast({
+				title: t('pages.my.settingPage.deleteAccountSuccess') as string,
+				icon: 'none',
+				success: () => {
+					uni.navigateTo({ url: '/pages/login/login' })
+				}
+			})
+		} else {
+			uni.showToast({
+				title: (res as any)?.message || (t('pages.my.settingPage.deleteAccountFailed') as string),
+				icon: 'none'
+			})
+		}
+	} catch {
+		uni.showToast({ title: t('pages.my.settingPage.deleteAccountFailed') as string, icon: 'none' })
+	} finally {
+		deletingAccount.value = false
+	}
 }
 
 const goChangePassword = () => {
@@ -768,6 +899,10 @@ onShow(() => {
 	background: #fff;
 }
 
+.row--danger {
+	background: #fffafa;
+}
+
 .row--btn {
 	width: 100%;
 }
@@ -787,6 +922,10 @@ onShow(() => {
 .label {
 	font-size: 28rpx;
 	color: #1f1f1f;
+}
+
+.label--danger {
+	color: #f56c6c;
 }
 
 .right {
@@ -830,6 +969,18 @@ onShow(() => {
 	text-align: center;
 }
 
+.popup-desc {
+	margin-top: 16rpx;
+	font-size: 24rpx;
+	line-height: 40rpx;
+	color: #909399;
+	text-align: center;
+}
+
+.popup-desc--danger {
+	color: #f56c6c;
+}
+
 .popup-form {
 	margin-top: 26rpx;
 }
@@ -854,6 +1005,25 @@ onShow(() => {
 	box-sizing: border-box;
 	font-size: 28rpx;
 	color: #1f1f1f;
+}
+
+.field-input-wrap {
+	position: relative;
+}
+
+.field-input--with-icon {
+	padding-right: 88rpx;
+}
+
+.field-eye {
+	position: absolute;
+	top: 0;
+	right: 0;
+	width: 88rpx;
+	height: 88rpx;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .field--code .field-input--code {

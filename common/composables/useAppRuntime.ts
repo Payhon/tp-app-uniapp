@@ -8,7 +8,7 @@ export function useAppRuntime() {
 		// #ifdef APP-PLUS
 		return plus.runtime.appid
 		// #endif
-		return uni.getStorageSync('app_appid') || ''
+		return $C.appId || uni.getStorageSync('app_appid') || ''
 	}
 
 	const getBaseUrl = (): string => $C.apiBaseUrl
@@ -24,4 +24,3 @@ export function useAppRuntime() {
 
 	return { getLang, getAppId, getBaseUrl, getHeaders }
 }
-

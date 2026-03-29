@@ -88,3 +88,7 @@ export const resetPasswordByCode = (identifier: string, verifyCode: string, pass
 		'POST'
 	)
 }
+
+export const deleteCurrentAccount = (password: string) => {
+	return apiRequest<unknown>('/api/v1/app/auth/delete_account', { password: String(password || '') }, 'POST')
+}

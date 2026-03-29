@@ -19,6 +19,7 @@
 import { getCurrentInstance, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
+import $C from '@/common/config'
 
 declare const plus: { runtime: { appid: string } }
 
@@ -38,7 +39,7 @@ const getAppId = (): string => {
 	// #ifdef APP-PLUS
 	return plus.runtime.appid
 	// #endif
-	return uni.getStorageSync('app_appid') || ''
+	return $C.appId || uni.getStorageSync('app_appid') || ''
 }
 
 const getApiRequest = () => {
@@ -52,6 +53,7 @@ const setTitle = () => {
 	let pageTitle = t('pages.contentPage')
 	if (contentKey.value === 'user_policy') pageTitle = t('pages.userPolicy')
 	if (contentKey.value === 'privacy_policy') pageTitle = t('pages.privacyPolicy')
+	if (contentKey.value === 'contact_service') pageTitle = t('pages.contactService')
 	uni.setNavigationBarTitle({ title: pageTitle })
 }
 

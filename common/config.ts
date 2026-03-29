@@ -3,6 +3,7 @@ declare const process: { env: { NODE_ENV?: string } }
 export interface AppConfig {
 	// 请求地址前缀
 	webUrl: string
+	appId: string
 	tenantId: string
 	apiBaseUrl: string
 	/**
@@ -20,6 +21,7 @@ const config: AppConfig = {
 	// 请求地址前缀
 	// webUrl : 'https://thingsdev.jiyikeji.cn/api',
 	webUrl : API_BSE_URL,
+	appId: '__UNI__40EADE1',
 	tenantId : 'd616bcbb', 
 	apiBaseUrl : API_BSE_URL,
 	imageCdnPrefix: IMAGE_CDN_PREFIX,
