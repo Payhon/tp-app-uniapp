@@ -144,6 +144,7 @@ import {
 	resolveAddTrackingViewMode,
 	type HomeDeviceViewMode
 } from '@/common/device-view-mode'
+import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { useInjected } from '@/common/composables/useInjected'
 import { canBleAutoConnect, connectBleClient, disconnectBleClient, getBleClientEntry, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
 import { useBoundDevicesStore } from '@/store/bound-devices'
@@ -157,6 +158,7 @@ type DeviceListItem = {
 	device_number: string
 	device_name?: string
 	ble_mac?: string | null
+	iccid?: string | null
 	bms_comm_type?: number | null
 	is_online?: number
 	soc?: number | null
@@ -273,6 +275,22 @@ const ensureUserInfo = async () => {
 	} catch (e) {}
 }
 
+const formatDeviceIdentifier = (item: DeviceListItem): string => {
+	const fallback = String(item?.device_number || '').trim() || '-'
+	const iccid = String(item?.iccid || '').trim()
+	const mac = normalizeMac(String(item?.ble_mac || ''))
+	const macText = mac ? mac12ToColon(mac) : ''
+	const rawComm = item?.bms_comm_type
+	const commNum = rawComm == null ? null : Number(rawComm)
+	const bmsCommType = Number.isFinite(commNum) ? commNum : null
+
+	if (bmsCommType === 1 && macText) return macText
+	if ((bmsCommType === 2 || bmsCommType === 3) && iccid) return iccid
+	if (macText) return macText
+	if (iccid) return iccid
+	return fallback
+}
+
 const toHomeModel = (item: DeviceListItem): HomeDeviceRow => {
 	const soc = Number(item?.soc ?? 0)
 	const batteryPercent = Number.isFinite(soc) ? Math.max(0, Math.min(100, Math.round(soc))) : 0
@@ -285,11 +303,12 @@ const toHomeModel = (item: DeviceListItem): HomeDeviceRow => {
 	return {
 		id: String(item?.device_id || ''),
 		name: String(item?.device_name || '').trim() || String(item?.device_number || '').trim() || '-',
-		model: String(item?.device_number || '').trim() || '-',
+		identifierText: formatDeviceIdentifier(item),
 		isOnline,
 		connectType: isOnline ? 'mqtt' : 'offline',
 		batteryPercent,
 		bleMac: item?.ble_mac ?? null,
+		iccid: item?.iccid ?? null,
 		bmsCommType,
 		relationType,
 	}

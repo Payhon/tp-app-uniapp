@@ -5,6 +5,7 @@ import App from './App.vue'
 import i18n, { updateTabbarText } from './lang'
 import { pinia } from '@/store/pinia'
 import legacyStore from '@/store'
+import { useBoundDevicesStore } from '@/store/bound-devices'
 
 import uviewPlus from '@/uni_modules/uview-next'
 
@@ -13,6 +14,7 @@ import http from '@/common/request'
 import { Login } from '@/types/auth'
 import { isLoginType } from '@/store/login'
 import { imageUrl } from '@/common/assets/images'
+import { DEVICE_MAC_PREFIXES } from '@/common/device-provision/device-prefix-shared'
 
 import needLogin from '@/components/login/needLogin.vue'
 import authorize from '@/components/login/authorize.vue'
@@ -20,6 +22,15 @@ import CysToast from '@/components/aui-toast/aui-toast.vue'
 import customNav from '@/components/customNav/customNav.vue'
 
 export function createApp() {
+	try {
+		uni.setStorageSync('__DEVICE_MAC_PREFIXES__', DEVICE_MAC_PREFIXES)
+	} catch (e) {}
+	try {
+		if (uni.getStorageSync('access_token')) {
+			void useBoundDevicesStore().refresh({ force: true })
+		}
+	} catch (e) {}
+
 	const app = createSSRApp(App)
 
 	app.use(pinia)

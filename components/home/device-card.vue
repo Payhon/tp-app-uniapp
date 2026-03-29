@@ -11,7 +11,7 @@
 		<view class="card__top">
 			<view class="card__title-wrap">
 				<text class="card__title u-line-1">{{ device.name }}</text>
-				<text class="card__sub u-line-1">{{ device.model }}</text>
+				<text class="card__sub u-line-1">{{ device.identifierText }}</text>
 			</view>
 		</view>
 

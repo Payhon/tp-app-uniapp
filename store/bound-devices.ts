@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 
-import { normalizeMac } from '@/common/device-provision/ble'
+import { normalizeHex, normalizeMac } from '@/common/device-provision/ble'
 import { resolveAddTrackingViewMode, type HomeDeviceViewMode } from '@/common/device-view-mode'
 import { appBoundDeviceList } from '@/service/device'
 import { useUserStore } from '@/store/user'
@@ -10,6 +10,7 @@ export type BoundDevice = {
 	device_number: string
 	device_name?: string
 	ble_mac?: string | null
+	item_uuid?: string | null
 	bms_comm_type?: number | null
 	[key: string]: unknown
 }
@@ -18,6 +19,21 @@ type BoundDevicesState = {
 	list: BoundDevice[]
 	lastFetchedAt: number
 	viewMode: HomeDeviceViewMode | null
+}
+
+const BOUND_DEVICE_SNAPSHOT_STORAGE_KEY = '__BOUND_DEVICES_SNAPSHOT__'
+
+const syncBoundDeviceSnapshot = (list: BoundDevice[]) => {
+	try {
+		uni.setStorageSync(
+			BOUND_DEVICE_SNAPSHOT_STORAGE_KEY,
+			(list || []).map((item) => ({
+				device_id: String(item?.device_id || ''),
+				ble_mac: item?.ble_mac ?? null,
+				item_uuid: item?.item_uuid ?? null,
+			}))
+		)
+	} catch (e) {}
 }
 
 export const useBoundDevicesStore = defineStore('boundDevices', {
@@ -41,6 +57,7 @@ export const useBoundDevicesStore = defineStore('boundDevices', {
 			this.list = []
 			this.lastFetchedAt = 0
 			this.viewMode = null
+			syncBoundDeviceSnapshot([])
 		},
 		removeByDeviceId(deviceId: string) {
 			const id = String(deviceId || '')
@@ -84,11 +101,22 @@ export const useBoundDevicesStore = defineStore('boundDevices', {
 		this.list = all
 		this.lastFetchedAt = now
 		this.viewMode = nextViewMode
+		syncBoundDeviceSnapshot(all)
 	},
 		hasBleMac(mac12: string): boolean {
 			const mac = normalizeMac(mac12)
 			if (!mac) return false
 			return this.boundBleMacSet.has(mac)
+		},
+		findByBleMac(mac12: string): BoundDevice | null {
+			const mac = normalizeMac(mac12)
+			if (!mac) return null
+			return this.list.find((x) => normalizeMac(String(x?.ble_mac || '')) === mac) || null
+		},
+		findByItemUuid(itemUuid: string): BoundDevice | null {
+			const normalized = normalizeHex(itemUuid)
+			if (!/^[0-9A-F]{32}$/.test(normalized)) return null
+			return this.list.find((x) => normalizeHex(String(x?.item_uuid || '')) === normalized) || null
 		}
 	}
 })

@@ -132,6 +132,12 @@ const debugLogFoundCount = ref(0)
 const debugLogFilteredCount = ref(0)
 const debugSeenDeviceIds = new Set<string>()
 let fallbackTimer: ReturnType<typeof setTimeout> | null = null
+let scanQueue: Promise<void> = Promise.resolve()
+let scanSessionId = 0
+let pageVisible = false
+
+const SCAN_STOP_SETTLE_MS = 180
+const ADAPTER_READY_WAIT_MS = 1200
 
 const visibleDevices = computed(() => {
 	const list = Array.from(rows.value.values())
@@ -172,6 +178,84 @@ function normalizeUuid(u: unknown): string {
 	return String(u || '').trim().toLowerCase()
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function clearFallbackTimer() {
+	if (!fallbackTimer) return
+	clearTimeout(fallbackTimer)
+	fallbackTimer = null
+}
+
+function runScanSerial<T>(task: () => Promise<T>): Promise<T> {
+	const run = scanQueue.then(task, task)
+	scanQueue = run.then(
+		() => undefined,
+		() => undefined,
+	)
+	return run
+}
+
+function isScanSessionActive(sessionId: number): boolean {
+	return pageVisible && scanSessionId === sessionId
+}
+
+function getBluetoothAdapterStateSafe(): Promise<{ available?: boolean; discovering?: boolean } | null> {
+	const getter = (uni as any).getBluetoothAdapterState
+	if (typeof getter !== 'function') return Promise.resolve(null)
+	return new Promise((resolve) => {
+		getter({
+			success: (res: { available?: boolean; discovering?: boolean }) => resolve(res),
+			fail: () => resolve(null),
+		})
+	})
+}
+
+async function ensureBluetoothAdapterReady(sessionId: number) {
+	const deadline = Date.now() + ADAPTER_READY_WAIT_MS
+	let state = await getBluetoothAdapterStateSafe()
+	while (isScanSessionActive(sessionId) && state && state.available === false && Date.now() < deadline) {
+		await sleep(120)
+		state = await getBluetoothAdapterStateSafe()
+	}
+	if (!isScanSessionActive(sessionId)) return
+	if (state?.available === false) {
+		throw new Error('Bluetooth adapter unavailable')
+	}
+	if (state?.discovering) {
+		await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
+	}
+}
+
+function offDeviceFoundListener() {
+	// #ifdef MP-WEIXIN
+	const wxOff = (wx as any).offBluetoothDeviceFound
+	if (typeof wxOff === 'function') wxOff(onDeviceFound)
+	// #endif
+	// #ifndef MP-WEIXIN
+	const offFn = (uni as any).offBluetoothDeviceFound
+	if (typeof offFn === 'function') offFn(onDeviceFound)
+	// #endif
+}
+
+function bindDeviceFoundListener() {
+	offDeviceFoundListener()
+	// #ifdef MP-WEIXIN
+	;(wx as any).onBluetoothDeviceFound(onDeviceFound as any)
+	// #endif
+	// #ifndef MP-WEIXIN
+	uni.onBluetoothDeviceFound(onDeviceFound as any)
+	// #endif
+}
+
+async function stopDiscovery({ settleMs = 0 }: { settleMs?: number } = {}) {
+	await new Promise((resolve) => {
+		uni.stopBluetoothDevicesDiscovery({ complete: resolve })
+	})
+	if (settleMs > 0) {
+		await sleep(settleMs)
+	}
+}
+
 function hasServiceDataKey(d: FoundDevice, targetKey: string): boolean {
 	const obj = (d as any)?.serviceData
 	if (!obj || typeof obj !== 'object') return false
@@ -188,10 +272,11 @@ function isTargetDevice(d: FoundDevice): { ok: boolean; reason?: string } {
 	// 你的过滤条件：
 	// 1) name 不为空且以 FJ 开头
 	// 2) serviceData 包含 0000180A-0000-1000-8000-00805F9B34FB 这个 key
+	// 3) 某些平台首次回调不稳定，不强依赖 serviceData；若广播里能解析出 MAC 也认为是目标设备
 	const has180a = hasServiceDataKey(d, '0000180A-0000-1000-8000-00805F9B34FB')
-	if (!has180a) return { ok: false, reason: 'no-180a' }
+	const advMac = parseMacFromAdvertisement((d as any).advertisData || (d as any).advertisingData || (d as any).manufacturerData || d || null)
+	if (!has180a && !advMac) return { ok: false, reason: 'no-identity' }
 	return { ok: true }
-
 }
 
 function logFoundDeviceOnce(d: FoundDevice) {
@@ -278,172 +363,190 @@ const onDeviceFound = (res: { devices?: FoundDevice[] }) => {
 }
 
 async function startScan() {
-	starting.value = true
-	errorMsg.value = ''
-	try {
-		console.log('[ble-scan] startScan')
-
-		const getErrCode = (e: any) => e?.errCode ?? e?.code
-		const getErrMsg = (e: any) => String(e?.errMsg ?? e?.message ?? '')
-
-		const openBluetoothAdapterOnce = () =>
-			new Promise((resolve, reject) => {
-				// #ifdef MP-WEIXIN
-				// 微信小程序：显式指定 central 模式，避免部分机型/基础库兼容问题
-				;(wx as any).openBluetoothAdapter({ mode: 'central', success: resolve, fail: reject })
-				// #endif
-				// #ifndef MP-WEIXIN
-				uni.openBluetoothAdapter({ success: resolve, fail: reject })
-				// #endif
-			})
-
+	return runScanSerial(async () => {
+		const sessionId = ++scanSessionId
+		starting.value = true
+		errorMsg.value = ''
 		try {
-			await openBluetoothAdapterOnce()
-		} catch (e) {
-			// 微信小程序：若提示隐私未授权，尝试触发隐私授权后重试
-			//（部分基础库对蓝牙相关 API 也走隐私合规校验）
-			// #ifdef MP-WEIXIN
-			const msg = getErrMsg(e).toLowerCase()
-			const requirePrivacyAuthorize = (wx as any).requirePrivacyAuthorize
-			if (msg.includes('privacy') && typeof requirePrivacyAuthorize === 'function') {
-				await new Promise((resolve) => {
-					requirePrivacyAuthorize({ complete: resolve })
-				})
-				await openBluetoothAdapterOnce()
-			} else {
-				throw e
-			}
-			// #endif
-			// #ifndef MP-WEIXIN
-			throw e
-			// #endif
-		}
+			if (!isScanSessionActive(sessionId)) return
+			console.log('[ble-scan] startScan', { sessionId })
 
-		// uni-app 部分平台支持 offBluetoothDeviceFound；这里优先卸载旧回调避免重复。
-		// #ifdef MP-WEIXIN
-		const wxOff = (wx as any).offBluetoothDeviceFound
-		if (typeof wxOff === 'function') wxOff(onDeviceFound)
-		;(wx as any).onBluetoothDeviceFound(onDeviceFound as any)
-		// #endif
-		// #ifndef MP-WEIXIN
-		const offFn = (uni as any).offBluetoothDeviceFound
-		if (typeof offFn === 'function') offFn(onDeviceFound)
-		uni.onBluetoothDeviceFound(onDeviceFound as any)
-		// #endif
+			const getErrCode = (e: any) => e?.errCode ?? e?.code
+			const getErrMsg = (e: any) => String(e?.errMsg ?? e?.message ?? '')
 
-		const startDiscovery = async ({ withServiceFilter }: { withServiceFilter: boolean }) => {
-			await new Promise((resolve, reject) => {
-				// #ifdef MP-WEIXIN
-				;(wx as any).startBluetoothDevicesDiscovery({
-					services: withServiceFilter ? [BMS_BLE_SERVICE_UUID] : undefined,
-					allowDuplicatesKey: true,
-					success: resolve,
-					fail: reject,
+			const openBluetoothAdapterOnce = () =>
+				new Promise((resolve, reject) => {
+					// #ifdef MP-WEIXIN
+					// 微信小程序：显式指定 central 模式，避免部分机型/基础库兼容问题
+					;(wx as any).openBluetoothAdapter({ mode: 'central', success: resolve, fail: reject })
+					// #endif
+					// #ifndef MP-WEIXIN
+					uni.openBluetoothAdapter({ success: resolve, fail: reject })
+					// #endif
 				})
-				// #endif
-				// #ifndef MP-WEIXIN
-				uni.startBluetoothDevicesDiscovery({
-					services: withServiceFilter ? [BMS_BLE_SERVICE_UUID] : undefined,
-					allowDuplicatesKey: true,
-					success: resolve,
-					fail: reject,
-				})
-				// #endif
-			})
-			console.log('[ble-scan] discovery started', { withServiceFilter, serviceUUID: BMS_BLE_SERVICE_UUID })
-		}
 
-		debugLogFoundCount.value = 0
-		debugLogFilteredCount.value = 0
-		debugSeenDeviceIds.clear()
-		if (fallbackTimer) clearTimeout(fallbackTimer)
-		isScanning.value = true
-		try {
-			await startDiscovery({ withServiceFilter: true })
-		} catch (e) {
-			// 微信小程序：部分 Android 机型扫描蓝牙需要开启定位服务/授权定位权限
-			const code = getErrCode(e)
-			const msg = getErrMsg(e).toLowerCase()
-			const maybeLocation = msg.includes('location') || msg.includes('permission') || code === 10012
-			if (maybeLocation) {
-				// #ifdef MP-WEIXIN
-				try {
-					await new Promise((resolve, reject) => {
-						;(wx as any).authorize({
-							scope: 'scope.userLocation',
-							success: resolve,
-							fail: reject,
-						})
+			const startDiscovery = async ({ withServiceFilter }: { withServiceFilter: boolean }) => {
+				await new Promise((resolve, reject) => {
+					// #ifdef MP-WEIXIN
+					;(wx as any).startBluetoothDevicesDiscovery({
+						services: withServiceFilter ? [BMS_BLE_SERVICE_UUID] : undefined,
+						allowDuplicatesKey: true,
+						success: resolve,
+						fail: reject,
 					})
-					await startDiscovery({ withServiceFilter: true })
-				} catch (e2) {
-					throw e2
+					// #endif
+					// #ifndef MP-WEIXIN
+					uni.startBluetoothDevicesDiscovery({
+						services: withServiceFilter ? [BMS_BLE_SERVICE_UUID] : undefined,
+						allowDuplicatesKey: true,
+						success: resolve,
+						fail: reject,
+					})
+					// #endif
+				})
+				console.log('[ble-scan] discovery started', { sessionId, withServiceFilter, serviceUUID: BMS_BLE_SERVICE_UUID })
+			}
+
+			try {
+				await openBluetoothAdapterOnce()
+			} catch (e) {
+				// 微信小程序：若提示隐私未授权，尝试触发隐私授权后重试
+				//（部分基础库对蓝牙相关 API 也走隐私合规校验）
+				// #ifdef MP-WEIXIN
+				const msg = getErrMsg(e).toLowerCase()
+				const requirePrivacyAuthorize = (wx as any).requirePrivacyAuthorize
+				if (msg.includes('privacy') && typeof requirePrivacyAuthorize === 'function') {
+					await new Promise((resolve) => {
+						requirePrivacyAuthorize({ complete: resolve })
+					})
+					await openBluetoothAdapterOnce()
+				} else {
+					throw e
 				}
 				// #endif
 				// #ifndef MP-WEIXIN
 				throw e
 				// #endif
-			} else {
-				throw e
 			}
-		}
 
-		// 重要：部分设备（或 uni 返回字段）不会暴露 advertisServiceUUIDs，导致使用 services 过滤时完全发现不了设备；
-		// 这里做一次自动降级：若短时间内“一个设备都没发现”，则重启扫描并取消 services 过滤。
-		fallbackTimer = setTimeout(async () => {
-			if (!isScanning.value) return
-			if (debugSeenDeviceIds.size > 0) return
+			if (!isScanSessionActive(sessionId)) return
+			await ensureBluetoothAdapterReady(sessionId)
+			if (!isScanSessionActive(sessionId)) return
+
+			bindDeviceFoundListener()
+			await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
+			if (!isScanSessionActive(sessionId)) return
+
+			debugLogFoundCount.value = 0
+			debugLogFilteredCount.value = 0
+			debugSeenDeviceIds.clear()
+			clearFallbackTimer()
+			isScanning.value = true
 			try {
-				console.warn('[ble-scan] no devices found with service filter, fallback to discovery without services')
-				await new Promise((resolve) => uni.stopBluetoothDevicesDiscovery({ complete: resolve }))
-				await startDiscovery({ withServiceFilter: false })
+				await startDiscovery({ withServiceFilter: true })
 			} catch (e) {
-				console.warn('[ble-scan] fallback discovery failed', e)
+				// 微信小程序：部分 Android 机型扫描蓝牙需要开启定位服务/授权定位权限
+				const code = getErrCode(e)
+				const msg = getErrMsg(e).toLowerCase()
+				const maybeLocation = msg.includes('location') || msg.includes('permission') || code === 10012
+				if (maybeLocation) {
+					// #ifdef MP-WEIXIN
+					try {
+						await new Promise((resolve, reject) => {
+							;(wx as any).authorize({
+								scope: 'scope.userLocation',
+								success: resolve,
+								fail: reject,
+							})
+						})
+						if (!isScanSessionActive(sessionId)) return
+						await startDiscovery({ withServiceFilter: true })
+					} catch (e2) {
+						throw e2
+					}
+					// #endif
+					// #ifndef MP-WEIXIN
+					throw e
+					// #endif
+				} else {
+					throw e
+				}
 			}
-		}, 1200)
-	} catch (e) {
-		console.error('[ble-scan] startScan failed', e)
-		const msg = formatUniError(e)
-		// NOTE: 某些平台/运行时在 script 内对 i18n 插值支持不稳定，这里用本地 format 做兜底
-		errorMsg.value = format(t('pages.deviceProvision.bleInitFailed') as string, { error: msg })
 
-		// 微信小程序：引导用户开启系统蓝牙
-		// errCode 10001 常见于 “Bluetooth not enabled/available”
-		const anyErr = e as any
-		const code = anyErr?.errCode ?? anyErr?.code
-		const errMsg = String(anyErr?.errMsg ?? '')
-		if (code === 10001 || errMsg.toLowerCase().includes('bluetooth')) {
-			// 尽量不打断用户：仅在可用时提供跳转入口
-			const openBtSetting = (uni as any).openSystemBluetoothSetting
-			if (typeof openBtSetting === 'function') {
-				uni.showModal({
-					title: t('common.tip'),
-					content: t('pages.deviceProvision.enableBluetoothTip'),
-					confirmText: t('common.confirm'),
-					cancelText: t('common.cancel'),
-					success: (res: UniApp.ShowModalRes) => {
-						if (res.confirm) openBtSetting()
-					},
+			if (!isScanSessionActive(sessionId)) return
+
+			// 部分设备首次扫描拿不到完整 serviceData，短时间内没有“可展示设备”时自动降级重启一次。
+			fallbackTimer = setTimeout(() => {
+				void runScanSerial(async () => {
+					if (!isScanSessionActive(sessionId)) return
+					if (visibleDevices.value.length > 0) return
+					try {
+						console.warn('[ble-scan] no visible devices found with service filter, fallback to discovery without services', { sessionId })
+						await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
+						if (!isScanSessionActive(sessionId)) return
+						await startDiscovery({ withServiceFilter: false })
+					} catch (e) {
+						console.warn('[ble-scan] fallback discovery failed', e)
+					}
 				})
+			}, 1500)
+		} catch (e) {
+			console.error('[ble-scan] startScan failed', e)
+			if (scanSessionId !== sessionId) return
+			isScanning.value = false
+			const msg = formatUniError(e)
+			// NOTE: 某些平台/运行时在 script 内对 i18n 插值支持不稳定，这里用本地 format 做兜底
+			errorMsg.value = format(t('pages.deviceProvision.bleInitFailed') as string, { error: msg })
+
+			// 微信小程序：引导用户开启系统蓝牙
+			// errCode 10001 常见于 “Bluetooth not enabled/available”
+			const anyErr = e as any
+			const code = anyErr?.errCode ?? anyErr?.code
+			const errMsg = String(anyErr?.errMsg ?? '')
+			if (code === 10001 || errMsg.toLowerCase().includes('bluetooth')) {
+				// 尽量不打断用户：仅在可用时提供跳转入口
+				const openBtSetting = (uni as any).openSystemBluetoothSetting
+				if (typeof openBtSetting === 'function') {
+					uni.showModal({
+						title: t('common.tip'),
+						content: t('pages.deviceProvision.enableBluetoothTip'),
+						confirmText: t('common.confirm'),
+						cancelText: t('common.cancel'),
+						success: (res: UniApp.ShowModalRes) => {
+							if (res.confirm) openBtSetting()
+						},
+					})
+				}
+			}
+		} finally {
+			if (scanSessionId === sessionId) {
+				starting.value = false
 			}
 		}
-	} finally {
-		starting.value = false
-	}
+	})
 }
 
-async function stopScan() {
-	try {
-		if (fallbackTimer) clearTimeout(fallbackTimer)
-		await new Promise((resolve) => {
-			uni.stopBluetoothDevicesDiscovery({ complete: resolve })
-		})
-	} finally {
-		isScanning.value = false
-	}
+async function stopScan({ closeAdapter = false }: { closeAdapter?: boolean } = {}) {
+	return runScanSerial(async () => {
+		++scanSessionId
+		try {
+			clearFallbackTimer()
+			offDeviceFoundListener()
+			await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
+			if (closeAdapter) {
+				try {
+					uni.closeBluetoothAdapter()
+				} catch (e) {}
+			}
+		} finally {
+			starting.value = false
+			isScanning.value = false
+		}
+	})
 }
 
 async function toggleScan() {
+	if (starting.value) return
 	if (isScanning.value) return stopScan()
 	return startScan()
 }
@@ -468,6 +571,7 @@ onLoad((option) => {
 })
 
 onShow(() => {
+	pageVisible = true
 	marginTopHeight.value = uni.getStorageSync('contentPaddingTop')
 	pageHeight.value = uni.getStorageSync('pageHeight')
 	;(async () => {
@@ -486,20 +590,19 @@ onShow(() => {
 		}
 
 		// 默认进入即开始扫描
-		startScan()
+		await startScan()
 	})()
 })
 
 onHide(() => {
+	pageVisible = false
 	// 页面离开（跳转/切后台）即停止扫描，避免占用系统资源
-	stopScan()
+	void stopScan()
 })
 
 onUnload(() => {
-	stopScan()
-	try {
-		uni.closeBluetoothAdapter()
-	} catch (e) {}
+	pageVisible = false
+	void stopScan({ closeAdapter: true })
 })
 </script>
 

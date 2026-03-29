@@ -1,9 +1,7 @@
 import i18n from '@/lang/index'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
-import * as devicePrefixModule from '@/common/device-provision/device-prefix.js'
-
-const DEVICE_TYPE_BMS = devicePrefixModule.DEVICE_TYPE_BMS
-const DEVICE_TYPE_METER = devicePrefixModule.DEVICE_TYPE_METER
+import { DEVICE_TYPE_BMS, DEVICE_TYPE_METER } from '@/common/device-provision/device-prefix-shared'
+import { useBoundDevicesStore } from '@/store/bound-devices'
 
 const t = (key: string) => i18n.global.t(key) as unknown as string
 
@@ -50,12 +48,43 @@ function switchToBaseTab(baseTabUrl: string, next: () => void) {
 	})
 }
 
-function navigateToDetailByBleMac(baseTabUrl: string, bleMac: string) {
+function navigateByUrl(baseTabUrl: string, url: string) {
 	switchToBaseTab(baseTabUrl, () => {
-		uni.navigateTo({
-			url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(bleMac)}&allow_scan_handoff=1`,
-		})
+		uni.navigateTo({ url })
 	})
+}
+
+function resolveScanRoute(
+	parsed: NonNullable<ReturnType<typeof parseAddDeviceScanCode>>,
+	boundDevicesStore: ReturnType<typeof useBoundDevicesStore>
+) {
+	if (parsed.type === 'mac') {
+		const matched = boundDevicesStore.findByBleMac(parsed.value)
+		const matchedDeviceId = String(matched?.device_id || '').trim()
+		if (matchedDeviceId) {
+			return { action: 'bound_detail', url: `/pages/device-battery/detail?device_id=${encodeURIComponent(matchedDeviceId)}` }
+		}
+		if (parsed.deviceType === DEVICE_TYPE_METER) {
+			return {
+				action: 'meter_session',
+				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(parsed.value)}&allow_scan_handoff=1`,
+			}
+		}
+		if (parsed.deviceType === DEVICE_TYPE_BMS) {
+			return {
+				action: 'bms_provision',
+				url: `/pages/device-provision/ble-scan?mode=qr&mac=${encodeURIComponent(parsed.value)}`,
+			}
+		}
+		return { action: 'unsupported' as const }
+	}
+
+	const matched = boundDevicesStore.findByItemUuid(parsed.value)
+	const matchedDeviceId = String(matched?.device_id || '').trim()
+	if (matchedDeviceId) {
+		return { action: 'bound_detail', url: `/pages/device-battery/detail?device_id=${encodeURIComponent(matchedDeviceId)}` }
+	}
+	return { action: 'uuid_bind', url: `/pages/device-provision/uuid-bind?uuid=${encodeURIComponent(parsed.value)}` }
 }
 
 export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOptions = {}) {
@@ -68,6 +97,7 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 	// #endif
 
 	const baseTabUrl = normalizeTabUrl(options.baseTabUrl || '')
+	const boundDevicesStore = useBoundDevicesStore()
 
 	uni.showActionSheet({
 		itemList: [t('pages.deviceProvision.bleSearch'), t('pages.deviceProvision.cameraScan')],
@@ -81,29 +111,21 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 			}
 			if (idx === 1) {
 				uni.scanCode({
-					success: (scanRes: { result?: unknown }) => {
+					success: async (scanRes: { result?: unknown }) => {
 						const parsed = parseAddDeviceScanCode(String(scanRes.result ?? ''))
 						if (!parsed) {
 							uni.showToast({ title: t('pages.deviceProvision.invalidCode'), icon: 'none' })
 							return
 						}
-						if (parsed.type === 'mac') {
-							if (parsed.deviceType === DEVICE_TYPE_METER) {
-								navigateToDetailByBleMac(baseTabUrl, parsed.value)
-								return
-							}
-							if (parsed.deviceType !== DEVICE_TYPE_BMS) {
-								uni.showToast({ title: t('pages.deviceProvision.unsupportedDeviceType'), icon: 'none' })
-								return
-							}
-							switchToBaseTab(baseTabUrl, () => {
-								uni.navigateTo({ url: `/pages/device-provision/ble-scan?mode=qr&mac=${parsed.value}` })
-							})
+						try {
+							await boundDevicesStore.refresh({ force: true })
+						} catch (e) {}
+						const decision = resolveScanRoute(parsed, boundDevicesStore)
+						if (decision.action === 'unsupported' || !decision.url) {
+							uni.showToast({ title: t('pages.deviceProvision.unsupportedDeviceType'), icon: 'none' })
 							return
 						}
-						switchToBaseTab(baseTabUrl, () => {
-							uni.navigateTo({ url: `/pages/device-provision/uuid-bind?uuid=${parsed.value}` })
-						})
+						navigateByUrl(baseTabUrl, decision.url)
 					},
 					fail: () => {
 						// 用户取消扫码，不提示
