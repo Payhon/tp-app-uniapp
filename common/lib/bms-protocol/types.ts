@@ -140,6 +140,7 @@ export type BmsStatus = {
 	}
 	status: {
 		protectionStatus: Record<string, boolean>
+		failureStatus: Record<string, boolean>
 		indicatorStatus: Record<string, boolean>
 		alarmStatus: Record<string, boolean>
 		customStatus: number

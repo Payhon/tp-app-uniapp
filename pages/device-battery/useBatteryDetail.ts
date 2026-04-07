@@ -84,13 +84,11 @@ const stableBoolMap = (obj?: Record<string, boolean>) => {
 const buildCoreReport = (s: BmsStatus): Record<string, unknown> => {
 	const indicator = s.status?.indicatorStatus || {}
 	const protection = s.status?.protectionStatus || {}
+	const failure = s.status?.failureStatus || {}
 	const alarm = s.status?.alarmStatus || {}
 	const balancing = Array.isArray(s.cell?.balancing) ? s.cell.balancing : []
 
-	let faultCount = 0
-	for (const [key, on] of Object.entries(protection)) {
-		if (on && key.toLowerCase().includes('fault')) faultCount += 1
-	}
+	const faultCount = countTrue(protection) + countTrue(failure)
 
 	return {
 		soc: s.energy?.socPct,
@@ -125,6 +123,7 @@ const buildStateFingerprint = (s: BmsStatus): string => {
 	return [
 		stableBoolMap(s.status?.alarmStatus),
 		stableBoolMap(s.status?.protectionStatus),
+		stableBoolMap(s.status?.failureStatus),
 		stableBoolMap(s.status?.indicatorStatus),
 	].join('||')
 }

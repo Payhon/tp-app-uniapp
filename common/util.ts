@@ -1,92 +1,100 @@
 import $http from './request'
+import i18n from '@/lang'
 
 declare const plus: any
+
+const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params as any) as string
 
 // 监听网络
 function onNetWork() {
 	const func = (res: { networkType?: string }) => {
-		if(res.networkType === 'none' ){
+		if (res.networkType === 'none') {
 			uni.showToast({
-				title:'网络未连接',
-				icon:'none'
-			});
+				title: t('common.networkDisconnected'),
+				icon: 'none'
+			})
 		}
-	};
-	uni.getNetworkType({ success:func });
-	uni.onNetworkStatusChange(func);
+	}
+	uni.getNetworkType({ success: func })
+	uni.onNetworkStatusChange(func)
 }
 // 更新检测
 function update(showToast = false) {
 	// #ifdef APP-PLUS
 	plus.runtime.getProperty(plus.runtime.appid, function (widgetInfo: { version: string }) {
-		// 
+		//
 		$http.post('/Update', { ver: widgetInfo.version }).then((result: any) => {
-			// 
-			if(!result.url){
+			//
+			if (!result.url) {
 				// 无需更新
-				if(showToast){
-					return uni.showToast({	title:"无需更新", icon:"none" })
+				if (showToast) {
+					return uni.showToast({ title: t('common.update.noUpdate'), icon: 'none' })
 				}
 			}
-			// 
+			//
 			uni.showModal({
-				title:"发现新版本",
-				content:"最新版本：" + result.version,
-				cancelText:"暂不更新",
-				confirmText:"立即更新",
-				success:(res: { confirm?: boolean })=>{
-					if(res.confirm){
+				title: t('common.update.newVersionTitle'),
+				content: t('common.update.latestVersion', { version: result.version }),
+				cancelText: t('common.update.later'),
+				confirmText: t('common.update.updateNow'),
+				success: (res: { confirm?: boolean }) => {
+					if (res.confirm) {
 						//
-						__update(result.url);
-						// 
+						__update(result.url)
+						//
 					}
 				}
 			})
-			// 
-		});
-		// 
-	});
+			//
+		})
+		//
+	})
 	// #endif
 }
 //
 function __update(downloadUrl = '') {
 	//
-	if(downloadUrl === '') return;
+	if (downloadUrl === '') return
 	//
-	let progressTxt = "开始下载...";
+	const progressTxt = t('common.update.startDownload')
 	//
-	uni.showToast({	title:progressTxt, icon:"loading" });
+	uni.showToast({ title: progressTxt, icon: 'loading' })
 	//
 	const downloadTask = uni.downloadFile({
-		url: downloadUrl, 
+		url: downloadUrl,
 		success: (res: { statusCode: number; tempFilePath: string }) => {
-			// 
-			if(res.statusCode === 200){
+			//
+			if (res.statusCode === 200) {
 				//
-				uni.hideToast();
+				uni.hideToast()
 				//
-				plus.runtime.install(res.tempFilePath,{
-					force:false
-				},function(){
-					console.log('install success ...');
-					plus.runtime.restart();
-				},function(e: any){
-					console.error('install fail...');
-				});
+				plus.runtime.install(
+					res.tempFilePath,
+					{
+						force: false
+					},
+					function () {
+						console.log('install success ...')
+						plus.runtime.restart()
+					},
+					function (e: any) {
+						console.error('install fail...')
+					}
+				)
 			}
-			// 
-		},
-		fail:(err: any)=>{
-			//
-			uni.hideToast();
 			//
 		},
-		complete: ()=> {
+		fail: (err: any) => {
+			//
+			uni.hideToast()
+			//
+		},
+		complete: () => {
 			//
 			// uni.hideToast();
 			//
 		}
-	});
+	})
 	//
 	downloadTask.onProgressUpdate((res: any) => {
 		// 
@@ -100,15 +108,17 @@ function __update(downloadUrl = '') {
 // 数组置顶
 function __toFirst<T>(arr: T[], index: number) {
 	// 
-	if(index != 0){
-		arr.unshift(arr.splice(index,1)[0]);
+	if (index != 0) {
+		arr.unshift(arr.splice(index, 1)[0])
 	}
 	// 
-	return arr;
+	return arr
 	// 
 }
 //
-export default{
-	onNetWork,update,__toFirst
+export default {
+	onNetWork,
+	update,
+	__toFirst
 }
-// 
+//

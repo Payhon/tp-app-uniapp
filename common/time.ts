@@ -1,4 +1,8 @@
+import i18n from '@/lang'
+
 export type DateLike = string | number | Date
+
+const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params as any) as string
 
 export const time = {
 	humanize(dataTime?: DateLike): string | undefined {
@@ -23,17 +27,17 @@ export const time = {
 
 		let result = ''
 		if (monthC >= 1 && monthC <= 3) {
-			result = ' ' + parseInt(String(monthC)) + '月前'
+			result = ' ' + t('common.time.monthAgo', { n: parseInt(String(monthC)) })
 		} else if (weekC >= 1 && weekC <= 3) {
-			result = ' ' + parseInt(String(weekC)) + '周前'
+			result = ' ' + t('common.time.weekAgo', { n: parseInt(String(weekC)) })
 		} else if (dayC >= 1 && dayC <= 6) {
-			result = ' ' + parseInt(String(dayC)) + '天前'
+			result = ' ' + t('common.time.dayAgo', { n: parseInt(String(dayC)) })
 		} else if (hourC >= 1 && hourC <= 23) {
-			result = ' ' + parseInt(String(hourC)) + '小时前'
+			result = ' ' + t('common.time.hourAgo', { n: parseInt(String(hourC)) })
 		} else if (minC >= 1 && minC <= 59) {
-			result = ' ' + parseInt(String(minC)) + '分钟前'
+			result = ' ' + t('common.time.minuteAgo', { n: parseInt(String(minC)) })
 		} else if (diffValue >= 0 && diffValue <= minute) {
-			result = '刚刚'
+			result = t('common.time.justNow')
 		} else {
 			const datetime = new Date()
 			datetime.setTime(dateTimeStamp)

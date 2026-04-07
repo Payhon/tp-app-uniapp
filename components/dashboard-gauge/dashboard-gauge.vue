@@ -10,7 +10,7 @@
 			<!-- #ifndef MP-WEIXIN -->
 			<view class="content-overlay">
 				<view class="top-voltage" v-if="totalVoltageText">
-					<text class="top-voltage__label">{{ totalVoltageLabel }}</text>
+					<text class="top-voltage__label">{{ totalVoltageLabelText }}</text>
 					<text class="top-voltage__value">{{ totalVoltageText }}</text>
 				</view>
 
@@ -43,6 +43,7 @@
 
 <script setup lang="ts">
 import { computed, getCurrentInstance, onMounted, ref, watch } from 'vue'
+import i18n from '@/lang'
 
 type Pt = { x: number; y: number }
 
@@ -59,10 +60,12 @@ const props = withDefaults(defineProps<Props>(), {
 	soc: 0,
 	soh: 0,
 	totalVoltageText: '',
-	totalVoltageLabel: '总电压',
+	totalVoltageLabel: '',
 	footerStateText: '',
 	footerMacText: '',
 })
+
+const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params as any) as string
 
 const instance = getCurrentInstance()
 const canvasId = `gauge-${Math.random().toString(16).slice(2)}`
@@ -72,6 +75,7 @@ const cssH = ref(0)
 
 const socText = computed(() => String(Math.round(props.soc || 0)))
 const sohText = computed(() => String(Math.round(props.soh || 0)))
+const totalVoltageLabelText = computed(() => props.totalVoltageLabel || t('components.dashboardGauge.totalVoltageLabel'))
 
 type CubicSegment = {
 	p0: Pt
@@ -240,7 +244,7 @@ const draw = () => {
 	const soc = socText.value
 	const soh = sohText.value
 	const totalVoltageText = String(props.totalVoltageText || '')
-	const totalVoltageLabel = String(props.totalVoltageLabel || '')
+	const totalVoltageLabel = String(totalVoltageLabelText.value || '')
 	const stateText = String(props.footerStateText || '')
 	const macText = String(props.footerMacText || '')
 
@@ -311,7 +315,7 @@ onMounted(() => {
 	setTimeout(measure, 200)
 })
 
-watch(() => [props.soc, props.soh, props.totalVoltageText, props.totalVoltageLabel, props.footerStateText, props.footerMacText], draw)
+watch(() => [props.soc, props.soh, props.totalVoltageText, totalVoltageLabelText.value, props.footerStateText, props.footerMacText], draw)
 </script>
 
 <style lang="scss" scoped>

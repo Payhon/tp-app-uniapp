@@ -47,18 +47,32 @@ function decodeBitField32(u32: number, mapping: Record<number, string>): Record<
 	return out;
 }
 
+function decodeBitField16(u16: number, mapping: Record<number, string>): Record<string, boolean> {
+	const out: Record<string, boolean> = {};
+	for (const [bit, name] of Object.entries(mapping)) {
+		out[name] = !!(u16 & (1 << Number(bit)));
+	}
+	return out;
+}
+
 const PROTECTION_BITS = Object.freeze({
-	0: 'chargeMosFault',
-	1: 'dischargeMosFault',
+	0: 'cellOverVoltageProtectionLv1',
+	1: 'cellUnderVoltageProtectionLv1',
 	2: 'poleTempOverTempProtection',
-	3: 'antiReverseMosFault',
+	3: 'preDischargeShortCircuitProtection',
 	4: 'chargeOverCurrentProtectionLv1',
 	5: 'dischargeOverCurrentProtectionLv1',
 	6: 'shortCircuitProtection',
 	7: 'insulationProtection',
 	8: 'cellOverVoltageProtectionLv2',
 	9: 'cellUnderVoltageProtectionLv2',
-	14: 'ambientNtcInvalid',
+	10: 'chargeOverCurrentProtectionLv2',
+	11: 'dischargeOverCurrentProtectionLv2',
+	12: 'afeOverTempProtection',
+	14: 'ambientUnderTempProtection',
+	15: 'ambientOverTempProtection',
+	16: 'chargeHighTempProtectionCell',
+	17: 'dischargeHighTempProtectionCell',
 	18: 'chargeLowTempProtectionCell',
 	19: 'dischargeLowTempProtectionCell',
 	20: 'cellUnderTempProtection',
@@ -71,6 +85,24 @@ const PROTECTION_BITS = Object.freeze({
 	28: 'heatingFilmTempProtection',
 	29: 'packUnderVoltageProtection',
 	30: 'packOverVoltageProtection',
+});
+
+const FAILURE_BITS = Object.freeze({
+	0: 'chargeMosFault',
+	1: 'dischargeMosFault',
+	2: 'prechargeMosFault',
+	3: 'antiReverseMosFault',
+	4: 'heatingMosFault',
+	5: 'cellSamplingOpenCircuitFault',
+	6: 'rtcOrCellUltraLowVoltageChargeDisableFault',
+	8: 'fuseBlownFault',
+	9: 'voltageSamplingFault',
+	10: 'currentSamplingFault',
+	11: 'cellAbnormalOverTempFault',
+	12: 'afeCommunicationFault',
+	13: 'cellNtcInvalid',
+	14: 'ambientNtcInvalid',
+	15: 'mosNtcInvalid',
 });
 
 const INDICATOR_BITS = Object.freeze({
@@ -151,6 +183,7 @@ export function parseStatusRegisters({
 	};
 
 	const protectionStatus = decodeBitField32(view.u32(0x12f), PROTECTION_BITS);
+	const failureStatus = decodeBitField16(view.u16(0x131), FAILURE_BITS);
 	const indicatorStatus = decodeBitField32(view.u32(0x132), INDICATOR_BITS);
 	const alarmStatus = decodeBitField32(view.u32(0x134), ALARM_BITS);
 
@@ -254,6 +287,7 @@ export function parseStatusRegisters({
 		},
 		status: {
 			protectionStatus,
+			failureStatus,
 			indicatorStatus,
 			alarmStatus,
 			customStatus: view.u32(0x136),

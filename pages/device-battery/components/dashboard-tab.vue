@@ -195,6 +195,7 @@ const sohPct = computed(() => {
 const indicator = computed(() => props.status?.status?.indicatorStatus || {})
 const alarm = computed(() => props.status?.status?.alarmStatus || {})
 const protect = computed(() => props.status?.status?.protectionStatus || {})
+const failure = computed(() => props.status?.status?.failureStatus || {})
 
 const stateText = computed(() => {
 	if ((indicator.value as any).charging) return t('deviceDetail.state.charging') as string
@@ -214,8 +215,7 @@ const chargeDischargeTimeLabel = computed(() => {
 })
 
 const faultCount = computed(() => {
-	const obj = protect.value as Record<string, boolean>
-	return Object.keys(obj).filter((k) => k.toLowerCase().includes('fault') && obj[k]).length
+	return faultItems.value.length
 })
 
 const alarmCount = computed(() => {
@@ -237,10 +237,9 @@ const labelForStatus = (key: string) => {
 }
 
 const faultItems = computed(() => {
-	const obj = protect.value as Record<string, boolean>
-	return Object.keys(obj)
-		.filter((k) => k.toLowerCase().includes('fault') && obj[k])
-		.map(labelForStatus)
+	const protectObj = protect.value as Record<string, boolean>
+	const failureObj = failure.value as Record<string, boolean>
+	return [...Object.keys(protectObj).filter((k) => protectObj[k]), ...Object.keys(failureObj).filter((k) => failureObj[k])].map(labelForStatus)
 })
 
 const alarmItems = computed(() => {
@@ -296,12 +295,12 @@ const chargeDischargeTimeText = computed(() => {
 	if ((indicator.value as any).charging) {
 		const v = props.status?.timing?.chargeRemainingMin
 		if (isInvalidU16(v)) return '-'
-		return `${Number(v || 0)}min`
+		return formatWithParams('deviceDetail.unit.minutes', { n: Number(v || 0) })
 	}
 	if ((indicator.value as any).discharging) {
 		const v = props.status?.timing?.dischargeRemainingMin
 		if (isInvalidU16(v)) return '-'
-		return `-${Number(v || 0)}min`
+		return formatWithParams('deviceDetail.unit.minutes', { n: -Number(v || 0) })
 	}
 	return '-'
 })

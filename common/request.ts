@@ -1,4 +1,5 @@
 import $C from '@/common/config'
+import i18n from '@/lang'
 import $store from '@/store'
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | string
@@ -31,6 +32,8 @@ const common: RequestCommon = {
 	data: {}
 }
 
+const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params as any) as string
+
 const request = <T = unknown>(options: RequestOptions): Promise<T> | any => {
 	const merged: RequestOptions = { ...options }
 	merged.url = $C.webUrl + merged.url
@@ -42,7 +45,7 @@ const request = <T = unknown>(options: RequestOptions): Promise<T> | any => {
 		merged.header.Authorization = `${$store.state.token.token_type} ${$store.state.token.access_token}`
 		if (!merged.header.Authorization) {
 			return uni.showToast({
-				title: '非法token，请重新登录',
+				title: t('auth.sessionExpired'),
 				icon: 'none'
 			})
 		}
@@ -69,7 +72,7 @@ const request = <T = unknown>(options: RequestOptions): Promise<T> | any => {
 			},
 			fail: (error: any) => {
 				uni.showToast({
-					title: error?.errMsg || '请求失败',
+					title: error?.errMsg || t('common.requestFailed'),
 					icon: 'none'
 				})
 				return reject()
@@ -107,7 +110,7 @@ const upload = <T = unknown>(url: string, options: UploadOptions = {}) => {
 		merged.header.token = $store.state.token
 		if (!merged.header.token) {
 			return uni.showToast({
-				title: '非法token，请重新登录',
+				title: t('auth.sessionExpired'),
 				icon: 'none'
 			})
 		}
@@ -119,7 +122,7 @@ const upload = <T = unknown>(url: string, options: UploadOptions = {}) => {
 			success: (uploadFileRes: any) => {
 				if (uploadFileRes.statusCode != 200) {
 					uni.showToast({
-						title: '上传图片失败',
+						title: t('common.uploadFailed'),
 						icon: 'none'
 					})
 					return

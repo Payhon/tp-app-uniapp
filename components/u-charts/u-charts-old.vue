@@ -6,11 +6,13 @@
 
 <script setup lang="ts">
 import { getCurrentInstance, onMounted } from 'vue'
+import i18n from '@/lang'
 
 // NOTE: 旧版封装（uCharts 依赖 $this 取 canvas 上下文），保留行为但用 Vue3 setup 写法
 import uCharts from '@/js_sdk/u-charts/u-charts.js'
 
 type AnyRecord = Record<string, any>
+const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params as any) as string
 
 const props = withDefaults(
 	defineProps<{
@@ -92,7 +94,7 @@ const initLineChart = () => {
 			min: 10,
 			max: 180,
 			format: (val: number) => {
-				return val.toFixed(0) + '元'
+				return val.toFixed(0) + t('components.uCharts.currencyUnit')
 			}
 		},
 		width: (props.cWidth || 0) * (props.pixelRatio || 1),

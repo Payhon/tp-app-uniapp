@@ -264,37 +264,44 @@ type FunctionControlItem = (typeof FUNCTION_CONFIG_ITEMS)[number] & {
 	statusText: string
 }
 
-const TEMP_DISPLAY_LABELS: Record<string, string> = {
-	CELL_OVER_TEMP_PROTECT_C: 'MOS高温保护温度',
-	CELL_OVER_TEMP_RELEASE_C: 'MOS高温保护解除温度',
-	MOS_OVER_TEMP_PROTECT_DELAY_S: 'MOS高温保护延时',
-	MOS_OVER_TEMP_RELEASE_DELAY_S: 'MOS高温保护解除延时',
-	CELL_UNDER_TEMP_PROTECT_C: '充电低温保护温度',
-	CELL_UNDER_TEMP_RELEASE_C: '充电低温保护解除温度',
-	CHARGE_OVER_TEMP_PROTECT_C: '充电高温保护温度',
-	CHARGE_OVER_TEMP_RELEASE_C: '充电高温保护解除温度',
-	CHARGE_OVER_TEMP_PROTECT_DELAY_S: '充电高低温保护延时',
-	CHARGE_OVER_TEMP_RELEASE_DELAY_S: '充电高低温保护解除延时',
-	DISCHARGE_UNDER_TEMP_PROTECT_C: '放电低温保护温度',
-	DISCHARGE_UNDER_TEMP_RELEASE_C: '放电低温保护解除温度',
-	DISCHARGE_OVER_TEMP_PROTECT_C: '放电高温保护温度',
-	DISCHARGE_OVER_TEMP_RELEASE_C: '放电高温保护解除温度',
-	DISCHARGE_OVER_TEMP_PROTECT_DELAY_S: '放电高低温保护延时',
-	DISCHARGE_OVER_TEMP_RELEASE_DELAY_S: '放电高低温保护解除延时',
+const TEMP_DISPLAY_LABEL_KEYS: Record<string, string> = {
+	CELL_OVER_TEMP_PROTECT_C: 'deviceDetail.params.temperatureLabels.mosOverTempProtect',
+	CELL_OVER_TEMP_RELEASE_C: 'deviceDetail.params.temperatureLabels.mosOverTempRelease',
+	MOS_OVER_TEMP_PROTECT_DELAY_S: 'deviceDetail.params.temperatureLabels.mosOverTempProtectDelay',
+	MOS_OVER_TEMP_RELEASE_DELAY_S: 'deviceDetail.params.temperatureLabels.mosOverTempReleaseDelay',
+	CELL_UNDER_TEMP_PROTECT_C: 'deviceDetail.params.temperatureLabels.chargeUnderTempProtect',
+	CELL_UNDER_TEMP_RELEASE_C: 'deviceDetail.params.temperatureLabels.chargeUnderTempRelease',
+	CHARGE_OVER_TEMP_PROTECT_C: 'deviceDetail.params.temperatureLabels.chargeOverTempProtect',
+	CHARGE_OVER_TEMP_RELEASE_C: 'deviceDetail.params.temperatureLabels.chargeOverTempRelease',
+	CHARGE_OVER_TEMP_PROTECT_DELAY_S: 'deviceDetail.params.temperatureLabels.chargeOverTempProtectDelay',
+	CHARGE_OVER_TEMP_RELEASE_DELAY_S: 'deviceDetail.params.temperatureLabels.chargeOverTempReleaseDelay',
+	DISCHARGE_UNDER_TEMP_PROTECT_C: 'deviceDetail.params.temperatureLabels.dischargeUnderTempProtect',
+	DISCHARGE_UNDER_TEMP_RELEASE_C: 'deviceDetail.params.temperatureLabels.dischargeUnderTempRelease',
+	DISCHARGE_OVER_TEMP_PROTECT_C: 'deviceDetail.params.temperatureLabels.dischargeOverTempProtect',
+	DISCHARGE_OVER_TEMP_RELEASE_C: 'deviceDetail.params.temperatureLabels.dischargeOverTempRelease',
+	DISCHARGE_OVER_TEMP_PROTECT_DELAY_S: 'deviceDetail.params.temperatureLabels.dischargeOverTempProtectDelay',
+	DISCHARGE_OVER_TEMP_RELEASE_DELAY_S: 'deviceDetail.params.temperatureLabels.dischargeOverTempReleaseDelay',
 }
 
-const BATTERY_TYPE_OPTIONS = [
-	{ text: '默认保留', value: 0x00 },
-	{ text: '磷酸铁锂', value: 0x01 },
-	{ text: '锰酸锂', value: 0x02 },
-	{ text: '三元锂', value: 0x03 },
-	{ text: '钴酸锂', value: 0x04 },
-	{ text: '聚合锂', value: 0x05 },
-	{ text: '钛酸锂', value: 0x06 },
-	{ text: '铅酸', value: 0x07 },
-	{ text: '镍氢', value: 0x08 },
-	{ text: '钠离子', value: 0x09 },
-] as const
+const BATTERY_TYPE_KEY_MAP: Record<number, string> = {
+	0x00: 'deviceDetail.params.batteryTypes.reserved',
+	0x01: 'deviceDetail.params.batteryTypes.lifepo4',
+	0x02: 'deviceDetail.params.batteryTypes.lmo',
+	0x03: 'deviceDetail.params.batteryTypes.ternaryLithium',
+	0x04: 'deviceDetail.params.batteryTypes.lco',
+	0x05: 'deviceDetail.params.batteryTypes.lipo',
+	0x06: 'deviceDetail.params.batteryTypes.lto',
+	0x07: 'deviceDetail.params.batteryTypes.leadAcid',
+	0x08: 'deviceDetail.params.batteryTypes.nimh',
+	0x09: 'deviceDetail.params.batteryTypes.sodiumIon',
+}
+
+const BATTERY_TYPE_OPTIONS = computed(() =>
+	Object.entries(BATTERY_TYPE_KEY_MAP).map(([value, key]) => ({
+		value: Number(value),
+		text: t(key) as string,
+	}))
+)
 
 const props = defineProps<{
 	battery: AppBatteryDetail | null
@@ -378,16 +385,18 @@ const filterParamEntries = <T extends string | { displayKey: string; actualKey: 
 	})
 
 const labelOf = (key: string) => {
-	if (TEMP_DISPLAY_LABELS[key]) return TEMP_DISPLAY_LABELS[key]
 	const i18nKey = `bmsParam.${key}`
 	if (te(i18nKey)) return t(i18nKey) as string
+	const tempLabelKey = TEMP_DISPLAY_LABEL_KEYS[key]
+	if (tempLabelKey) return t(tempLabelKey) as string
 	return PARAM_DEF_BY_KEY[key]?.label || key
 }
 
 const withSingleCellPrefix = (label: string) => {
-	if (!label) return '单体'
+	if (!label) return t('deviceDetail.params.singleCellDefault') as string
 	if (label.includes('单体')) return label
-	return `单体${label}`
+	if (/single cell/i.test(label) || /\bcell\b/i.test(label)) return label
+	return t('deviceDetail.params.singleCellPrefix', { label }) as string
 }
 
 const unitOf = (key: string) => String(PARAM_DEF_BY_KEY[key]?.unit || '')
@@ -407,7 +416,10 @@ const formatDisplayNumber = (value: number, decimals: number) => {
 const getBatteryTypeLabel = (value: unknown) => {
 	const n = typeof value === 'number' ? value : Number(value)
 	if (!Number.isFinite(n)) return '-'
-	return BATTERY_TYPE_OPTIONS.find((item) => item.value === n)?.text || `未知类型(${Math.trunc(n)})`
+	return (
+		BATTERY_TYPE_OPTIONS.value.find((item) => item.value === n)?.text ||
+		(t('deviceDetail.params.unknownBatteryType', { value: Math.trunc(n) }) as string)
+	)
 }
 
 const getScaleDecimals = (scale?: number) => {
@@ -746,7 +758,7 @@ const openBatteryTypeSelector = (key: string, title: string, currentValue: unkno
 	batteryTypePicker.title = title
 	batteryTypePicker.index = Math.max(
 		0,
-		BATTERY_TYPE_OPTIONS.findIndex((item) => item.value === current)
+		BATTERY_TYPE_OPTIONS.value.findIndex((item) => item.value === current)
 	)
 	batteryTypePicker.show = true
 }
@@ -769,7 +781,10 @@ const confirmBatteryTypePicker = async (payload: { value?: Array<{ value: number
 	}
 	try {
 		await writeParamValue(batteryTypePicker.key, selected.value)
-		uni.showToast({ title: `${batteryTypePicker.title}已更新`, icon: 'none' })
+		uni.showToast({
+			title: t('deviceDetail.params.batteryTypeUpdated', { title: batteryTypePicker.title }) as string,
+			icon: 'none',
+		})
 	} catch (e) {
 		uni.showToast({ title: t('deviceDetail.toast.saveFailed') as string, icon: 'none' })
 	} finally {
@@ -785,7 +800,10 @@ const setFunctionControl = async (key: FunctionConfigFlagKey, enabled: boolean) 
 	}
 	if (functionConfigFlags.value[key] === enabled) return
 	if (!canAccessFunctionControl(key)) {
-		uni.showToast({ title: '当前账号无权限操作功能配置', icon: 'none' })
+		uni.showToast({
+			title: t('deviceDetail.params.noPermissionFunctionConfig') as string,
+			icon: 'none',
+		})
 		return
 	}
 	const nextWord = setFunctionConfigFlag(paramValues[BMS_PARAM.FUNCTION_CONFIG], key, enabled)
@@ -844,7 +862,10 @@ const runFactory = async (item: { key: string; raw: number; confirm?: boolean })
 		return
 	}
 	if (!canAccessFactoryAction(item.key)) {
-		uni.showToast({ title: '当前账号无权限执行工厂命令', icon: 'none' })
+		uni.showToast({
+			title: t('deviceDetail.params.noPermissionFactoryCommand') as string,
+			icon: 'none',
+		})
 		return
 	}
 	if (item.confirm) {

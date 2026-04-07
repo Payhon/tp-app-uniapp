@@ -376,6 +376,7 @@ export const BMS_STATUS_PARAM = Object.freeze({
 	LOWEST_TEMP: 'LOWEST_TEMP',
 
 	PROTECTION_STATUS: 'PROTECTION_STATUS',
+	FAILURE_STATUS: 'FAILURE_STATUS',
 	INDICATOR_STATUS: 'INDICATOR_STATUS',
 	ALARM_STATUS: 'ALARM_STATUS',
 	CUSTOM_STATUS_U32: 'CUSTOM_STATUS_U32',
@@ -486,6 +487,7 @@ export const PARAM_DEFS = Object.freeze([
 	def(BMS_STATUS_PARAM.LOWEST_TEMP, PARAM_CATEGORIES.STATUS, { label: '最低温度', valueType: 'statusPath', path: 'temperature.lowestTemp', access: 'R' }),
 
 	def(BMS_STATUS_PARAM.PROTECTION_STATUS, PARAM_CATEGORIES.STATUS, { label: '保护状态', valueType: 'statusPath', path: 'status.protectionStatus', access: 'R' }),
+	def(BMS_STATUS_PARAM.FAILURE_STATUS, PARAM_CATEGORIES.STATUS, { label: '失效状态', valueType: 'statusPath', path: 'status.failureStatus', access: 'R' }),
 	def(BMS_STATUS_PARAM.INDICATOR_STATUS, PARAM_CATEGORIES.STATUS, { label: '指示状态', valueType: 'statusPath', path: 'status.indicatorStatus', access: 'R' }),
 	def(BMS_STATUS_PARAM.ALARM_STATUS, PARAM_CATEGORIES.STATUS, { label: '告警状态', valueType: 'statusPath', path: 'status.alarmStatus', access: 'R' }),
 	def(BMS_STATUS_PARAM.CUSTOM_STATUS_U32, PARAM_CATEGORIES.STATUS, { label: '自定义状态', valueType: 'statusPath', path: 'status.customStatus', access: 'R' }),

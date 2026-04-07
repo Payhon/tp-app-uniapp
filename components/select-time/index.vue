@@ -45,7 +45,7 @@
       <!-- 1 每小时 -->
       <view v-if="data.v1 === '1'" class="item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing">
         <CustomSelect
-          placeholder="mm:ss" 
+          :placeholder="$t('components.selectTime.minuteSecondPlaceholder')"
           :options="minuteOptions"
           v-model="data.v3"
         ></CustomSelect>
@@ -61,7 +61,7 @@
       <!-- 2 每天 -->
       <view v-if="data.v1 === '2'" class="item tp-flex tp-flex-row tp-flex-j-s tp-flex-a-c tp-box-sizing">
       	<picker class="tp-flex-1" mode="time" :value="data.v3" @change="bindTimeChange">
-      		<view class="uni-input" :class="!data.v3 && 'placeholder'">{{data.v3 || 'hh:mm'}}</view>
+      		<view class="uni-input" :class="!data.v3 && 'placeholder'">{{data.v3 || $t('components.selectTime.timePlaceholder')}}</view>
       	</picker>
         
         <view class="tp-flex-1 tp-flex">
@@ -82,7 +82,7 @@
         
         <view class="tp-flex-1 tp-flex tp-flex-a-c">
           <picker class="tp-flex-1" v-if="data.v3" mode="time" :value="data.v4" @change="bindTimeChange2">
-            <view class="uni-input" :class="!data.v4 && 'placeholder'">{{data.v4 || 'hh:mm'}}</view>
+            <view class="uni-input" :class="!data.v4 && 'placeholder'">{{data.v4 || $t('components.selectTime.timePlaceholder')}}</view>
           </picker>
           
           <uni-tooltip v-if="data.v3" class="tooltip" :content="$t('components.selectTime.weekTip')">
@@ -102,7 +102,7 @@
         
         <view class="tp-flex-1 tp-flex tp-flex-a-c">
           <picker class="tp-flex-1" v-if="date" mode="time" :value="time" @change="bindTimeChange1">
-          	<view class="uni-input" :class="!time && 'placeholder'">{{time || 'hh:mm'}}</view>
+          	<view class="uni-input" :class="!time && 'placeholder'">{{time || $t('components.selectTime.timePlaceholder')}}</view>
           </picker>
           
           <uni-tooltip v-if="date" class="tooltip" :content="$t('components.selectTime.monthTip')">
