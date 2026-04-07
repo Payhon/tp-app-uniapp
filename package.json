@@ -1,18 +1,12 @@
 {
-    "id": "echarts-uniapp",
-    "name": "echarts for uniapp",
-    "version": "0.0.1",
-    "description": "echarts适配uni-app",
+    "id": "fjbms-uniapp",
+    "name": "fjbms for uniapp",
+    "version": "1.0.1",
+    "description": "fjbms适配uni-app",
     "keywords": [
-        "echarts",
-        "图表"
+        "fjbms",
+        "BMS"
     ],
-    "dcloudext": {
-        "category": [
-            "前端组件",
-            "通用组件"
-        ]
-    },
     "dependencies": {
         "dayjs": "^1.11.8",
         "echarts": "^5.4.3",

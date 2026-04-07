@@ -37,6 +37,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
+import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { normalizeHex } from '@/common/device-provision/ble'
 import { getDeviceProvisionInfo, postDeviceProvisionBind } from '@/service/deviceProvision'
 
@@ -50,6 +51,7 @@ const running = ref(false)
 const done = ref(false)
 const status = ref<'idle' | 'checking' | 'binding' | 'success' | 'error'>('idle')
 const errorMsg = ref('')
+let blockedByLoginGuard = false
 
 const statusText = computed(() => {
 	if (status.value === 'idle') return t('pages.deviceProvision.statusPending')
@@ -116,12 +118,15 @@ async function run() {
 }
 
 onLoad((option) => {
+	blockedByLoginGuard = !ensureLoggedIn({ navigateMode: 'redirectTo' })
+	if (blockedByLoginGuard) return
 	const opt = option as Record<string, string | undefined>
 	uuid.value = normalizeHex(String(opt.uuid || ''))
 	if (!/^[0-9A-F]{32}$/.test(uuid.value)) uuid.value = ''
 })
 
 onShow(() => {
+	if (blockedByLoginGuard) return
 	marginTopHeight.value = uni.getStorageSync('contentPaddingTop')
 	pageHeight.value = uni.getStorageSync('pageHeight')
 	run()

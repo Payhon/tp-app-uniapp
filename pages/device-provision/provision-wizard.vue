@@ -54,6 +54,7 @@
 import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { BmsClient, BMS_PARAM, createUniBleBmsTransport } from '@/common/lib/bms-protocol'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { formatUniError } from '@/common/device-provision/error'
@@ -83,6 +84,7 @@ const rawDeviceIdParam = ref('')
 const running = ref(false)
 const done = ref(false)
 const errorMsg = ref('')
+let blockedByLoginGuard = false
 
 const summary = reactive<{ uuid: string; bleMac: string; hardwareModel: string; batteryGroupId: string; boardCode: string }>({
 	uuid: '',
@@ -291,6 +293,8 @@ function retry() {
 }
 
 onLoad((option) => {
+	blockedByLoginGuard = !ensureLoggedIn({ navigateMode: 'redirectTo' })
+	if (blockedByLoginGuard) return
 	const opt = option as Record<string, string | undefined>
 	rawDeviceIdParam.value = String(opt.deviceId || '')
 	deviceId.value = safeDecodeURIComponent(rawDeviceIdParam.value)
@@ -298,12 +302,14 @@ onLoad((option) => {
 })
 
 onShow(() => {
+	if (blockedByLoginGuard) return
 	marginTopHeight.value = uni.getStorageSync('contentPaddingTop')
 	pageHeight.value = uni.getStorageSync('pageHeight')
 	runProvision()
 })
 
 onUnload(() => {
+	blockedByLoginGuard = false
 	// transport.destroy() 已在 runProvision finally 做过；这里不再重复处理
 })
 </script>

@@ -2,7 +2,7 @@
 	<view class="auth-page">
 		<image class="page-bg" :src="$img('bg@2x.png')" mode="aspectFill" />
 		<view class="brand">
-			<image class="brand-logo" src="/static/image/logo@2x.png" mode="heightFix" />
+			<image class="brand-logo" src="/static/image/logo@2x.png" mode="heightFix" @tap="onBrandLogoTap" />
 		</view>
 
 		<view class="auth-card">
@@ -67,10 +67,26 @@
 					<text class="link" @tap="goRegister">{{ $t('auth.login.createAccount') }}</text>
 					<text class="link muted" @tap="goForgot">{{ $t('auth.login.forgotPassword') }}</text>
 				</view>
+
+				<view v-if="isDeveloperMode" class="dev-panel">
+					<text class="dev-title">{{ $t('auth.login.developerModeTitle') }}</text>
+					<view class="dev-item">
+						<text class="dev-label">{{ $t('auth.login.baseVersionLabel') }}</text>
+						<text class="dev-value">{{ debugInfo.baseVersion }}</text>
+					</view>
+					<view class="dev-item">
+						<text class="dev-label">{{ $t('auth.login.appVersionLabel') }}</text>
+						<text class="dev-value">{{ debugInfo.appVersion }}</text>
+					</view>
+					<view class="dev-item">
+						<text class="dev-label">{{ $t('auth.login.apiBaseUrlLabel') }}</text>
+						<text class="dev-value">{{ debugInfo.apiBaseUrl }}</text>
+					</view>
+				</view>
 			</view>
 		</view>
 
-		<view class="other">
+		<view v-if="hasOtherLoginMethods" class="other">
 			<text class="other-title">{{ $t('auth.login.otherMethods') }}</text>
 			<!-- #ifdef MP-WEIXIN -->
 			<view class="wx-btn" @tap="doWxmpLogin">
@@ -83,13 +99,16 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onUnload } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import { fetchLoginCaptcha, loginByPassword, wxmpLogin } from '@/service/app-auth'
 import api from '@/API/'
+import { createDefaultAppDebugInfo, getAppDebugInfo, type AppDebugInfo } from '@/common/app-debug'
+import { openPublicAppPage } from '@/common/public-content'
 import type { ApiResponse } from '@/types/api'
+import { useDeveloperStore } from '@/store/developer'
 import { useUserStore } from '@/store/user'
 
 type LoginTab = 'phone' | 'email'
@@ -105,6 +124,7 @@ type PushClientIdResult = {
 }
 
 const { t } = useI18n()
+const developerStore = useDeveloperStore()
 const userStore = useUserStore()
 
 const activeTab = ref<LoginTab>('phone')
@@ -116,10 +136,64 @@ const captchaImage = ref<string>('')
 const agree = ref<boolean>(true)
 const loading = ref<boolean>(false)
 const captchaLoading = ref<boolean>(false)
+const logoTapCount = ref<number>(0)
+const debugInfo = ref<AppDebugInfo>(createDefaultAppDebugInfo())
+
+let logoTapResetTimer: ReturnType<typeof setTimeout> | null = null
+
+const isDeveloperMode = computed<boolean>(() => developerStore.enabled)
+
+const hasOtherLoginMethods = computed<boolean>(() => {
+	// #ifdef MP-WEIXIN
+	return true
+	// #endif
+	// #ifndef MP-WEIXIN
+	return false
+	// #endif
+})
 
 const canSubmit = computed<boolean>(() => {
 	return !!identifier.value && !!password.value && !!captchaCode.value && !!agree.value && !loading.value
 })
+
+const clearLogoTapResetTimer = () => {
+	if (!logoTapResetTimer) return
+	clearTimeout(logoTapResetTimer)
+	logoTapResetTimer = null
+}
+
+const resetLogoTapState = () => {
+	logoTapCount.value = 0
+	clearLogoTapResetTimer()
+}
+
+const scheduleLogoTapReset = () => {
+	clearLogoTapResetTimer()
+	logoTapResetTimer = setTimeout(() => {
+		logoTapCount.value = 0
+		logoTapResetTimer = null
+	}, 1500)
+}
+
+const refreshDeveloperDebugInfo = async () => {
+	debugInfo.value = await getAppDebugInfo()
+}
+
+const onBrandLogoTap = async () => {
+	logoTapCount.value += 1
+	if (logoTapCount.value < 9) {
+		scheduleLogoTapReset()
+		return
+	}
+
+	resetLogoTapState()
+	const changed = developerStore.enable()
+	await refreshDeveloperDebugInfo()
+	uni.showToast({
+		title: changed ? (t('auth.login.developerModeEnabled') as string) : (t('auth.login.developerModeAlreadyEnabled') as string),
+		icon: 'none'
+	})
+}
 
 const onAgreeChange = (e: { detail: { value: unknown } }) => {
 	agree.value = Array.isArray(e.detail.value) && (e.detail.value as string[]).includes('1')
@@ -178,6 +252,14 @@ const refreshCaptcha = async () => {
 }
 
 const openContent = (key: string) => {
+	if (key === 'user_policy') {
+		openPublicAppPage('user-policy', t('pages.userPolicy') as string)
+		return
+	}
+	if (key === 'privacy_policy') {
+		openPublicAppPage('privacy', t('pages.privacyPolicy') as string)
+		return
+	}
 	uni.navigateTo({
 		url: '/pages/content/page?key=' + key
 	})
@@ -281,6 +363,13 @@ const doLogin = async () => {
 
 onShow(() => {
 	void refreshCaptcha()
+	if (developerStore.enabled) {
+		void refreshDeveloperDebugInfo()
+	}
+})
+
+onUnload(() => {
+	resetLogoTapState()
 })
 
 // #ifdef MP-WEIXIN
@@ -509,6 +598,40 @@ page {
 	justify-content: space-between;
 	align-items: center;
 	padding: 6rpx 8rpx 0;
+}
+
+.dev-panel {
+	margin-top: 12rpx;
+	padding-top: 20rpx;
+	border-top: 1rpx solid rgba(148, 163, 184, 0.24);
+	display: flex;
+	flex-direction: column;
+	gap: 14rpx;
+}
+
+.dev-title {
+	font-size: 22rpx;
+	font-weight: 700;
+	color: #475569;
+}
+
+.dev-item {
+	display: flex;
+	flex-direction: column;
+	gap: 6rpx;
+}
+
+.dev-label {
+	font-size: 22rpx;
+	color: #94a3b8;
+}
+
+.dev-value {
+	font-size: 24rpx;
+	line-height: 1.5;
+	color: #0f172a;
+	word-break: break-all;
+	font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
 .link {

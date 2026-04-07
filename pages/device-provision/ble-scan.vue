@@ -75,6 +75,7 @@
 import { computed, ref } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
+import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/device-provision/ble'
 import { formatUniError } from '@/common/device-provision/error'
 import { BMS_BLE_SERVICE_UUID } from '@/common/lib/bms-protocol'
@@ -135,6 +136,7 @@ let fallbackTimer: ReturnType<typeof setTimeout> | null = null
 let scanQueue: Promise<void> = Promise.resolve()
 let scanSessionId = 0
 let pageVisible = false
+let blockedByLoginGuard = false
 
 const SCAN_STOP_SETTLE_MS = 180
 const ADAPTER_READY_WAIT_MS = 1200
@@ -219,7 +221,7 @@ async function ensureBluetoothAdapterReady(sessionId: number) {
 	}
 	if (!isScanSessionActive(sessionId)) return
 	if (state?.available === false) {
-		throw new Error('Bluetooth adapter unavailable')
+		throw new Error(t('pages.deviceProvision.bluetoothAdapterUnavailable') as string)
 	}
 	if (state?.discovering) {
 		await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
@@ -562,6 +564,8 @@ function selectDevice(d: DeviceRow) {
 }
 
 onLoad((option) => {
+	blockedByLoginGuard = !ensureLoggedIn({ navigateMode: 'redirectTo' })
+	if (blockedByLoginGuard) return
 	const opt = option as Record<string, string | undefined>
 	const m = opt.mode === 'qr' ? 'qr' : 'manual'
 	mode.value = m
@@ -571,6 +575,7 @@ onLoad((option) => {
 })
 
 onShow(() => {
+	if (blockedByLoginGuard) return
 	pageVisible = true
 	marginTopHeight.value = uni.getStorageSync('contentPaddingTop')
 	pageHeight.value = uni.getStorageSync('pageHeight')
@@ -601,6 +606,7 @@ onHide(() => {
 })
 
 onUnload(() => {
+	blockedByLoginGuard = false
 	pageVisible = false
 	void stopScan({ closeAdapter: true })
 })

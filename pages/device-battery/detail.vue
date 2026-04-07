@@ -153,6 +153,7 @@ import CellsTab from './components/cells-tab.vue'
 import HistoryTab from './components/history-tab.vue'
 import ParamsTab from './components/params-tab.vue'
 
+import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { DEVICE_TYPE_BMS } from '@/common/device-provision/device-prefix-shared'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
@@ -304,6 +305,7 @@ watch(
 )
 
 const scanAndBindBms = async () => {
+	if (!ensureLoggedIn()) return
 	const activeClient = client.value
 	if (!activeClient || connType.value !== 'bluetooth') {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })

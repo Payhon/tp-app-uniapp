@@ -12,11 +12,10 @@ function normalizeBaseUrl(url) {
 	return url
 }
 
-function resolveBaseUrl() {
+export function resolveBaseUrl() {
 	const stored = normalizeBaseUrl(uni.getStorageSync('serverAddress'))
 	// 兼容历史默认值：如果仍是 demo 地址则回退到当前环境默认 host
 	if (stored && stored !== 'http://demo.thingspanel.cn' && stored !== 'https://demo.thingspanel.cn') return stored
-	// 开发环境默认走测试环境，生产环境默认走生产环境
 	return process.env.NODE_ENV === 'development' ? DEFAULT_BASE_URL_DEV : DEFAULT_BASE_URL_PROD
 }
 

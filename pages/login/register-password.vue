@@ -67,6 +67,7 @@ import { useI18n } from 'vue-i18n'
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import { registerByCode } from '@/service/app-auth'
 import api from '@/API/'
+import { openPublicAppPage } from '@/common/public-content'
 import type { ApiResponse } from '@/types/api'
 
 const { t } = useI18n()
@@ -94,6 +95,14 @@ const goLogin = () => {
 }
 
 const openContent = (key: string) => {
+	if (key === 'user_policy') {
+		openPublicAppPage('user-policy', t('pages.userPolicy') as string)
+		return
+	}
+	if (key === 'privacy_policy') {
+		openPublicAppPage('privacy', t('pages.privacyPolicy') as string)
+		return
+	}
 	uni.navigateTo({ url: '/pages/content/page?key=' + key })
 }
 

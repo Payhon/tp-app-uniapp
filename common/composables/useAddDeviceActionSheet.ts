@@ -1,3 +1,4 @@
+import { ensureLoggedIn, isUserLoggedIn } from '@/common/auth/ensure-login'
 import i18n from '@/lang/index'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { DEVICE_TYPE_BMS, DEVICE_TYPE_METER } from '@/common/device-provision/device-prefix-shared'
@@ -98,6 +99,12 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 
 	const baseTabUrl = normalizeTabUrl(options.baseTabUrl || '')
 	const boundDevicesStore = useBoundDevicesStore()
+	if (!isUserLoggedIn()) {
+		switchToBaseTab(baseTabUrl, () => {
+			void ensureLoggedIn()
+		})
+		return
+	}
 
 	uni.showActionSheet({
 		itemList: [t('pages.deviceProvision.bleSearch'), t('pages.deviceProvision.cameraScan')],

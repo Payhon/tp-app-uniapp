@@ -80,7 +80,13 @@ export default function (): Promise<UpgradeCheckResult> {
 						uniVersion
 					}
 
+					console.log('[app-upgrade] request /api/v1/app/upgrade/check', {
+						baseUrl: typeof api?.config?.baseUrl === 'string' ? api.config.baseUrl : undefined,
+						payload
+					})
+
 					const res = await apiRequest<UpgradeCheckResult>('/api/v1/app/upgrade/check', payload, 'POST')
+					console.log('[app-upgrade] response /api/v1/app/upgrade/check', res)
 					if (!res || typeof res.code !== 'number') {
 						return reject('invalid response')
 					}
@@ -89,6 +95,7 @@ export default function (): Promise<UpgradeCheckResult> {
 					}
 					resolve(res.data)
 				} catch (e: any) {
+					console.error('[app-upgrade] request failed /api/v1/app/upgrade/check', e)
 					reject(e?.message || e)
 				}
 			})

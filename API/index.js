@@ -1,4 +1,5 @@
 import http from './interface'
+import { resolveBaseUrl } from './interface'
 import i18n from '@/lang/index'
 import $C from '@/common/config'
 /**
@@ -10,7 +11,7 @@ export const apiRequest = (url, data, method) => {
 	//设置请求前拦截器
 	http.interceptor.request = (config) => {
 		let token = uni.getStorageSync("access_token")
-		let tenantId = $C.tenantId
+		let tenantId = uni.getStorageSync('tenant_id') || $C.tenantId
 		delete config.header['x-token']
 		delete config.header['X-TenantID']
 		if (token) {
@@ -19,15 +20,11 @@ export const apiRequest = (url, data, method) => {
 		if (tenantId) {
 			config.header['X-TenantID'] = tenantId
 		}
-		let server = $C.apiBaseUrl
-		// console.log("server",server);
-		config.baseUrl = server
-		console.log("config========",config);
+		config.baseUrl = resolveBaseUrl()
 		return config;
 	}
 	//设置请求结束后拦截器
 		http.interceptor.response = async (response) => {
-			console.log("response========",response);
 			const statusCode = response.statusCode;
 			if (statusCode === 401 || statusCode === 403 || statusCode === 402) {
 				uni.showModal({

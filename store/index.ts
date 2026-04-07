@@ -1,3 +1,4 @@
+import { useDeveloperStore } from './developer'
 import { useListStore } from './list'
 import { useTokenStore } from './token'
 import { useUserStore } from './user'
@@ -15,6 +16,9 @@ type LegacyCommitType =
 	| 'editUserInfoField'
 	| 'login'
 	| 'logout'
+	| 'setDeveloperMode'
+	| 'enableDeveloperMode'
+	| 'disableDeveloperMode'
 
 /**
  * 兼容旧代码的 `$store.commit(...)` / `$store.state.xxx` 访问方式。
@@ -24,10 +28,12 @@ const store = {
 	get state() {
 		const list = useListStore()
 		const token = useTokenStore()
+		const developer = useDeveloperStore()
 		const user = useUserStore()
 		return {
 			list,
 			token,
+			developerMode: developer.enabled,
 			userInfo: user.userInfo
 		}
 	},
@@ -40,6 +46,7 @@ const store = {
 	},
 	commit(type: LegacyCommitType | string, payload?: any) {
 		const list = useListStore()
+		const developer = useDeveloperStore()
 		const user = useUserStore()
 
 		switch (type as LegacyCommitType) {
@@ -67,6 +74,12 @@ const store = {
 				return user.login(payload)
 			case 'logout':
 				return user.logout()
+			case 'setDeveloperMode':
+				return developer.setEnabled(!!payload)
+			case 'enableDeveloperMode':
+				return developer.enable()
+			case 'disableDeveloperMode':
+				return developer.disable()
 			default:
 				return
 		}

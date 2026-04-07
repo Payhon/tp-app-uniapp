@@ -1,3 +1,5 @@
+import { resolveBaseUrl } from '@/API/interface'
+
 declare const process: { env: { NODE_ENV?: string } }
 
 export interface AppConfig {
@@ -20,10 +22,14 @@ const IMAGE_CDN_PREFIX = process.env.NODE_ENV === 'development' ? 'https://fjcdn
 const config: AppConfig = {
 	// 请求地址前缀
 	// webUrl : 'https://thingsdev.jiyikeji.cn/api',
-	webUrl : API_BSE_URL,
+	get webUrl() {
+		return resolveBaseUrl()
+	},
 	appId: '__UNI__40EADE1',
 	tenantId : 'd616bcbb', 
-	apiBaseUrl : API_BSE_URL,
+	get apiBaseUrl() {
+		return resolveBaseUrl()
+	},
 	imageCdnPrefix: IMAGE_CDN_PREFIX,
 	// webUrl : 'http://cc.jszjcc.com',
 	// websocket链接 ws://47.99.103.220:8282 
