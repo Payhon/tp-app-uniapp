@@ -82,6 +82,7 @@
 						<text class="dev-label">{{ $t('auth.login.apiBaseUrlLabel') }}</text>
 						<text class="dev-value">{{ debugInfo.apiBaseUrl }}</text>
 					</view>
+					<button class="dev-exit-btn" @tap="exitDeveloperMode">{{ $t('auth.login.disableDeveloperMode') }}</button>
 				</view>
 			</view>
 		</view>
@@ -191,6 +192,15 @@ const onBrandLogoTap = async () => {
 	await refreshDeveloperDebugInfo()
 	uni.showToast({
 		title: changed ? (t('auth.login.developerModeEnabled') as string) : (t('auth.login.developerModeAlreadyEnabled') as string),
+		icon: 'none'
+	})
+}
+
+const exitDeveloperMode = () => {
+	const changed = developerStore.disable()
+	if (!changed) return
+	uni.showToast({
+		title: t('auth.login.developerModeDisabled') as string,
 		icon: 'none'
 	})
 }
@@ -632,6 +642,18 @@ page {
 	color: #0f172a;
 	word-break: break-all;
 	font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.dev-exit-btn {
+	margin-top: 8rpx;
+	height: 72rpx;
+	line-height: 72rpx;
+	border-radius: 16rpx;
+	border: 1rpx solid rgba(11, 59, 182, 0.24);
+	background: rgba(11, 59, 182, 0.06);
+	color: #0b3bb6;
+	font-size: 24rpx;
+	font-weight: 600;
 }
 
 .link {
