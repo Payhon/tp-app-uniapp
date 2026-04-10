@@ -90,10 +90,16 @@
 			<view v-if="allowOtaEnabled" class="action" hover-class="action--hover" @tap="openOta">
 				<view class="action__left">
 					<image class="action__icon" src="/static/image/device/icon-ota@2x.png" mode="aspectFit" />
-					<text class="action__title">{{ $t('deviceDetail.params.otaUpgrade') }}</text>
+					<view class="action__title-wrap">
+						<text class="action__title">{{ $t('deviceDetail.params.otaUpgrade') }}</text>
+						<view v-if="showOtaBadge" class="ota-badge"></view>
+					</view>
 				</view>
 				<view class="action__right">
-					<text class="action__value">{{ fwVersionText }}</text>
+					<view class="action__meta">
+						<text class="action__value">{{ fwVersionText }}</text>
+						<text v-if="otaTargetVersionText" class="action__subvalue">{{ otaTargetVersionText }}</text>
+					</view>
 					<u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
 				</view>
 			</view>
@@ -264,6 +270,16 @@ type FunctionControlItem = (typeof FUNCTION_CONFIG_ITEMS)[number] & {
 	statusText: string
 }
 
+type DeviceOtaCheckState = {
+	checking: boolean
+	checked: boolean
+	needUpgrade: boolean
+	targetVersion: string
+	firmwareUrl: string
+	lastCheckedVersion: string
+	errorMessage: string
+}
+
 const TEMP_DISPLAY_LABEL_KEYS: Record<string, string> = {
 	CELL_OVER_TEMP_PROTECT_C: 'deviceDetail.params.temperatureLabels.mosOverTempProtect',
 	CELL_OVER_TEMP_RELEASE_C: 'deviceDetail.params.temperatureLabels.mosOverTempRelease',
@@ -310,8 +326,14 @@ const props = defineProps<{
 	connType: 'bluetooth' | 'mqtt' | 'offline'
 	active?: boolean
 	allowOta?: boolean
+	otaInfo?: DeviceOtaCheckState | null
+	otaChecking?: boolean
+	otaNeedUpgrade?: boolean
 	onPausePolling?: () => void
 	onResumePolling?: () => void
+}>()
+const emit = defineEmits<{
+	(e: 'ota-state-change', patch: Partial<DeviceOtaCheckState>): void
 }>()
 
 const { t, te } = useI18n()
@@ -353,6 +375,16 @@ const toggle = (k: keyof typeof opened) => {
 
 const fwVersionText = computed(() => String(props.battery?.fw_version || props.status?.meta?.softwareVersion || '-'))
 const allowOtaEnabled = computed(() => props.allowOta !== false)
+const showOtaBadge = computed(() => allowOtaEnabled.value && !!props.otaNeedUpgrade)
+const otaTargetVersionText = computed(() => {
+	const version = String(props.otaInfo?.targetVersion || '').trim()
+	if (!showOtaBadge.value || !version) return ''
+	let text = (t('deviceDetail.params.otaTargetVersion', { v: version }) as string) || ''
+	if (text.includes('{v}')) {
+		text = text.replace(/\{v\}/g, version)
+	}
+	return text
+})
 
 const paramValues = reactive<Record<string, unknown>>({})
 
@@ -918,6 +950,23 @@ const otaLogger = {
 	error: (...args: unknown[]) => console.error('[ota]', ...args),
 }
 
+const syncOtaState = (patch: Partial<DeviceOtaCheckState>) => {
+	emit('ota-state-change', patch)
+}
+
+const applyOtaCheckResult = (data: Record<string, unknown> | null, version: string) => {
+	const payload = data || {}
+	syncOtaState({
+		checking: false,
+		checked: true,
+		needUpgrade: !!payload.need_upgrade,
+		targetVersion: String(payload.target_version || payload.version || '').trim(),
+		firmwareUrl: String(payload.firmware_url || payload.package_url || '').trim(),
+		lastCheckedVersion: version,
+		errorMessage: '',
+	})
+}
+
 const startOta = async () => {
 	if (props.allowOta === false) {
 		uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
@@ -939,9 +988,33 @@ const startOta = async () => {
 		await delay(120)
 		const modelName = String(props.status?.identity?.hardwareModel || props.battery?.battery_model_name || '').trim()
 		const versionText = String(props.status?.meta?.softwareVersion || props.battery?.fw_version || '').trim()
-		const rsp = await appBatteryOtaCheck({ device_id: deviceId, model: modelName || undefined, version: versionText || undefined })
-		if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
-		const data = rsp.data || {}
+		let data: Record<string, unknown> = {}
+		const sharedOta = props.otaInfo || null
+		const canUseSharedNoUpgrade = !!sharedOta?.checked && !props.otaNeedUpgrade
+		const canUseSharedUpgrade = !!props.otaNeedUpgrade && !!sharedOta?.firmwareUrl
+
+		if (canUseSharedNoUpgrade) {
+			data = {
+				need_upgrade: false,
+			}
+		} else if (canUseSharedUpgrade) {
+			data = {
+				need_upgrade: true,
+				target_version: sharedOta?.targetVersion || '',
+				version: sharedOta?.targetVersion || '',
+				firmware_url: sharedOta?.firmwareUrl || '',
+			}
+		} else {
+			syncOtaState({
+				checking: true,
+				errorMessage: '',
+			})
+			const rsp = await appBatteryOtaCheck({ device_id: deviceId, model: modelName || undefined, version: versionText || undefined })
+			if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
+			data = (rsp.data || {}) as Record<string, unknown>
+			applyOtaCheckResult(data, versionText)
+		}
+
 		if (!data.need_upgrade) {
 			otaState.show = false
 			uni.showToast({ title: t('deviceDetail.toast.otaLatest') as string, icon: 'none' })
@@ -1016,8 +1089,21 @@ const startOta = async () => {
 		if (otaErr) throw otaErr
 
 		updateOtaStage('success', 100)
+		syncOtaState({
+			checking: false,
+			checked: false,
+			needUpgrade: false,
+			targetVersion: '',
+			firmwareUrl: '',
+			lastCheckedVersion: '',
+			errorMessage: '',
+		})
 		uni.showToast({ title: t('deviceDetail.toast.otaSuccess') as string, icon: 'none' })
 	} catch (e) {
+		syncOtaState({
+			checking: false,
+			errorMessage: e instanceof Error ? e.message : String(e || ''),
+		})
 		updateOtaStage('failed', otaState.progress || 0)
 		const errMessage = (e as Error)?.message || String(e || '')
 		if (errMessage === 'boot_packet0_no_ack') {
@@ -1130,6 +1216,12 @@ const loadSection = (k: keyof typeof opened) => {
 	gap: 12rpx;
 }
 
+.action__title-wrap {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+}
+
 .section__icon,
 .action__icon {
 	width: 38rpx;
@@ -1149,9 +1241,32 @@ const loadSection = (k: keyof typeof opened) => {
 	gap: 10rpx;
 }
 
+.action__meta {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 4rpx;
+}
+
 .action__value {
 	font-size: 24rpx;
 	color: #8e95a2;
+}
+
+.action__subvalue {
+	font-size: 22rpx;
+	color: #b0b6c2;
+}
+
+.ota-badge {
+	position: absolute;
+	top: -4rpx;
+	right: -14rpx;
+	width: 14rpx;
+	height: 14rpx;
+	border-radius: 50%;
+	background: #ff4d4f;
+	box-shadow: 0 0 0 3rpx #ffffff;
 }
 
 .section__tips {

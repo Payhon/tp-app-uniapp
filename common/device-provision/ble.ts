@@ -1,3 +1,5 @@
+import { resolveDeviceTypeByMac } from '@/common/device-provision/device-prefix-shared'
+
 export function normalizeHex(input: string): string {
 	return String(input || '')
 		.trim()
@@ -47,13 +49,39 @@ function ensureUint8Array(data: unknown): Uint8Array | null {
 	if (!data) return null
 	if (data instanceof Uint8Array) return data
 	if (data instanceof ArrayBuffer) return new Uint8Array(data)
+	if (Array.isArray(data)) return Uint8Array.from(data.map((item) => Number(item) & 0xff))
 	if (typeof data === 'string') return hexToBytes(data)
 	if (typeof data === 'object') {
 		const obj = data as Record<string, unknown>
+		const nested = obj.data || obj.bytes || obj.buffer || obj.value
+		if (nested) {
+			const nestedBytes = ensureUint8Array(nested)
+			if (nestedBytes) return nestedBytes
+		}
 		const manuf = obj.manufacturerData || obj.manufacturerdata
-		if (manuf) return ensureUint8Array(manuf)
+		if (manuf) {
+			const manufBytes = ensureUint8Array(manuf)
+			if (manufBytes) return manufBytes
+		}
+		const numericKeys = Object.keys(obj).filter((key) => /^\d+$/.test(key))
+		if (numericKeys.length > 0) {
+			const sortedKeys = numericKeys.sort((a, b) => Number(a) - Number(b))
+			return Uint8Array.from(sortedKeys.map((key) => Number(obj[key]) & 0xff))
+		}
 	}
 	return null
+}
+
+function isValidDeviceMacCandidate(bytes: Uint8Array): boolean {
+	if (bytes.length !== 6) return false
+	let allZero = true
+	let allFF = true
+	for (let i = 0; i < bytes.length; i += 1) {
+		if (bytes[i] !== 0x00) allZero = false
+		if (bytes[i] !== 0xff) allFF = false
+	}
+	if (allZero || allFF) return false
+	return !!resolveDeviceTypeByMac(bytesToHex(bytes))
 }
 
 /**
@@ -68,15 +96,26 @@ function ensureUint8Array(data: unknown): Uint8Array | null {
 export function parseMacFromAdvertisement(data: ArrayBuffer | Uint8Array | string | Record<string, unknown> | null | undefined): string | null {
 	const u8 = ensureUint8Array(data)
 	// 微信小程序/iOS 可能只返回 6 字节 MAC（无 0x07 0xFF 前缀）
-	if (u8 && u8.length === 6) {
+	if (u8 && u8.length === 6 && isValidDeviceMacCandidate(u8)) {
 		return bytesToHex(u8)
 	}
-	if (!u8 || u8.length < 8) return null
+	if (!u8 || u8.length < 6) return null
 	for (let i = 0; i <= u8.length - 8; i += 1) {
 		if ((u8[i] & 0xff) !== 0x07) continue
 		if ((u8[i + 1] & 0xff) !== 0xff) continue
 		const macBytes = u8.slice(i + 2, i + 8)
-		return bytesToHex(macBytes)
+		if (isValidDeviceMacCandidate(macBytes)) return bytesToHex(macBytes)
+	}
+
+	const firstSix = u8.slice(0, 6)
+	if (isValidDeviceMacCandidate(firstSix)) return bytesToHex(firstSix)
+
+	const lastSix = u8.slice(u8.length - 6)
+	if (isValidDeviceMacCandidate(lastSix)) return bytesToHex(lastSix)
+
+	for (let i = 0; i <= u8.length - 6; i += 1) {
+		const macBytes = u8.slice(i, i + 6)
+		if (isValidDeviceMacCandidate(macBytes)) return bytesToHex(macBytes)
 	}
 	return null
 }

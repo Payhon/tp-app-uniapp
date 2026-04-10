@@ -77,6 +77,7 @@ import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/device-provision/ble'
+import { DEVICE_TYPE_METER, resolveDeviceTypeByMac, type SupportedDeviceType } from '@/common/device-provision/device-prefix-shared'
 import { formatUniError } from '@/common/device-provision/error'
 import { BMS_BLE_SERVICE_UUID } from '@/common/lib/bms-protocol'
 import { useBoundDevicesStore } from '@/store/bound-devices'
@@ -88,9 +89,12 @@ type FoundDevice = {
 	deviceId: string
 	name?: string
 	localName?: string
+	iosMac?: string
 	RSSI?: number
 	advertisData?: ArrayBuffer
 	advertisingData?: ArrayBuffer
+	manufacturerData?: ArrayBuffer | Uint8Array | string
+	manufacturerdata?: ArrayBuffer | Uint8Array | string
 	advertisServiceUUIDs?: string[]
 	serviceData?: Record<string, unknown>
 }
@@ -100,6 +104,7 @@ type DeviceRow = {
 	displayName: string
 	RSSI: number | null
 	advMac: string | null
+	deviceType: SupportedDeviceType | null
 	lastSeenAt: number
 }
 
@@ -140,6 +145,18 @@ let blockedByLoginGuard = false
 
 const SCAN_STOP_SETTLE_MS = 180
 const ADAPTER_READY_WAIT_MS = 1200
+const sysInfo = (() => {
+	try {
+		return uni.getSystemInfoSync?.() || ({} as Record<string, unknown>)
+	} catch (e) {
+		return {} as Record<string, unknown>
+	}
+})()
+const defaultPageHeight = `${Number((sysInfo as any).windowHeight || (sysInfo as any).screenHeight || 667)}px`
+const defaultMarginTop = (() => {
+	const statusBarHeight = Number((sysInfo as any).statusBarHeight || 0)
+	return `${statusBarHeight + 44}px`
+})()
 
 const visibleDevices = computed(() => {
 	const list = Array.from(rows.value.values())
@@ -161,6 +178,10 @@ const visibleDevices = computed(() => {
 	return filtered
 })
 
+const hasResolvedAdvMacRows = computed(() =>
+	Array.from(rows.value.values()).some((item) => !!normalizeMac(String(item?.advMac || '')))
+)
+
 const signalLevel = (rssi: number | null) => {
 	if (typeof rssi !== 'number') return 0
 	if (rssi >= -60) return 4
@@ -178,6 +199,31 @@ function clearList() {
 
 function normalizeUuid(u: unknown): string {
 	return String(u || '').trim().toLowerCase()
+}
+
+function parseMacFromServiceData(d: FoundDevice | null | undefined): string | null {
+	if (!d?.serviceData || typeof d.serviceData !== 'object') return null
+	for (const value of Object.values(d.serviceData)) {
+		const mac = parseMacFromAdvertisement(value as any)
+		if (mac) return mac
+	}
+	return null
+}
+
+function resolveAdvMacFromFoundDevice(d: FoundDevice | null | undefined): string | null {
+	if (!d) return null
+	return (
+		normalizeMac(d.iosMac || '') ||
+		parseMacFromServiceData(d) ||
+		parseMacFromAdvertisement(d.advertisData || null) ||
+		parseMacFromAdvertisement(d.advertisingData || null) ||
+		parseMacFromAdvertisement(d.manufacturerData || null) ||
+		parseMacFromAdvertisement(d.manufacturerdata || null) ||
+		parseMacFromAdvertisement(d) ||
+		normalizeMac(d.deviceId || '') ||
+		normalizeMac(d.name || '') ||
+		normalizeMac(d.localName || '')
+	)
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -276,7 +322,7 @@ function isTargetDevice(d: FoundDevice): { ok: boolean; reason?: string } {
 	// 2) serviceData 包含 0000180A-0000-1000-8000-00805F9B34FB 这个 key
 	// 3) 某些平台首次回调不稳定，不强依赖 serviceData；若广播里能解析出 MAC 也认为是目标设备
 	const has180a = hasServiceDataKey(d, '0000180A-0000-1000-8000-00805F9B34FB')
-	const advMac = parseMacFromAdvertisement((d as any).advertisData || (d as any).advertisingData || (d as any).manufacturerData || d || null)
+	const advMac = resolveAdvMacFromFoundDevice(d)
 	if (!has180a && !advMac) return { ok: false, reason: 'no-identity' }
 	return { ok: true }
 }
@@ -291,12 +337,21 @@ function logFoundDeviceOnce(d: FoundDevice) {
 	const name = String(d?.name || d?.localName || '')
 	const advSvcs = Array.isArray((d as any).advertisServiceUUIDs) ? (d as any).advertisServiceUUIDs : []
 	const serviceDataKeys = (d as any)?.serviceData && typeof (d as any).serviceData === 'object' ? Object.keys((d as any).serviceData) : []
+	const serviceDataValuePreview = (d as any)?.serviceData && typeof (d as any).serviceData === 'object'
+		? Object.fromEntries(
+				Object.entries((d as any).serviceData).map(([key, value]) => [key, parseMacFromAdvertisement(value as any) || '[unparsed]'])
+			)
+		: undefined
+	const advMac = resolveAdvMacFromFoundDevice(d)
 	console.log('[ble-scan] found device', {
 		deviceId: d.deviceId,
 		name,
 		RSSI: d.RSSI,
+		advMac,
+		hasManufacturerData: !!((d as any).manufacturerData || (d as any).manufacturerdata),
 		advertisServiceUUIDs: advSvcs,
 		serviceDataKeys,
+		serviceDataValuePreview,
 		targetService: BMS_BLE_SERVICE_UUID,
 	})
 }
@@ -314,30 +369,42 @@ function upsertDevice(d: FoundDevice) {
 			const name = String(d?.name || d?.localName || '')
 			const advSvcs = Array.isArray((d as any).advertisServiceUUIDs) ? (d as any).advertisServiceUUIDs : []
 			const serviceDataKeys = (d as any)?.serviceData && typeof (d as any).serviceData === 'object' ? Object.keys((d as any).serviceData) : []
+			const serviceDataValuePreview = (d as any)?.serviceData && typeof (d as any).serviceData === 'object'
+				? Object.fromEntries(
+						Object.entries((d as any).serviceData).map(([key, value]) => [key, parseMacFromAdvertisement(value as any) || '[unparsed]'])
+					)
+				: undefined
+			const advMac = resolveAdvMacFromFoundDevice(d)
 			console.log('[ble-scan] filtered device', {
 				reason: match.reason,
 				deviceId: d.deviceId,
 				name,
 				RSSI: d.RSSI,
+				advMac,
+				hasManufacturerData: !!((d as any).manufacturerData || (d as any).manufacturerdata),
 				advertisServiceUUIDs: advSvcs,
 				serviceDataKeys,
+				serviceDataValuePreview,
 				targetService: BMS_BLE_SERVICE_UUID,
 			})
 		}
 		return
 	}
 
-	const advMac = parseMacFromAdvertisement((d as any).advertisData || (d as any).advertisingData || null)
+	const advMac = resolveAdvMacFromFoundDevice(d)
 	if (advMac && boundDevicesStore.hasBleMac(advMac)) {
+		rows.value.delete(d.deviceId)
 		return
 	}
 	const existing = rows.value.get(d.deviceId)
+	const deviceType = advMac ? resolveDeviceTypeByMac(advMac) : existing?.deviceType ?? null
 	const displayName = String(d.name || d.localName || t('pages.deviceProvision.unknownDevice'))
 	rows.value.set(d.deviceId, {
 		deviceId: d.deviceId,
 		displayName,
 		RSSI: typeof d.RSSI === 'number' ? d.RSSI : existing?.RSSI ?? null,
 		advMac: advMac || existing?.advMac || null,
+		deviceType,
 		lastSeenAt: Date.now(),
 	})
 
@@ -481,9 +548,13 @@ async function startScan() {
 			fallbackTimer = setTimeout(() => {
 				void runScanSerial(async () => {
 					if (!isScanSessionActive(sessionId)) return
-					if (visibleDevices.value.length > 0) return
+					if (hasResolvedAdvMacRows.value) return
 					try {
-						console.warn('[ble-scan] no visible devices found with service filter, fallback to discovery without services', { sessionId })
+						console.warn('[ble-scan] no adv mac resolved with service filter, fallback to discovery without services', {
+							sessionId,
+							rowCount: rows.value.size,
+							visibleCount: visibleDevices.value.length,
+						})
 						await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
 						if (!isScanSessionActive(sessionId)) return
 						await startDiscovery({ withServiceFilter: false })
@@ -555,6 +626,12 @@ async function toggleScan() {
 
 function selectDevice(d: DeviceRow) {
 	stopScan().finally(() => {
+		if (d.deviceType === DEVICE_TYPE_METER && d.advMac) {
+			uni.navigateTo({
+				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(d.advMac)}&allow_scan_handoff=1&device_name=${encodeURIComponent(d.displayName)}`,
+			})
+			return
+		}
 		uni.navigateTo({
 			url: `/pages/device-provision/provision-wizard?deviceId=${encodeURIComponent(d.deviceId)}${
 				targetMac.value ? `&qrMac=${targetMac.value}` : ''
@@ -577,8 +654,8 @@ onLoad((option) => {
 onShow(() => {
 	if (blockedByLoginGuard) return
 	pageVisible = true
-	marginTopHeight.value = uni.getStorageSync('contentPaddingTop')
-	pageHeight.value = uni.getStorageSync('pageHeight')
+	marginTopHeight.value = uni.getStorageSync('contentPaddingTop') || defaultMarginTop
+	pageHeight.value = uni.getStorageSync('pageHeight') || defaultPageHeight
 	;(async () => {
 		// 确保“我的设备”列表已加载（用于过滤已绑定设备）
 		try {

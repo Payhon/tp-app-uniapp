@@ -97,8 +97,12 @@
 				:connType="connType"
 				:active="activeTab === 2"
 				:allowOta="allowOta"
+				:otaInfo="otaCheckState"
+				:otaChecking="otaCheckState.checking"
+				:otaNeedUpgrade="showOtaBadge"
 				:onPausePolling="pausePolling"
 				:onResumePolling="resumePolling"
+				@ota-state-change="patchOtaCheckState"
 			/>
 			<history-tab
 				v-else-if="activeTab === 3 && canShowHistoryTab"
@@ -125,7 +129,10 @@
 				</view>
 				<view class="tab" hover-class="tab--hover" @tap="activeTab = 2">
 					<image class="tab__icon" :src="activeTab === 2 ? '/static/image/device/navbar-params-on@2x.png' : '/static/image/device/navbar-params@2x.png'" mode="aspectFit" />
-					<text class="tab__text" :class="{ 'tab__text--on': activeTab === 2 }">{{ $t('deviceDetail.tabs.params') }}</text>
+					<view class="tab__text-wrap">
+						<text class="tab__text" :class="{ 'tab__text--on': activeTab === 2 }">{{ $t('deviceDetail.tabs.params') }}</text>
+						<view v-if="showOtaBadge" class="tab__badge"></view>
+					</view>
 				</view>
 				<view v-if="canShowHistoryTab" class="tab" hover-class="tab--hover" @tap="activeTab = 3">
 					<image class="tab__icon" src="/static/image/device/icon-charge-time@2x.png" mode="aspectFit" :class="{ 'tab__icon--muted': activeTab !== 3 }" />
@@ -143,10 +150,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { onLoad, onReachBottom, onUnload } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 import { fetchCurrentMobileUIPermissions } from '@/service/permissions'
+import { appBatteryOtaCheck, type AppBatteryOtaCheck } from '@/service/app-battery'
 
 import DashboardTab from './components/dashboard-tab.vue'
 import CellsTab from './components/cells-tab.vue'
@@ -163,6 +171,16 @@ const { t } = useI18n()
 
 type HistoryTabExposed = {
 	loadMoreStatusRecords?: () => void | Promise<void>
+}
+
+type DeviceOtaCheckState = {
+	checking: boolean
+	checked: boolean
+	needUpgrade: boolean
+	targetVersion: string
+	firmwareUrl: string
+	lastCheckedVersion: string
+	errorMessage: string
 }
 
 const DEVICE_HISTORY_PERMISSION = 'app_device_detail_history'
@@ -203,6 +221,75 @@ const showMeterScanHandoff = computed(() => sessionMode.value === 'instrument' &
 const showMeterPanelReady = computed(() => showMeterScanHandoff.value && connType.value === 'bluetooth' && !connecting.value)
 const showMeterFloatingPanel = computed(() => showMeterPanelReady.value && meterPanelVisible.value && activeTab.value === 0)
 const showMeterPanelTrigger = computed(() => showMeterPanelReady.value && !meterPanelVisible.value)
+const otaCheckState = reactive<DeviceOtaCheckState>({
+	checking: false,
+	checked: false,
+	needUpgrade: false,
+	targetVersion: '',
+	firmwareUrl: '',
+	lastCheckedVersion: '',
+	errorMessage: '',
+})
+const otaAutoCheckedKeys = new Set<string>()
+const showOtaBadge = computed(() => allowOta.value && otaCheckState.needUpgrade)
+
+const patchOtaCheckState = (patch: Partial<DeviceOtaCheckState>) => {
+	Object.assign(otaCheckState, patch)
+}
+
+const applyOtaCheckResult = (payload: AppBatteryOtaCheck | null, version: string) => {
+	const data = payload || ({} as AppBatteryOtaCheck)
+	patchOtaCheckState({
+		checking: false,
+		checked: true,
+		needUpgrade: !!data.need_upgrade,
+		targetVersion: String(data.target_version || data.version || '').trim(),
+		firmwareUrl: String(data.firmware_url || (data as any).package_url || '').trim(),
+		lastCheckedVersion: version,
+		errorMessage: '',
+	})
+}
+
+const maybeCheckOtaOnDashboard = async () => {
+	if (activeTab.value !== 0) return
+	if (!allowOta.value || sessionMode.value !== 'cloud') return
+	const deviceId = String(battery.value?.device_id || '').trim()
+	if (!deviceId) return
+	const modelName = String(status.value?.identity?.hardwareModel || battery.value?.battery_model_name || '').trim()
+	const versionText = String(status.value?.meta?.softwareVersion || battery.value?.fw_version || '').trim()
+	if (!modelName || !versionText) return
+
+	const requestKey = `${deviceId}::${modelName}::${versionText}`
+	if (otaCheckState.checking || otaAutoCheckedKeys.has(requestKey)) return
+
+	otaAutoCheckedKeys.add(requestKey)
+	patchOtaCheckState({
+		checking: true,
+		checked: false,
+		errorMessage: '',
+	})
+
+	try {
+		const rsp = await appBatteryOtaCheck({
+			device_id: deviceId,
+			model: modelName,
+			version: versionText,
+		})
+		if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
+		applyOtaCheckResult(rsp.data || null, versionText)
+	} catch (e) {
+		patchOtaCheckState({
+			checking: false,
+			errorMessage: e instanceof Error ? e.message : String(e || ''),
+		})
+		console.warn('[device-detail] ota precheck failed', {
+			device_id: deviceId,
+			model: modelName,
+			version: versionText,
+			error: e instanceof Error ? e.message : String(e || ''),
+		})
+	}
+}
 
 const connText = computed(() => {
 	if (connecting.value) return t('deviceDetail.conn.connecting') as string
@@ -302,6 +389,23 @@ watch(
 			activeTab.value = 0
 		}
 	}
+)
+
+watch(
+	() => [
+		activeTab.value,
+		sessionMode.value,
+		allowOta.value,
+		battery.value?.device_id || '',
+		battery.value?.battery_model_name || '',
+		battery.value?.fw_version || '',
+		status.value?.identity?.hardwareModel || '',
+		status.value?.meta?.softwareVersion || '',
+	],
+	() => {
+		void maybeCheckOtaOnDashboard()
+	},
+	{ immediate: true }
 )
 
 const scanAndBindBms = async () => {
@@ -763,6 +867,13 @@ onUnload(() => {
 	opacity: 0.85;
 }
 
+.tab__text-wrap {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
 .tab__icon {
 	width: 44rpx;
 	height: 44rpx;
@@ -780,5 +891,16 @@ onUnload(() => {
 .tab__text--on {
 	color: #0b3bff;
 	font-weight: 600;
+}
+
+.tab__badge {
+	position: absolute;
+	top: -6rpx;
+	right: -14rpx;
+	width: 14rpx;
+	height: 14rpx;
+	border-radius: 50%;
+	background: #ff4d4f;
+	box-shadow: 0 0 0 3rpx rgba(255, 255, 255, 0.92);
 }
 </style>
