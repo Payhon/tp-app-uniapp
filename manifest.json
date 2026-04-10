@@ -2,8 +2,8 @@
     "name" : "FJiaBMS",
     "appid" : "__UNI__40EADE1",
     "description" : "富嘉 BMS",
-    "versionName" : "1.0.2",
-    "versionCode" : 102,
+    "versionName" : "1.0.5",
+    "versionCode" : 105,
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
@@ -48,11 +48,11 @@
             },
             /* ios打包配置 */
             "ios" : {
-                "dSYMs" : false
+                "dSYMs" : false,
+                "idfa" : false
             },
             /* SDK配置 */
             "sdkConfigs" : {
-                "ad" : {},
                 "push" : {
                     "unipush" : {
                         "version" : "2",
