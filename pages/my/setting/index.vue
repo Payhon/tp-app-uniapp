@@ -509,8 +509,10 @@ const uploadOne = (filePath: string) =>
       success: (res) => {
         try {
           const data = JSON.parse(res.data || "{}") as UploadResponse;
-          if (data && data.code == 200 && data.data?.path)
-            resolve(data.data.path);
+          const uploadedValue = String(
+            data?.data?.url || data?.data?.path || "",
+          ).trim();
+          if (data && data.code == 200 && uploadedValue) resolve(uploadedValue);
           else reject(new Error(data.message || "upload failed"));
         } catch (e) {
           reject(e);
