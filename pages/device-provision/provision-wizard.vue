@@ -133,6 +133,35 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function stopBleDiscoveryBestEffort(timeoutMs = 1200): Promise<void> {
+	return new Promise((resolve) => {
+		let settled = false
+		const finish = () => {
+			if (settled) return
+			settled = true
+			clearTimeout(timer)
+			resolve()
+		}
+		const timer = setTimeout(() => {
+			console.warn('[provision] stopBluetoothDevicesDiscovery timeout, continue', { timeoutMs })
+			finish()
+		}, timeoutMs)
+		try {
+			uni.stopBluetoothDevicesDiscovery({
+				success: () => finish(),
+				fail: (err) => {
+					console.warn('[provision] stopBluetoothDevicesDiscovery fail ignored', err)
+					finish()
+				},
+				complete: () => finish(),
+			})
+		} catch (e) {
+			console.warn('[provision] stopBluetoothDevicesDiscovery throw ignored', e)
+			finish()
+		}
+	})
+}
+
 function stringifyError(e: unknown): string {
 	return formatUniError(e)
 }
@@ -178,15 +207,13 @@ async function runProvision() {
 	const transport = createUniBleBmsTransport({ logger: console as any, requestTimeoutMs: 12000 })
 	// NOTE: 部分设备对单帧写入长度更敏感，这里把 maxWriteRegisters 降到 20（字符串写入会自动分包多次写入）。
 	const client = new BmsClient({ transport, logger: console as any, maxWriteRegisters: 20 })
-	try {
-		console.log('[provision] start', { rawDeviceIdParam: rawDeviceIdParam.value, deviceId: deviceId.value, qrMac: qrMac.value })
-		// 部分平台要求连接前停止扫描，否则连接/发现服务可能失败
 		try {
-			await new Promise((resolve) => uni.stopBluetoothDevicesDiscovery({ complete: resolve }))
-		} catch (e) {}
-		await sleep(120)
+			console.log('[provision] start', { rawDeviceIdParam: rawDeviceIdParam.value, deviceId: deviceId.value, qrMac: qrMac.value })
+			// 部分平台要求连接前停止扫描，否则连接/发现服务可能失败
+			await stopBleDiscoveryBestEffort()
+			await sleep(120)
 
-		setStep('connect', 'doing')
+			setStep('connect', 'doing')
 		console.log('[provision] connect start', { deviceId: deviceId.value })
 		await transport.connect({ deviceId: deviceId.value })
 		setStep('connect', 'done')

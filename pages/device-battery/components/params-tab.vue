@@ -428,7 +428,12 @@ const withSingleCellPrefix = (label: string) => {
 	if (!label) return t('deviceDetail.params.singleCellDefault') as string
 	if (label.includes('单体')) return label
 	if (/single cell/i.test(label) || /\bcell\b/i.test(label)) return label
-	return t('deviceDetail.params.singleCellPrefix', { label }) as string
+	let text = (t('deviceDetail.params.singleCellPrefix', { label }) as string) || ''
+	if (!text) return label
+	if (text.includes('{label}')) {
+		text = text.replace(/\{label\}/g, label)
+	}
+	return text
 }
 
 const unitOf = (key: string) => String(PARAM_DEF_BY_KEY[key]?.unit || '')

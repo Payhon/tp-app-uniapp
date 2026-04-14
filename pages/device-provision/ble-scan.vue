@@ -145,6 +145,8 @@ let blockedByLoginGuard = false
 
 const SCAN_STOP_SETTLE_MS = 180
 const ADAPTER_READY_WAIT_MS = 1200
+const BLE_API_TIMEOUT_MS = 8000
+const STOP_DISCOVERY_TIMEOUT_MS = 1200
 const sysInfo = (() => {
 	try {
 		return uni.getSystemInfoSync?.() || ({} as Record<string, unknown>)
@@ -228,6 +230,64 @@ function resolveAdvMacFromFoundDevice(d: FoundDevice | null | undefined): string
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+function createBleTimeoutError(label: string, timeoutMs: number) {
+	return new Error(`${label} timeout after ${timeoutMs}ms`)
+}
+
+function callBleApiWithTimeout<T>({
+	label,
+	timeoutMs,
+	invoke,
+	resolveOnFail = false,
+	resolveOnTimeout = false,
+}: {
+	label: string
+	timeoutMs: number
+	invoke: (handlers: {
+		success: (res?: T) => void
+		fail: (err?: unknown) => void
+		complete: (res?: unknown) => void
+	}) => void
+	resolveOnFail?: boolean
+	resolveOnTimeout?: boolean
+}): Promise<T | undefined> {
+	return new Promise((resolve, reject) => {
+		let settled = false
+		const finish = (fn: (value?: any) => void, value?: unknown) => {
+			if (settled) return
+			settled = true
+			clearTimeout(timer)
+			fn(value)
+		}
+		const timer = setTimeout(() => {
+			const err = createBleTimeoutError(label, timeoutMs)
+			console.warn(`[ble-scan] ${label} timeout`, { timeoutMs })
+			if (resolveOnTimeout) {
+				finish(resolve)
+				return
+			}
+			finish(reject, err)
+		}, timeoutMs)
+
+		try {
+			invoke({
+				success: (res?: T) => finish(resolve, res),
+				fail: (err?: unknown) => {
+					if (resolveOnFail) {
+						console.warn(`[ble-scan] ${label} fail ignored`, err)
+						finish(resolve)
+						return
+					}
+					finish(reject, err)
+				},
+				complete: () => {},
+			})
+		} catch (e) {
+			finish(reject, e)
+		}
+	})
+}
+
 function clearFallbackTimer() {
 	if (!fallbackTimer) return
 	clearTimeout(fallbackTimer)
@@ -296,9 +356,33 @@ function bindDeviceFoundListener() {
 }
 
 async function stopDiscovery({ settleMs = 0 }: { settleMs?: number } = {}) {
-	await new Promise((resolve) => {
-		uni.stopBluetoothDevicesDiscovery({ complete: resolve })
-	})
+	const state = await getBluetoothAdapterStateSafe()
+	if (state?.discovering) {
+		await callBleApiWithTimeout<void>({
+			label: 'stopBluetoothDevicesDiscovery',
+			timeoutMs: STOP_DISCOVERY_TIMEOUT_MS,
+			resolveOnFail: true,
+			resolveOnTimeout: true,
+			invoke: ({ success, fail, complete }) => {
+				let finished = false
+				const done = () => {
+					if (finished) return
+					finished = true
+					success()
+				}
+				uni.stopBluetoothDevicesDiscovery({
+					success: () => done(),
+					fail: (err) => {
+						fail(err)
+					},
+					complete: () => {
+						complete()
+						done()
+					},
+				})
+			},
+		})
+	}
 	if (settleMs > 0) {
 		await sleep(settleMs)
 	}
@@ -444,34 +528,42 @@ async function startScan() {
 			const getErrMsg = (e: any) => String(e?.errMsg ?? e?.message ?? '')
 
 			const openBluetoothAdapterOnce = () =>
-				new Promise((resolve, reject) => {
-					// #ifdef MP-WEIXIN
-					// 微信小程序：显式指定 central 模式，避免部分机型/基础库兼容问题
-					;(wx as any).openBluetoothAdapter({ mode: 'central', success: resolve, fail: reject })
-					// #endif
-					// #ifndef MP-WEIXIN
-					uni.openBluetoothAdapter({ success: resolve, fail: reject })
-					// #endif
+				callBleApiWithTimeout({
+					label: 'openBluetoothAdapter',
+					timeoutMs: BLE_API_TIMEOUT_MS,
+					invoke: ({ success, fail }) => {
+						// #ifdef MP-WEIXIN
+						// 微信小程序：显式指定 central 模式，避免部分机型/基础库兼容问题
+						;(wx as any).openBluetoothAdapter({ mode: 'central', success, fail })
+						// #endif
+						// #ifndef MP-WEIXIN
+						uni.openBluetoothAdapter({ success, fail })
+						// #endif
+					},
 				})
 
 			const startDiscovery = async ({ withServiceFilter }: { withServiceFilter: boolean }) => {
-				await new Promise((resolve, reject) => {
-					// #ifdef MP-WEIXIN
-					;(wx as any).startBluetoothDevicesDiscovery({
-						services: withServiceFilter ? [BMS_BLE_SERVICE_UUID] : undefined,
-						allowDuplicatesKey: true,
-						success: resolve,
-						fail: reject,
-					})
-					// #endif
-					// #ifndef MP-WEIXIN
-					uni.startBluetoothDevicesDiscovery({
-						services: withServiceFilter ? [BMS_BLE_SERVICE_UUID] : undefined,
-						allowDuplicatesKey: true,
-						success: resolve,
-						fail: reject,
-					})
-					// #endif
+				await callBleApiWithTimeout({
+					label: 'startBluetoothDevicesDiscovery',
+					timeoutMs: BLE_API_TIMEOUT_MS,
+					invoke: ({ success, fail }) => {
+						// #ifdef MP-WEIXIN
+						;(wx as any).startBluetoothDevicesDiscovery({
+							services: withServiceFilter ? [BMS_BLE_SERVICE_UUID] : undefined,
+							allowDuplicatesKey: true,
+							success,
+							fail,
+						})
+						// #endif
+						// #ifndef MP-WEIXIN
+						uni.startBluetoothDevicesDiscovery({
+							services: withServiceFilter ? [BMS_BLE_SERVICE_UUID] : undefined,
+							allowDuplicatesKey: true,
+							success,
+							fail,
+						})
+						// #endif
+					},
 				})
 				console.log('[ble-scan] discovery started', { sessionId, withServiceFilter, serviceUUID: BMS_BLE_SERVICE_UUID })
 			}

@@ -278,6 +278,71 @@ function uniAsync<T = unknown>(apiName: string, args: Record<string, unknown>): 
 	});
 }
 
+function uniAsyncBestEffort(apiName: string, args: Record<string, unknown>, timeoutMs = 1200): Promise<void> {
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve();
+		};
+		const timer = setTimeout(() => {
+			finish();
+		}, timeoutMs);
+		try {
+			(uni as Record<string, any>)[apiName]({
+				...args,
+				success: finish,
+				fail: finish,
+				complete: finish,
+			});
+		} catch (e) {
+			finish();
+		}
+	});
+}
+
+function uniAsyncSoftTimeout<T = unknown>(
+	apiName: string,
+	args: Record<string, unknown>,
+	{
+		timeoutMs = 1200,
+		timeoutValue,
+	}: {
+		timeoutMs?: number
+		timeoutValue: T
+	}
+): Promise<T> {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const finishResolve = (value: T) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(value);
+		};
+		const finishReject = (err: unknown) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			reject(err);
+		};
+		const timer = setTimeout(() => {
+			finishResolve(timeoutValue);
+		}, timeoutMs);
+		try {
+			(uni as Record<string, any>)[apiName]({
+				...args,
+				success: (res: T) => finishResolve(res),
+				fail: finishReject,
+			});
+		} catch (e) {
+			finishReject(e);
+		}
+	});
+}
+
 /**
  * 基于 uniapp 蓝牙 API 的 BMS 传输层（Transport）
  *
@@ -311,6 +376,13 @@ export class UniBleBmsTransport {
 	private _pending: PendingReq | null
 	private _queue: Promise<Uint8Array>
 	private _rxLogCount: number
+	private _platform: string
+	private _writeSupportsNoResponse: boolean
+	private _writeSupportsResponse: boolean
+	private _preferWriteWithResponse: boolean
+	private _bleApiTimeoutMarker: { __bleApiTimeout: true }
+	private _iosWriteAckUnreliable: boolean
+	private _lastWriteTimeoutLogAt: number
 
 	constructor({
 		serviceUUID = BMS_BLE_SERVICE_UUID,
@@ -341,10 +413,17 @@ export class UniBleBmsTransport {
 		this._connected = false;
 		this._lastTxAt = 0;
 
-		this._pending = null; // { resolve, reject, expect, timer }
-		this._queue = Promise.resolve(new Uint8Array(0)); // 串行化 request，避免并发导致“回复帧串包”
-		this._rxLogCount = 0;
-	}
+			this._pending = null; // { resolve, reject, expect, timer }
+			this._queue = Promise.resolve(new Uint8Array(0)); // 串行化 request，避免并发导致“回复帧串包”
+			this._rxLogCount = 0;
+			this._platform = '';
+			this._writeSupportsNoResponse = true;
+			this._writeSupportsResponse = true;
+			this._preferWriteWithResponse = false;
+			this._bleApiTimeoutMarker = { __bleApiTimeout: true };
+			this._iosWriteAckUnreliable = false;
+			this._lastWriteTimeoutLogAt = 0;
+		}
 
 	async init() {
 		// 初始化蓝牙模块（必须调用）
@@ -381,7 +460,7 @@ export class UniBleBmsTransport {
 			// ignore
 		}
 		try {
-			await uniAsync('closeBluetoothAdapter', {});
+			await uniAsyncBestEffort('closeBluetoothAdapter', {});
 		} catch (e) {
 			// ignore
 		}
@@ -406,7 +485,7 @@ export class UniBleBmsTransport {
 				allowDuplicatesKey,
 			});
 			await sleep(durationMs);
-			await uniAsync('stopBluetoothDevicesDiscovery', {});
+			await uniAsyncBestEffort('stopBluetoothDevicesDiscovery', {});
 			const res = await uniAsync<{ devices?: UniBleDeviceInfo[] }>('getBluetoothDevices', {});
 			return (res.devices || []).map((d: UniBleDeviceInfo) => ({
 				deviceId: d.deviceId,
@@ -421,60 +500,110 @@ export class UniBleBmsTransport {
 		 * - 查找 service/characteristic
 		 * - 打开 notify
 		 */
-		async connect({ deviceId }: { deviceId: string }) {
-			if (!deviceId) throw new BmsProtocolError('deviceId is required for BLE connect');
-			await this.init();
-			this.deviceId = deviceId;
+	async connect({ deviceId }: { deviceId: string }) {
+		if (!deviceId) throw new BmsProtocolError('deviceId is required for BLE connect');
+		await this.init();
+		this.deviceId = deviceId;
+		const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any);
+		const platform = String((sys as any)?.platform || '').toLowerCase();
+		const isIOS = platform === 'ios';
+		this._platform = platform;
+		const serviceRetryCount = isIOS ? 8 : 4;
+		const charRetryCount = isIOS ? 10 : 4;
+		const serviceRetryDelayMs = isIOS ? 300 : 200;
+		const charRetryDelayMs = isIOS ? 320 : 200;
 
 		// 连接前停止扫描（部分平台扫描中会影响连接/发现服务）
 		try {
-			await uniAsync('stopBluetoothDevicesDiscovery', {});
+			await uniAsyncBestEffort('stopBluetoothDevicesDiscovery', {});
 		} catch (e) {}
 
 		if (this.logger?.info) {
-			this.logger.info('[ble] connect()', { deviceId, serviceUUID: this.serviceUUID, writeCharUUID: this.writeCharUUID, notifyCharUUID: this.notifyCharUUID });
+			this.logger.info('[ble] connect()', { deviceId, serviceUUID: this.serviceUUID, writeCharUUID: this.writeCharUUID, notifyCharUUID: this.notifyCharUUID, platform });
 		}
 		await uniAsync('createBLEConnection', { deviceId });
-			this._connected = true;
+		this._connected = true;
 
-			// 获取服务（部分平台刚连上时会返回空，做重试）
-			const tryGetServices = async (): Promise<UniBleService[]> => {
+		if (isIOS) {
+			// iOS 端 createBLEConnection 成功后，服务树准备可能明显滞后，先留一点缓冲。
+			await sleep(220);
+		}
+
+		// 获取服务（部分平台刚连上时会返回空或目标服务尚未可见，做重试）
+		let services: UniBleService[] = [];
+		let service: UniBleService | null = null;
+		let lastServiceError: unknown = null;
+		for (let i = 0; i < serviceRetryCount; i += 1) {
+			try {
 				const srvRes = await uniAsync<{ services?: UniBleService[] }>('getBLEDeviceServices', { deviceId });
-				return srvRes.services || [];
-			};
-			let services: UniBleService[] = [];
-			for (let i = 0; i < 3; i += 1) {
-				services = await tryGetServices();
-				if (services.length) break;
-				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceServices empty, retry...', i + 1);
-				await sleep(200);
+				services = srvRes.services || [];
+				service = services.find((s: UniBleService) => normalizeUuid(s.uuid) === this.serviceUUID) || null;
+				if (service) break;
+				if (this.logger?.debug) {
+					this.logger.debug('[ble] target service not ready, retry...', {
+						attempt: i + 1,
+						services: services.map((s) => s.uuid),
+						expect: this.serviceUUID,
+					});
+				}
+			} catch (e) {
+				lastServiceError = e;
+				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceServices failed, retry...', { attempt: i + 1, error: e });
 			}
+			await sleep(serviceRetryDelayMs);
+		}
+		if (!service) {
+			if (!services.length && lastServiceError) throw lastServiceError;
 			if (!services.length) throw new BmsProtocolError('No BLE services found on device');
-			const service = services.find((s: UniBleService) => normalizeUuid(s.uuid) === this.serviceUUID) || null;
-			if (!service) throw new BmsProtocolError('Target BLE service not found', { expect: this.serviceUUID, services: services.map((s) => s.uuid) });
-			this.serviceId = service.uuid;
+			throw new BmsProtocolError('Target BLE service not found', { expect: this.serviceUUID, services: services.map((s) => s.uuid) });
+		}
+		this.serviceId = service.uuid;
 
-			// 获取特征值（重试），并强制匹配固定 UUID（不做猜测）
-			const tryGetChars = async (): Promise<UniBleCharacteristic[]> => {
+		// 获取特征值（重试），并强制匹配固定 UUID（不做猜测）
+		let chars: UniBleCharacteristic[] = [];
+		let lastCharError: unknown = null;
+		for (let i = 0; i < charRetryCount; i += 1) {
+			try {
 				const chRes = await uniAsync<{ characteristics?: UniBleCharacteristic[] }>('getBLEDeviceCharacteristics', {
 					deviceId,
 					serviceId: this.serviceId,
 				});
-				return chRes.characteristics || [];
-			};
-			let chars: UniBleCharacteristic[] = [];
-			for (let i = 0; i < 3; i += 1) {
-				chars = await tryGetChars();
+				chars = chRes.characteristics || [];
 				if (chars.length) break;
-				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceCharacteristics empty, retry...', i + 1);
-				await sleep(200);
+				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceCharacteristics empty, retry...', { attempt: i + 1, serviceId: this.serviceId });
+			} catch (e) {
+				lastCharError = e;
+				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceCharacteristics failed, retry...', { attempt: i + 1, serviceId: this.serviceId, error: e });
 			}
-			if (!chars.length) throw new BmsProtocolError('No BLE characteristics found on service', { serviceId: this.serviceId });
+			await sleep(charRetryDelayMs);
+		}
+		if (!chars.length) {
+			if (lastCharError) throw lastCharError;
+			throw new BmsProtocolError('No BLE characteristics found on service', { serviceId: this.serviceId });
+		}
 
-			const writeChar = chars.find((c: UniBleCharacteristic) => normalizeUuid(c.uuid) === this.writeCharUUID) || null;
-			const notifyChar = chars.find((c: UniBleCharacteristic) => normalizeUuid(c.uuid) === this.notifyCharUUID) || null;
-			if (!writeChar) throw new BmsProtocolError('Write characteristic not found', { expect: this.writeCharUUID });
-			if (!notifyChar) throw new BmsProtocolError('Notify characteristic not found', { expect: this.notifyCharUUID });
+		const writeChar = chars.find((c: UniBleCharacteristic) => normalizeUuid(c.uuid) === this.writeCharUUID) || null;
+		const notifyChar = chars.find((c: UniBleCharacteristic) => normalizeUuid(c.uuid) === this.notifyCharUUID) || null;
+		if (!writeChar) throw new BmsProtocolError('Write characteristic not found', { expect: this.writeCharUUID, chars: chars.map((c) => c.uuid) });
+		if (!notifyChar) throw new BmsProtocolError('Notify characteristic not found', { expect: this.notifyCharUUID, chars: chars.map((c) => c.uuid) });
+		const writeProps = writeChar.properties || {};
+		const notifyProps = notifyChar.properties || {};
+		this._writeSupportsNoResponse = writeProps.writeNoResponse !== false;
+		this._writeSupportsResponse = writeProps.write !== false;
+		this._preferWriteWithResponse = isIOS && this._writeSupportsResponse;
+		if (this.logger?.info) {
+			this.logger.info('[ble] write characteristic properties', {
+				deviceId,
+				writeCharacteristicId: writeChar.uuid,
+				properties: writeProps,
+				preferWriteWithResponse: this._preferWriteWithResponse,
+			});
+			this.logger.info('[ble] notify characteristic properties', {
+				deviceId,
+				notifyCharacteristicId: notifyChar.uuid,
+				properties: notifyProps,
+			});
+		}
 
 		this.writeCharId = writeChar.uuid;
 		this.notifyCharId = notifyChar.uuid;
@@ -491,12 +620,17 @@ export class UniBleBmsTransport {
 		const key = mkNotifyKey(deviceId, this.serviceId, this.notifyCharId);
 		notifyCallbacks.set(key, (ab) => this._onNotify(ab));
 
-		this._rxLogCount = 0;
-		// 部分设备在打开 notify 后需要短暂准备时间
-		await sleep(220);
+			this._rxLogCount = 0;
+			const postConnectWarmupMs = isIOS ? 820 : 220;
+			if (this.logger?.info) {
+				this.logger.info('[ble] post-connect warmup', { deviceId, platform, warmupMs: postConnectWarmupMs });
+			}
+			// 部分设备在打开 notify 后需要短暂准备时间，iOS App 端首包前需要更长稳定窗口
+			await sleep(postConnectWarmupMs);
+			await this._primeNotifyValue('connect_ready');
 
-		this.logger && this.logger.info && this.logger.info('[ble] connected:', { deviceId, serviceId: this.serviceId });
-	}
+			this.logger && this.logger.info && this.logger.info('[ble] connected:', { deviceId, serviceId: this.serviceId });
+		}
 
 	async disconnect() {
 		if (!this.deviceId) return;
@@ -512,12 +646,49 @@ export class UniBleBmsTransport {
 
 		try {
 			await uniAsync('closeBLEConnection', { deviceId });
-		} finally {
-			this._connected = false;
-			this.deviceId = null;
-			this.serviceId = null;
-			this.writeCharId = null;
-			this.notifyCharId = null;
+			} finally {
+				this._connected = false;
+				this.deviceId = null;
+				this.serviceId = null;
+				this.writeCharId = null;
+				this.notifyCharId = null;
+				this._platform = '';
+				this._writeSupportsNoResponse = true;
+				this._writeSupportsResponse = true;
+				this._preferWriteWithResponse = false;
+				this._iosWriteAckUnreliable = false;
+				this._lastWriteTimeoutLogAt = 0;
+				}
+			}
+
+		_getWriteApiSoftTimeoutMs() {
+			if (this._platform !== 'ios') return 4000;
+			return this._iosWriteAckUnreliable ? 180 : 320;
+		}
+
+		_noteWriteApiTimeout(meta: { characteristicId: string; writeWithResponse: boolean; chunkLen: number; fallback?: boolean }) {
+			if (this._platform === 'ios' && !this._iosWriteAckUnreliable) {
+				this._iosWriteAckUnreliable = true;
+				if (this.logger?.info) {
+					this.logger.info('[ble] ios write callback unreliable, switch to fast soft-timeout', {
+						deviceId: this.deviceId,
+						serviceId: this.serviceId,
+						characteristicId: meta.characteristicId,
+					});
+				}
+			}
+			const now = Date.now();
+			if (this.logger?.warn && (now - this._lastWriteTimeoutLogAt > 8000 || !!meta.fallback)) {
+				this._lastWriteTimeoutLogAt = now;
+				this.logger.warn('[ble] writeBLECharacteristicValue timeout, continue waiting for notify', {
+					deviceId: this.deviceId,
+					serviceId: this.serviceId,
+					characteristicId: meta.characteristicId,
+					writeWithResponse: meta.writeWithResponse,
+					chunkLen: meta.chunkLen,
+					fallback: !!meta.fallback,
+					softTimeoutMs: this._getWriteApiSoftTimeoutMs(),
+				});
 			}
 		}
 
@@ -597,36 +768,61 @@ export class UniBleBmsTransport {
 
 		const bytes = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
 
-		for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-			const chunk = bytes.slice(offset, Math.min(bytes.length, offset + chunkSize));
-			try {
-				await uniAsync('writeBLECharacteristicValue', {
-					deviceId: this.deviceId,
-					serviceId: this.serviceId,
-					characteristicId: this.writeCharId,
-					// 目标特征值为 write without response，但部分运行时不支持 writeType 入参；失败时降级重试一次
-					...(writeWithResponse ? {} : { writeType: 'writeNoResponse' }),
-					value: toArrayBuffer(chunk),
-				});
-			} catch (e: any) {
-				const code = e?.code
-				const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
-				if (code === 10007 || msg.includes('property not support') || msg.includes('not support')) {
-					await uniAsync('writeBLECharacteristicValue', {
+			for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+				const chunk = bytes.slice(offset, Math.min(bytes.length, offset + chunkSize));
+				const shouldWriteWithResponse =
+					writeWithResponse ||
+					(this._preferWriteWithResponse && this._writeSupportsResponse && !this._writeSupportsNoResponse)
+					|| (this._preferWriteWithResponse && this._writeSupportsResponse);
+				try {
+					const writeRes = await uniAsyncSoftTimeout<Record<string, unknown> | { __bleApiTimeout: true }>('writeBLECharacteristicValue', {
 						deviceId: this.deviceId,
 						serviceId: this.serviceId,
 						characteristicId: this.writeCharId,
+						// 目标特征值为 write without response，但部分运行时不支持 writeType 入参；失败时降级重试一次
+						...(shouldWriteWithResponse ? {} : { writeType: 'writeNoResponse' }),
 						value: toArrayBuffer(chunk),
+					}, {
+						timeoutMs: this._getWriteApiSoftTimeoutMs(),
+						timeoutValue: this._bleApiTimeoutMarker,
 					});
-				} else {
-					throw e;
+					if ((writeRes as { __bleApiTimeout?: true })?.__bleApiTimeout) {
+						this._noteWriteApiTimeout({
+							characteristicId: this.writeCharId,
+							writeWithResponse: shouldWriteWithResponse,
+							chunkLen: chunk.length,
+						});
+					}
+				} catch (e: any) {
+					const code = e?.code
+					const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
+					if (code === 10007 || msg.includes('property not support') || msg.includes('not support')) {
+						const writeRes = await uniAsyncSoftTimeout<Record<string, unknown> | { __bleApiTimeout: true }>('writeBLECharacteristicValue', {
+							deviceId: this.deviceId,
+							serviceId: this.serviceId,
+							characteristicId: this.writeCharId,
+							value: toArrayBuffer(chunk),
+						}, {
+							timeoutMs: this._getWriteApiSoftTimeoutMs(),
+							timeoutValue: this._bleApiTimeoutMarker,
+						});
+						if ((writeRes as { __bleApiTimeout?: true })?.__bleApiTimeout) {
+							this._noteWriteApiTimeout({
+								characteristicId: this.writeCharId,
+								writeWithResponse: true,
+								chunkLen: chunk.length,
+								fallback: true,
+							});
+						}
+					} else {
+						throw e;
+					}
 				}
-			}
 			if (chunkIntervalMs > 0 && offset + chunkSize < bytes.length) await sleep(chunkIntervalMs);
 		}
 	}
 
-	async setMtu(mtu: number): Promise<number> {
+		async setMtu(mtu: number): Promise<number> {
 		if (!this.deviceId) throw new BmsProtocolError('deviceId is required for setMtu');
 		const api = (uni as Record<string, any>)?.setBLEMTU;
 		if (typeof api !== 'function') throw new BmsProtocolError('setBLEMTU not supported');
@@ -642,30 +838,85 @@ export class UniBleBmsTransport {
 	 * 通讯层核心方法：发送请求帧，等待一帧有效回复。
 	 * - 为避免“串包”，内部默认强制串行
 	 */
-	request(
-		frameBytes: Uint8Array | ArrayLike<number>,
-		{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
-	): Promise<Uint8Array> {
-		this._queue = this._queue
-			.catch(() => new Uint8Array(0))
-			.then(() => this._requestSerial(frameBytes, { timeoutMs, writeWithResponse: false }));
-		return this._queue;
-	}
+		request(
+			frameBytes: Uint8Array | ArrayLike<number>,
+			{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
+		): Promise<Uint8Array> {
+			this._queue = this._queue
+				.catch(() => new Uint8Array(0))
+				.then(() => this._requestWithFallback(frameBytes, { timeoutMs, writeWithResponse: false }));
+			return this._queue;
+		}
 
-	requestWithResponse(
-		frameBytes: Uint8Array | ArrayLike<number>,
-		{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
-	): Promise<Uint8Array> {
-		this._queue = this._queue
-			.catch(() => new Uint8Array(0))
-			.then(() => this._requestSerial(frameBytes, { timeoutMs, writeWithResponse: true }));
-		return this._queue;
-	}
+		requestWithResponse(
+			frameBytes: Uint8Array | ArrayLike<number>,
+			{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
+		): Promise<Uint8Array> {
+			this._queue = this._queue
+				.catch(() => new Uint8Array(0))
+				.then(() => this._requestWithFallback(frameBytes, { timeoutMs, writeWithResponse: true }));
+			return this._queue;
+		}
 
-	async _requestSerial(
-		frameBytes: Uint8Array | ArrayLike<number>,
-		{ timeoutMs, writeWithResponse }: { timeoutMs: number; writeWithResponse?: boolean }
-	): Promise<Uint8Array> {
+		async _primeNotifyValue(reason: string): Promise<void> {
+			if (!this.deviceId || !this.serviceId || !this.notifyCharId) return;
+			try {
+				if (this.logger?.debug) this.logger.debug('[ble] prime notify read', { reason });
+				const readRes = await uniAsyncSoftTimeout<Record<string, unknown> | { __bleApiTimeout: true }>('readBLECharacteristicValue', {
+					deviceId: this.deviceId,
+					serviceId: this.serviceId,
+					characteristicId: this.notifyCharId,
+				}, {
+					timeoutMs: this._platform === 'ios' ? 1200 : 3000,
+					timeoutValue: this._bleApiTimeoutMarker,
+				});
+				if ((readRes as { __bleApiTimeout?: true })?.__bleApiTimeout && this.logger?.warn) {
+					this.logger.warn('[ble] prime notify read timeout', { reason });
+				}
+			} catch (e) {
+				// ignore prime read errors
+			}
+		}
+
+		async _requestWithFallback(
+			frameBytes: Uint8Array | ArrayLike<number>,
+			{ timeoutMs, writeWithResponse }: { timeoutMs: number; writeWithResponse?: boolean }
+		): Promise<Uint8Array> {
+			try {
+				return await this._requestSerial(frameBytes, { timeoutMs, writeWithResponse });
+			} catch (e) {
+				const msg = String((e as any)?.message || (e as any)?.errMsg || e || '');
+				const canRetryWithAlternateWriteMode =
+					this._platform === 'ios' &&
+					!writeWithResponse &&
+					msg.includes('BLE request timeout') &&
+					this._writeSupportsResponse &&
+					this._writeSupportsNoResponse;
+				if (!canRetryWithAlternateWriteMode) throw e;
+				if (this.logger?.warn) {
+					this.logger.warn('[ble] request timeout, retry with alternate write mode', {
+						preferWriteWithResponse: this._preferWriteWithResponse,
+					});
+				}
+				const prev = this._preferWriteWithResponse;
+				this._preferWriteWithResponse = !prev;
+				try {
+					await this._primeNotifyValue('timeout_retry');
+					await sleep(120);
+					return await this._requestSerial(frameBytes, {
+						timeoutMs,
+						writeWithResponse: false,
+					});
+				} finally {
+					this._preferWriteWithResponse = prev;
+				}
+			}
+		}
+
+		async _requestSerial(
+			frameBytes: Uint8Array | ArrayLike<number>,
+			{ timeoutMs, writeWithResponse }: { timeoutMs: number; writeWithResponse?: boolean }
+		): Promise<Uint8Array> {
 		if (this._pending) throw new BmsProtocolError('Previous request still pending');
 
 		const req = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
@@ -724,11 +975,17 @@ export class UniBleBmsTransport {
 					if (!this.deviceId || !this.serviceId || !this.notifyCharId) return;
 					try {
 						if (this.logger?.debug) this.logger.debug('[ble] probe read notify', { ms });
-						await uniAsync('readBLECharacteristicValue', {
+						const readRes = await uniAsyncSoftTimeout<Record<string, unknown> | { __bleApiTimeout: true }>('readBLECharacteristicValue', {
 							deviceId: this.deviceId,
 							serviceId: this.serviceId,
 							characteristicId: this.notifyCharId,
+						}, {
+							timeoutMs: this._platform === 'ios' ? 1200 : 3000,
+							timeoutValue: this._bleApiTimeoutMarker,
 						});
+						if ((readRes as { __bleApiTimeout?: true })?.__bleApiTimeout && this.logger?.warn) {
+							this.logger.warn('[ble] probe read notify timeout', { ms });
+						}
 					} catch (e) {
 						// ignore probe errors
 					}
