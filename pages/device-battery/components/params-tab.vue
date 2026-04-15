@@ -224,6 +224,7 @@
 							</view>
 						</view>
 					</view>
+					<view class="advanced__body-spacer" :style="{ height: advancedBottomGap + 'px' }"></view>
 				</scroll-view>
 			</view>
 		</u-popup>
@@ -254,6 +255,7 @@ import {
 	getParamPermissionKey,
 	listParamsByCategory,
 } from '@/common/lib/bms-protocol/param-registry'
+import { getWindowInfo } from '@/common/platform'
 
 type ParamItem = {
 	key: string
@@ -666,6 +668,10 @@ const FACTORY_ACTIONS = [
 	{ key: 'function3Off', raw: 0x08000000, confirm: true },
 	{ key: 'function4On', raw: 0x10000000, confirm: true },
 	{ key: 'function4Off', raw: 0x20000000, confirm: true },
+	{ key: 'eraseCurrentParams', raw: 0x00010000, confirm: true },
+	{ key: 'eraseHistoryRecords', raw: 0x00020000, confirm: true },
+	{ key: 'eraseCycleCount', raw: 0x00040000, confirm: true },
+	{ key: 'clearProtectionStatus', raw: 0x00080000, confirm: true },
 	{ key: 'resetProtectionBoard', raw: 0x00200000, confirm: true },
 	{ key: 'mcuProtectionOn', raw: 0x00004000, confirm: true },
 	{ key: 'mcuProtectionOff', raw: 0x00008000, confirm: true },
@@ -718,14 +724,10 @@ const batteryTypePicker = reactive({
 	index: 0,
 })
 
-const safeBottom = (() => {
-	try {
-		const info = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
-		return info?.safeAreaInsets?.bottom || 0
-	} catch (e) {
-		return 0
-	}
-})()
+const windowInfo = getWindowInfo()
+const safeBottom = Number(windowInfo?.safeAreaInsets?.bottom || 0)
+const rpx2px = Number(windowInfo?.windowWidth || windowInfo?.screenWidth || 375) / 750
+const advancedBottomGap = Math.round(176 * rpx2px + safeBottom)
 
 const otaMessageText = computed(
 	() => otaState.message || (t('deviceDetail.params.otaProgress', { p: otaState.progress }) as string)
@@ -1480,6 +1482,10 @@ const loadSection = (k: keyof typeof opened) => {
 .advanced__body {
 	margin-top: 12rpx;
 	max-height: 62vh;
+}
+
+.advanced__body-spacer {
+	flex-shrink: 0;
 }
 
 .advanced__section {
