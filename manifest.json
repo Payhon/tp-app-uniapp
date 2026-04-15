@@ -1,15 +1,28 @@
 {
-    "name" : "FJiaBMS",
+    "name" : "%app.name%",
     "appid" : "__UNI__40EADE1",
     "description" : "富嘉 BMS",
-    "versionName" : "1.0.5",
-    "versionCode" : 105,
+    "versionName" : "1.0.8",
+    "versionCode" : 108,
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
         "usingComponents" : true,
         "nvueStyleCompiler" : "uni-app",
         "compilerVersion" : 3,
+        "locales" : {
+            "en" : {
+                "ios" : {
+                    "privacyDescription" : {
+                        "NSCameraUsageDescription" : "Camera access is used to scan device QR codes and capture profile photos. For example, you can scan the QR code on a battery or meter to identify its MAC address, UUID, or serial number and complete device binding, or take a photo and upload it as your avatar.",
+                        "NSBluetoothAlwaysUsageDescription" : "Bluetooth access is used to discover, connect to, and communicate with nearby BMS and meter devices. For example, you can read battery status, view real-time data, configure parameters, or switch a meter to a target BMS over Bluetooth.",
+                        "NSBluetoothPeripheralUsageDescription" : "Bluetooth access is used to discover, connect to, and communicate with nearby BMS and meter devices. For example, you can read battery status, view real-time data, configure parameters, or switch a meter to a target BMS over Bluetooth.",
+                        "NSPhotoLibraryUsageDescription" : "Photo Library access is used when you select images for feedback or profile updates. For example, you can choose a screenshot or device photo from your library and upload it with feedback or as your avatar.",
+                        "NSPhotoLibraryAddUsageDescription" : "Photo Library write access is used when you save images from supported pages. For example, you can save an image from the app to your library for later sharing or record keeping."
+                    }
+                }
+            }
+        },
         "splashscreen" : {
             "alwaysShowBeforeRender" : true,
             "waiting" : true,
@@ -21,7 +34,8 @@
             "Bluetooth" : {},
             "Barcode" : {},
             "SQLite" : {},
-            "Push" : {}
+            "Push" : {},
+            "Camera" : {}
         },
         /* 应用发布信息 */
         "distribute" : {
@@ -49,7 +63,14 @@
             /* ios打包配置 */
             "ios" : {
                 "dSYMs" : false,
-                "idfa" : false
+                "idfa" : false,
+                "privacyDescription" : {
+                    "NSCameraUsageDescription" : "用于扫描设备二维码和拍摄头像照片。例如，您可以扫描电池或仪表机身上的二维码，识别设备 MAC、UUID 或序列号并完成设备绑定，也可以拍摄照片并上传为您的头像。",
+                    "NSBluetoothAlwaysUsageDescription" : "用于搜索、连接和通信附近的蓝牙 BMS 或仪表设备。例如，您可以通过蓝牙读取电池状态、查看实时数据、配置参数，或将仪表切换到目标 BMS。",
+                    "NSBluetoothPeripheralUsageDescription" : "用于搜索、连接和通信附近的蓝牙 BMS 或仪表设备。例如，您可以通过蓝牙读取电池状态、查看实时数据、配置参数，或将仪表切换到目标 BMS。",
+                    "NSPhotoLibraryUsageDescription" : "用于在意见反馈或头像设置时从系统相册选择图片。例如，您可以选择故障截图、设备照片或头像图片并上传到应用。",
+                    "NSPhotoLibraryAddUsageDescription" : "用于在支持保存图片的页面将图片保存到系统相册。例如，您可以把应用中的图片保存到相册后再分享或留档。"
+                }
             },
             /* SDK配置 */
             "sdkConfigs" : {

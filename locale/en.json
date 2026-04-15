@@ -1,4 +1,5 @@
 {
+  "app.name": "FUJIA BMS",
   "alarm.detailTitle": "Alarm Detail",
   "common.save": "Save",
   "pages.addAlertStrategy": "Add Alert Strategy",

@@ -118,6 +118,7 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 			}
 			if (idx === 1) {
 				uni.scanCode({
+					onlyFromCamera: true,
 					success: async (scanRes: { result?: unknown }) => {
 						const parsed = parseAddDeviceScanCode(String(scanRes.result ?? ''))
 						if (!parsed) {
