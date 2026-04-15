@@ -51,7 +51,7 @@ export type AppBatteryOtaCheck = {
 }
 
 export type AppBatteryOtaCheckReq = {
-	device_id: string
+	device_id?: string
 	model?: string | null
 	version?: string | null
 	[key: string]: unknown

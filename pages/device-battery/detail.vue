@@ -216,7 +216,7 @@ const titleText = computed(() => {
 	return name || t('pages.deviceDetailTitle')
 })
 
-const allowOta = computed(() => sessionMode.value !== 'instrument')
+const allowOta = computed(() => connType.value === 'bluetooth' || sessionMode.value === 'cloud')
 const showMeterScanHandoff = computed(() => sessionMode.value === 'instrument' && allowScanHandoff.value)
 const showMeterPanelReady = computed(() => showMeterScanHandoff.value && connType.value === 'bluetooth' && !connecting.value)
 const showMeterFloatingPanel = computed(() => showMeterPanelReady.value && meterPanelVisible.value && activeTab.value === 0)
@@ -252,14 +252,14 @@ const applyOtaCheckResult = (payload: AppBatteryOtaCheck | null, version: string
 
 const maybeCheckOtaOnDashboard = async () => {
 	if (activeTab.value !== 0) return
-	if (!allowOta.value || sessionMode.value !== 'cloud') return
+	if (!allowOta.value) return
 	const deviceId = String(battery.value?.device_id || '').trim()
-	if (!deviceId) return
 	const modelName = String(status.value?.identity?.hardwareModel || battery.value?.battery_model_name || '').trim()
 	const versionText = String(status.value?.meta?.softwareVersion || battery.value?.fw_version || '').trim()
 	if (!modelName || !versionText) return
 
-	const requestKey = `${deviceId}::${modelName}::${versionText}`
+	const requestIdentity = deviceId || String(battery.value?.ble_mac || '').trim() || sessionMode.value
+	const requestKey = `${sessionMode.value}::${requestIdentity}::${modelName}::${versionText}`
 	if (otaCheckState.checking || otaAutoCheckedKeys.has(requestKey)) return
 
 	otaAutoCheckedKeys.add(requestKey)
@@ -271,7 +271,7 @@ const maybeCheckOtaOnDashboard = async () => {
 
 	try {
 		const rsp = await appBatteryOtaCheck({
-			device_id: deviceId,
+			device_id: deviceId || undefined,
 			model: modelName,
 			version: versionText,
 		})

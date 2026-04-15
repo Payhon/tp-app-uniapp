@@ -975,6 +975,8 @@ const applyOtaCheckResult = (data: Record<string, unknown> | null, version: stri
 }
 
 const startOta = async () => {
+	const BOOT_TARGET_BMS = 0x01
+	const BOOT_TARGET_METER = 0xfc
 	if (props.allowOta === false) {
 		uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
 		return
@@ -983,8 +985,6 @@ const startOta = async () => {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
 		return
 	}
-	const deviceId = String(props.battery?.device_id || '').trim()
-	if (!deviceId) return
 
 	otaState.show = true
 	otaState.running = true
@@ -1016,7 +1016,12 @@ const startOta = async () => {
 				checking: true,
 				errorMessage: '',
 			})
-			const rsp = await appBatteryOtaCheck({ device_id: deviceId, model: modelName || undefined, version: versionText || undefined })
+			const deviceId = String(props.battery?.device_id || '').trim()
+			const rsp = await appBatteryOtaCheck({
+				device_id: deviceId || undefined,
+				model: modelName || undefined,
+				version: versionText || undefined,
+			})
 			if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
 			data = (rsp.data || {}) as Record<string, unknown>
 			applyOtaCheckResult(data, versionText)
@@ -1046,10 +1051,10 @@ const startOta = async () => {
 		const firmware = await downloadFirmware(firmwareUrl)
 		updateOtaStage('prepare', 10)
 
-		const { sourceAddress, targetAddress: deviceTarget } = props.client.getAddresses()
+		const { sourceAddress } = props.client.getAddresses()
 		const macRaw = String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim()
 		const isGaugeDevice = isMeterMac(macRaw)
-		const otaTargetAddress = isGaugeDevice ? 0xfc : deviceTarget
+		const otaTargetAddress = isGaugeDevice ? BOOT_TARGET_METER : BOOT_TARGET_BMS
 		const rawTransport = props.client.getTransport()
 		const otaTransport = {
 			request: (frameBytes: Uint8Array) => {
@@ -1060,7 +1065,7 @@ const startOta = async () => {
 				return t.request(frameBytes, { timeoutMs })
 			},
 		}
-		const queryTargetAddress = isGaugeDevice ? 0xfc : 0x00
+		const queryTargetAddress = isGaugeDevice ? BOOT_TARGET_METER : BOOT_TARGET_BMS
 		const targets = [otaTargetAddress]
 		let otaErr: unknown = null
 		for (const targetAddress of targets) {
