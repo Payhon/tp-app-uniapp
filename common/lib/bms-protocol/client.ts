@@ -111,6 +111,30 @@ function encodeStringToRegisterWrites(startAddress: number, byteLength: number, 
 	return { startAddress, registerValues: regs };
 }
 
+const STATUS_REG_START = 0x100;
+const STATUS_FIXED_READ_END = 0x135;
+const STATUS_LEGACY_GAP_START = 0x136;
+const STATUS_LEGACY_GAP_END = 0x140;
+const STATUS_DYNAMIC_START = 0x141;
+
+function buildStatusRegisterView({
+	headRegisters,
+	tailRegisters,
+	lastAddress,
+}: {
+	headRegisters: Uint16Array
+	tailRegisters: Uint16Array
+	lastAddress: number
+}): Uint16Array {
+	const totalRegs = lastAddress - STATUS_REG_START + 1;
+	const legacyGapRegs = STATUS_LEGACY_GAP_END - STATUS_LEGACY_GAP_START + 1;
+	const out = new Uint16Array(totalRegs);
+	out.set(headRegisters, 0);
+	// Leave the legacy gap (0x136~0x140) zero-filled for old boards that do not implement it.
+	out.set(tailRegisters, headRegisters.length + legacyGapRegs);
+	return out;
+}
+
 export class BmsClient {
 	private transport: BmsRequestTransport
 	private targetAddress: number
@@ -438,13 +462,18 @@ export class BmsClient {
 
 	async readAllStatus(): Promise<BmsStatus> {
 		const { s, n } = await this.readSn();
-		const cellVoltagesStart = 0x141;
+		const cellVoltagesStart = STATUS_DYNAMIC_START;
 		const macStart = cellVoltagesStart + s + n + 16 + 16 + 16;
 		const macRegs = 5; // 10 bytes
 		const lastAddr = macStart + macRegs - 1;
-		const totalRegs = lastAddr - 0x100 + 1;
-		const regs = await this.readRegisters(0x100, totalRegs);
-		return parseStatusRegisters({ startAddress: 0x100, registers: regs });
+		const headRegs = await this.readRegisters(STATUS_REG_START, STATUS_FIXED_READ_END - STATUS_REG_START + 1);
+		const tailRegs = await this.readRegisters(STATUS_DYNAMIC_START, lastAddr - STATUS_DYNAMIC_START + 1);
+		const regs = buildStatusRegisterView({
+			headRegisters: headRegs,
+			tailRegisters: tailRegs,
+			lastAddress: lastAddr,
+		});
+		return parseStatusRegisters({ startAddress: STATUS_REG_START, registers: regs });
 	}
 
 	/**
