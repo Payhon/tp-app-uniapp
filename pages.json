@@ -76,6 +76,17 @@
 	],
 	"subPackages": [
 		{
+			"root": "uni_modules/fjbms-upgrade/pages",
+			"pages": [
+				{
+					"path": "upgrade-popup",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				}
+			]
+		},
+		{
 			"root": "pages/alarm",
 			"pages": [
 				{

@@ -28,7 +28,7 @@
             "type" : "uni-app:app-ios"
         },
         {
-            "customPlaygroundType" : "device",
+            "customPlaygroundType" : "local",
             "packageName" : "fjbms.fjiacom",
             "playground" : "custom",
             "type" : "uni-app:app-android"

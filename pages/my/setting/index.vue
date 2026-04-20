@@ -4,7 +4,7 @@
       <view class="row" hover-class="row--hover" @tap="handleEditAvatar">
         <text class="label">{{ $t("pages.my.settingPage.editAvatar") }}</text>
         <view class="right">
-          <u-avatar :src="avatarSrc" size="32"></u-avatar>
+          <AppAvatar :src="avatarSrc" size="64rpx" />
           <u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
         </view>
       </view>
@@ -377,6 +377,23 @@
         </view>
       </view>
     </u-popup>
+
+    <u-cropper
+      v-if="avatarCropperVisible"
+      ref="avatarCropperRef"
+      :autoChoose="false"
+      shape="square"
+      :rectWidth="280"
+      :rectHeight="280"
+      :width="640"
+      :height="640"
+      fileType="jpg"
+      :quality="0.9"
+      @open="onAvatarCropOpen"
+      @confirm="onAvatarCropConfirm"
+      @close="onAvatarCropClose"
+      @error="onAvatarCropError"
+    ></u-cropper>
   </view>
 </template>
 
@@ -384,6 +401,8 @@
 import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useI18n } from "vue-i18n";
+import { resolveAvatarUrl } from "@/common/avatar";
+import AppAvatar from "@/components/app-avatar/app-avatar.vue";
 import $C from "@/common/config";
 import { useInjected } from "@/common/composables/useInjected";
 import { useAppRuntime } from "@/common/composables/useAppRuntime";
@@ -404,7 +423,7 @@ type BindingsResp = { user_id?: string; list?: BindingItem[] };
 type UploadResponse = {
   code: number;
   message?: string;
-  data?: { path?: string };
+  data?: { path?: string; url?: string };
 };
 
 const isLoggedIn = computed(() => login?.isLoginType?.()?.isLogin ?? false);
@@ -464,11 +483,7 @@ const hasUsername = computed(() => !!username.value);
 const canSetUsername = computed(() => !hasUsername.value);
 const avatarSrc = computed(() => {
   const raw = (userStore.userInfo as any)?.avatar_url as string | undefined;
-  if (!raw) return "/static/image/my/avatar-default@2x.png";
-  const baseUrl = String(getBaseUrl() || "")
-    .replace(/\/?api\/v1\/?$/, "")
-    .replace(/\/$/, "");
-  return baseUrl ? `${baseUrl}/${String(raw).replace(/^\//, "")}` : String(raw);
+  return resolveAvatarUrl(raw, getBaseUrl());
 });
 
 const maskPhone = (input: string) => {
@@ -553,6 +568,17 @@ const refreshUserInfo = async () => {
 };
 
 const wxAuthVisible = ref<boolean>(false);
+const avatarCropperVisible = ref<boolean>(false);
+const avatarCropperRef = ref<any>(null);
+const pendingAvatarFilePath = ref<string>("");
+const savingAvatar = ref<boolean>(false);
+
+type SelectedAvatarImage = {
+  filePath: string;
+  size?: number;
+};
+
+type AvatarImageSource = "album" | "camera";
 
 const ensureLogin = (): boolean => {
   if (!isLoggedIn.value) {
@@ -562,6 +588,88 @@ const ensureLogin = (): boolean => {
   return true;
 };
 
+const chooseAvatarImage = (source: AvatarImageSource) =>
+  new Promise<SelectedAvatarImage>((resolve, reject) => {
+    // #ifdef APP-PLUS
+    uni.chooseMedia({
+      count: 1,
+      mediaType: ["image"],
+      sourceType: [source],
+      sizeType: ["compressed"],
+      camera: "back",
+      success: (res) => {
+        const file = res.tempFiles?.[0];
+        const filePath = String(file?.tempFilePath || "").trim();
+        if (!filePath) {
+          reject(new Error("empty avatar file"));
+          return;
+        }
+        console.log("[avatar] chooseMedia success", {
+          source,
+          size: Number(file?.size || 0),
+          path: filePath,
+        });
+        resolve({
+          filePath,
+          size: Number(file?.size || 0),
+        });
+      },
+      fail: reject,
+    });
+    // #endif
+    // #ifndef APP-PLUS
+    uni.chooseImage({
+      count: 1,
+      sourceType: [source],
+      sizeType: ["compressed"],
+      success: (res) => {
+        const filePath = String(res?.tempFilePaths?.[0] || "").trim();
+        if (!filePath) {
+          reject(new Error("empty avatar file"));
+          return;
+        }
+        const size = Number(res?.tempFiles?.[0]?.size || 0);
+        console.log("[avatar] chooseImage success", {
+          source,
+          size,
+          path: filePath,
+        });
+        resolve({ filePath, size });
+      },
+      fail: reject,
+    });
+    // #endif
+  });
+
+const compressAvatarImage = async (
+  filePath: string,
+  fileSize?: number,
+): Promise<string> => {
+  const sourcePath = String(filePath || "").trim();
+  if (!sourcePath) return "";
+
+  // #ifdef APP-PLUS
+  // Android 真机拍照链路上，chooseMedia + sizeType=compressed 已经返回压缩图。
+  // 再次调用原生 compressImage 在部分机型上会直接闪退，因此 APP 端这里不做二次压缩。
+  console.log("[avatar] skip extra compress on app", {
+    size: Number(fileSize || 0),
+    path: sourcePath,
+  });
+  return sourcePath;
+  // #endif
+
+  return sourcePath;
+};
+
+const startAvatarCropFlow = async (source: AvatarImageSource) => {
+  const choose = await chooseAvatarImage(source);
+  const filePath = await compressAvatarImage(choose.filePath, choose.size);
+  if (!filePath) throw new Error("empty avatar file");
+  console.log("[avatar] open cropper", { source, path: filePath });
+  pendingAvatarFilePath.value = filePath;
+  avatarCropperVisible.value = true;
+};
+
 const handleEditAvatar = async () => {
   if (!ensureLogin()) return;
   // #ifdef MP-WEIXIN
@@ -569,22 +677,64 @@ const handleEditAvatar = async () => {
   return;
   // #endif
   // #ifndef MP-WEIXIN
-  try {
-    const choose = await new Promise<{ tempFilePaths?: string[] }>(
-      (resolve, reject) => {
-        uni.chooseImage({
-          count: 1,
-          sizeType: ["compressed"],
-          success: resolve,
-          fail: reject,
+  uni.showActionSheet({
+    itemList: [
+      t("pages.my.settingPage.avatarTakePhoto") as string,
+      t("pages.my.settingPage.avatarChooseFromAlbum") as string,
+    ],
+    success: async (res) => {
+      const source: AvatarImageSource = res.tapIndex === 0 ? "camera" : "album";
+      try {
+        await startAvatarCropFlow(source);
+      } catch (err) {
+        const message = String(
+          (err as { errMsg?: string } | undefined)?.errMsg || "",
+        );
+        if (message.toLowerCase().includes("cancel")) return;
+        console.error("[avatar] pick flow fail", err);
+        uni.showToast({
+          title: t("pages.my.settingPage.avatarSelectFailed") as string,
+          icon: "none",
         });
-      },
-    );
-    const filePath = String(choose?.tempFilePaths?.[0] || "").trim();
-    if (!filePath) return;
-    if (!apiRequest) return;
-    uni.showLoading({ title: t("common.loading") as string });
-    const uploadedPath = await uploadOne(filePath);
+      }
+    },
+    fail: () => {},
+  });
+  // #endif
+};
+
+const onAvatarCropOpen = () => {
+  const filePath = String(pendingAvatarFilePath.value || "").trim();
+  if (!filePath) return;
+  console.log("[avatar] cropper open load image", { path: filePath });
+  avatarCropperRef.value?.loadImage?.(filePath);
+};
+
+const onAvatarCropClose = () => {
+  avatarCropperVisible.value = false;
+  pendingAvatarFilePath.value = "";
+  avatarCropperRef.value = null;
+};
+
+const onAvatarCropError = () => {
+  uni.showToast({
+    title: t("pages.my.settingPage.avatarCropFailed") as string,
+    icon: "none",
+  });
+};
+
+const onAvatarCropConfirm = async (filePath: string) => {
+  const croppedFilePath = String(filePath || "").trim();
+  if (!croppedFilePath) {
+    onAvatarCropError();
+    return;
+  }
+  if (!apiRequest || savingAvatar.value) return;
+
+  savingAvatar.value = true;
+  uni.showLoading({ title: t("pages.my.settingPage.avatarSaving") as string });
+  try {
+    const uploadedPath = await uploadOne(croppedFilePath);
     const res = await apiRequest<unknown>(
       "/api/v1/app/auth/profile",
       { avatar_url: uploadedPath },
@@ -597,20 +747,24 @@ const handleEditAvatar = async () => {
         title: t("pages.my.settingPage.updateSuccess") as string,
         icon: "none",
       });
-    } else {
-      uni.showToast({
-        title:
-          (res as any)?.message ||
-          (t("pages.my.settingPage.updateFailed") as string),
-        icon: "none",
-      });
+      return;
     }
+
+    uni.showToast({
+      title:
+        (res as any)?.message ||
+        (t("pages.my.settingPage.updateFailed") as string),
+      icon: "none",
+    });
   } catch {
-    // ignore
+    uni.showToast({
+      title: t("pages.my.settingPage.updateFailed") as string,
+      icon: "none",
+    });
   } finally {
+    savingAvatar.value = false;
     uni.hideLoading();
   }
-  // #endif
 };
 
 const nicknamePopupVisible = ref<boolean>(false);

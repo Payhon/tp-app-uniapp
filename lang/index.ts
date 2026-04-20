@@ -29,12 +29,14 @@ function toUniLocale(nextLocale: SupportedLocale): string {
 const systemLanguage = getSystemLanguage()
 const locale = normalizeLocale(uni.getStorageSync('language') || systemLanguage || 'zh-CN')
 
-try {
-	// 启动时同步 uni-app 内置 locale，保证 pages.json `%xxx%` 占位符从一开始就正常解析
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const setLocale = (uni as any)?.setLocale as undefined | ((locale: string) => void)
-	if (typeof setLocale === 'function') setLocale(toUniLocale(locale))
-} catch (e) {}
+const syncUniLocale = (nextLocale: SupportedLocale) => {
+	try {
+		// 将 uni-app 内置 locale 同步放到 app 创建后，避免启动阶段触发 getApp() failed 警告
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const setLocale = (uni as any)?.setLocale as undefined | ((locale: string) => void)
+		if (typeof setLocale === 'function') setLocale(toUniLocale(nextLocale))
+	} catch (e) {}
+}
 
 const i18n = createI18n({
 	legacy: false,
@@ -92,13 +94,12 @@ export const updateTabbarText = () => {
 export const changeLanguage = (nextLocale: SupportedLocale) => {
 	i18n.global.locale.value = nextLocale
 	uni.setStorageSync('language', nextLocale)
-	try {
-		// 同步 uni-app 内置 locale，保证 pages.json `%xxx%` 占位符（含 tabBar midButton）正常解析
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const setLocale = (uni as any)?.setLocale as undefined | ((locale: string) => void)
-		if (typeof setLocale === 'function') setLocale(toUniLocale(nextLocale))
-	} catch (e) {}
+	syncUniLocale(nextLocale)
 	updateTabbarText()
+}
+
+export const syncCurrentUniLocale = () => {
+	syncUniLocale(i18n.global.locale.value as SupportedLocale)
 }
 
 export default i18n

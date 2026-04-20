@@ -47,7 +47,7 @@
 							:disabled="installing"
 							@click="installPackage"
 						>
-							{{ installing ? '正在安装……' : '下载完成，立即安装' }}
+							{{ installing ? $t('appUpgrade.installing') : $t('appUpgrade.installNow') }}
 						</button>
 						<button
 							v-else-if="installed && !isWGT"
@@ -58,10 +58,10 @@
 							:disabled="installing"
 							@click="installPackage"
 						>
-							安装未完成，点击安装
+							{{ $t('appUpgrade.installIncomplete') }}
 						</button>
 
-						<button v-else-if="installed && isWGT" class="content-button" style="border: none; color: #fff" plain @click="restart">安装完毕，点击重启</button>
+						<button v-else-if="installed && isWGT" class="content-button" style="border: none; color: #fff" plain @click="restart">{{ $t('appUpgrade.restartNow') }}</button>
 					</template>
 				</view>
 			</view>
@@ -75,8 +75,10 @@
 // #ifdef APP-PLUS
 import { createNotificationProgress, cancelNotificationProgress, finishNotificationProgress } from '@/uni_modules/uts-progressNotification';
 // #endif
+import i18n from '@/lang'
 import { compare, platform_iOS, platform_Android, platform_Harmony } from '../utils/utils'
 const localFilePathKey = 'FJBMS_UPGRADE_LOCAL_FILE_PATH';
+const t = (key, params) => i18n.global.t(key, params || {}) || ''
 
 let downloadTask = null;
 let openSchemePromise;
@@ -103,19 +105,20 @@ export default {
 			tempFilePath: '', // 要安装的本地包地址
 
 			// 默认安装包信息
-			title: '更新日志',
+			title: t('appUpgrade.defaultTitle'),
 			contents: '',
 			version: '',
+			type: '',
 			is_mandatory: false,
-			url: '',
+			packageUrl: '',
 			platform: [],
 			store_list: null,
 
 			// 可自定义属性
-			subTitle: '发现新版本',
-			downLoadBtnTextiOS: '立即跳转更新',
-			downLoadBtnText: '立即下载更新',
-			downLoadingText: '安装包下载中，请稍后',
+			subTitle: t('appUpgrade.newVersionTitle'),
+			downLoadBtnTextiOS: t('appUpgrade.jumpToUpdate'),
+			downLoadBtnText: t('appUpgrade.downloadNow'),
+			downLoadingText: t('appUpgrade.downloadingHint'),
 
 			// #ifdef APP-PLUS
 			shown: true,
@@ -127,14 +130,14 @@ export default {
 	},
 	onLoad({ local_storage_key }) {
 		if (!local_storage_key) {
-			console.error('local_storage_key为空，请检查后重试');
+			console.error(t('appUpgrade.errors.missingLocalStorageKey'));
 			uni.navigateBack();
 			return;
 		}
 
 		const localPackageInfo = uni.getStorageSync(local_storage_key);
 		if (!localPackageInfo) {
-			console.error('安装包信息为空，请检查后重试');
+			console.error(t('appUpgrade.errors.missingPackageInfo'));
 			uni.navigateBack();
 			return;
 		}
@@ -170,7 +173,7 @@ export default {
 				this.isiOS ||
 				this.isHarmony
 			)
-			// return this.isiOS || (!this.isiOS && !this.isWGT && this.url.indexOf('.apk') === -1);
+			// return this.isiOS || (!this.isiOS && !this.isWGT && this.packageUrl.indexOf('.apk') === -1);
 		},
 		needNotificationProgress() {
 			return this.platform.indexOf(platform_iOS) === -1 && !this.is_mandatory && !this.isHarmony;
@@ -184,7 +187,7 @@ export default {
 				this.shown = shown
 				this.setLocalPackageInfo(localPackageInfo)
 			} else {
-				console.error(`安装包信息为空，请检查后重试`);
+				console.error(t('appUpgrade.errors.missingPackageInfo'));
 			}
 			// #endif
 		},
@@ -192,7 +195,7 @@ export default {
 			const requiredKey = ['version', 'url', 'type'];
 			for (let key in localPackageInfo) {
 				if (requiredKey.indexOf(key) !== -1 && !localPackageInfo[key]) {
-					console.error(`参数 ${key} 必填，请检查后重试`);
+					console.error(t('appUpgrade.errors.requiredField', { key }));
 					// #ifdef APP-PLUS
 					uni.navigateBack();
 					// #endif
@@ -203,7 +206,28 @@ export default {
 				}
 			}
 
-			Object.assign(this, localPackageInfo);
+			this.title = localPackageInfo.title || this.title;
+			this.contents = localPackageInfo.contents || '';
+			this.version = localPackageInfo.version || '';
+			this.type = localPackageInfo.type || '';
+			this.is_mandatory = !!localPackageInfo.is_mandatory;
+			this.packageUrl = localPackageInfo.url || '';
+			this.platform = Array.isArray(localPackageInfo.platform) ? localPackageInfo.platform : [];
+			this.store_list = Array.isArray(localPackageInfo.store_list) ? localPackageInfo.store_list : null;
+
+			if (typeof localPackageInfo.subTitle === 'string' && localPackageInfo.subTitle) {
+				this.subTitle = localPackageInfo.subTitle;
+			}
+			if (typeof localPackageInfo.downLoadBtnTextiOS === 'string' && localPackageInfo.downLoadBtnTextiOS) {
+				this.downLoadBtnTextiOS = localPackageInfo.downLoadBtnTextiOS;
+			}
+			if (typeof localPackageInfo.downLoadBtnText === 'string' && localPackageInfo.downLoadBtnText) {
+				this.downLoadBtnText = localPackageInfo.downLoadBtnText;
+			}
+			if (typeof localPackageInfo.downLoadingText === 'string' && localPackageInfo.downLoadingText) {
+				this.downLoadingText = localPackageInfo.downLoadingText;
+			}
+
 			this.checkLocalStoragePackage();
 		},
 		checkLocalStoragePackage() {
@@ -225,9 +249,9 @@ export default {
 		},
 		askAbortDownload() {
 			uni.showModal({
-				title: '是否取消下载？',
-				cancelText: '否',
-				confirmText: '是',
+				title: t('appUpgrade.confirmCancelDownload'),
+				cancelText: t('common.no'),
+				confirmText: t('common.yes'),
 				success: (res) => {
 					if (res.confirm) {
 						downloadTask && downloadTask.abort();
@@ -243,7 +267,7 @@ export default {
 			if (this.downloading) {
 				if (this.is_mandatory) {
 					return uni.showToast({
-						title: '下载中，请稍后……',
+						title: t('appUpgrade.downloadingWait'),
 						icon: 'none',
 						duration: 500
 					});
@@ -302,7 +326,7 @@ export default {
 			this.downloading = true;
 			//下载包
 			downloadTask = uni.downloadFile({
-				url: this.url,
+				url: this.packageUrl,
 				success: (res) => {
 					if (res.statusCode == 200) {
 						// fix: wgt 文件下载完成后后缀不是 wgt
@@ -355,7 +379,7 @@ export default {
 
 				if (this.needNotificationProgress && !this.downloadSuccess) {
 					createNotificationProgress({
-						title: '升级中心正在下载安装包……',
+						title: t('appUpgrade.notifications.downloadingTitle'),
 						content: `${this.downLoadPercent}%`,
 						progress: this.downLoadPercent,
 						onClick: () => {
@@ -367,9 +391,9 @@ export default {
 			if (this.needNotificationProgress) {
 				uni.navigateBack();
 			}
-		},
+    },
     downloadFail() {
-      const errMsg = '下载失败，请点击重试'
+      const errMsg = t('appUpgrade.downloadRetry')
 
       this.downloadSuccess = false;
       this.downloading = false;
@@ -384,8 +408,8 @@ export default {
 
       if (this.needNotificationProgress) {
         finishNotificationProgress({
-          title: '升级包下载失败',
-          content: '请重新检查更新',
+          title: t('appUpgrade.notifications.downloadFailedTitle'),
+          content: t('appUpgrade.notifications.downloadFailedContent'),
 					onClick: () => {}
         });
       }
@@ -402,8 +426,8 @@ export default {
 
 			if (this.needNotificationProgress) {
 				finishNotificationProgress({
-					title: '安装升级包',
-					content: '下载完成',
+					title: t('appUpgrade.notifications.installTitle'),
+					content: t('appUpgrade.downloadCompleted'),
 					onClick: () => {}
 				});
 
@@ -438,7 +462,7 @@ export default {
 							// #ifdef APP-PLUS
 							uni.showLoading({
 								icon: 'none',
-								title: '安装成功，正在重启……'
+								title: t('appUpgrade.installSuccessRestarting')
 							});
 							// #endif
 
@@ -469,7 +493,7 @@ export default {
 					this.installed = false;
 
 					uni.showModal({
-						title: '更新失败，请重新下载',
+						title: t('appUpgrade.updateFailedRedownload'),
 						content: err.message,
 						showCancel: false
 					});
@@ -486,8 +510,8 @@ export default {
 			this.installed = false;
 			// #ifdef APP-HARMONY
 			uni.showModal({
-				title: '更新完毕',
-				content: '请手动重启',
+				title: t('appUpgrade.updateCompleted'),
+				content: t('appUpgrade.manualRestart'),
 				showCancel: false,
 				success(res) {
 					plus.runtime.quit()
@@ -522,7 +546,7 @@ export default {
 			});
 		},
 		jumpToApplicationStore() {
-			plus.runtime.openURL(this.url);
+			plus.runtime.openURL(this.packageUrl);
 		}
 	}
 };

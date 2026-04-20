@@ -1,6 +1,7 @@
 <script lang="ts">
 import api from '@/API/'
 import { showAddDeviceActionSheet } from '@/common/composables/useAddDeviceActionSheet'
+import { syncCurrentUniLocale } from '@/lang'
 // APP 端自动检查更新（对接自建 backend，不依赖 uniCloud）
 import checkAppUpdate from '@/uni_modules/fjbms-upgrade/utils/check-update'
 
@@ -39,6 +40,10 @@ const navigateToDetail = (data: unknown) => {
 
 export default {
 	onLaunch() {
+		try {
+			syncCurrentUniLocale()
+		} catch (e) {}
+
 		// #ifdef APP-PLUS
 		try {
 			if (typeof uni.getPushClientId === 'function') {

@@ -104,6 +104,7 @@ export default {
         return {
             cropper: null,
             canvasId: 'cropper' + uni.$u.guid(),
+            pendingImageSrc: '',
             viewData: {
                 imageLoaded: false,
                 imageSrc: '',
@@ -177,6 +178,25 @@ export default {
     emits: ['change', 'open', 'close','confirm','error'],
     // #endif
     methods: {
+        normalizeTouches(e) {
+            const rawTouches = Array.isArray(e?.touches) && e.touches.length
+                ? e.touches
+                : Array.isArray(e?.changedTouches) && e.changedTouches.length
+                    ? e.changedTouches
+                    : [];
+
+            if (!rawTouches.length) {
+                return [{
+                    clientX: e?.clientX || e?.x || e?.pageX,
+                    clientY: e?.clientY || e?.y || e?.pageY
+                }];
+            }
+
+            return rawTouches.map((touch) => ({
+                clientX: touch.clientX || touch.x || touch.pageX,
+                clientY: touch.clientY || touch.y || touch.pageY
+            }));
+        },
         // 初始化裁剪器
         async initCropper() {
 
@@ -202,6 +222,12 @@ export default {
 
             this.$emit('open');
 
+            if (this.pendingImageSrc) {
+                const src = this.pendingImageSrc;
+                this.pendingImageSrc = '';
+                this.loadImage(src);
+            }
+
             if(this.autoChoose) {
                 this.chooseImage();
             }
@@ -209,7 +235,12 @@ export default {
         
         // 加载图片
         loadImage(src) {
-            if (!this.cropper) return;
+            if (!src) return;
+            if (!this.cropper) {
+                this.pendingImageSrc = src;
+                return;
+            }
+            this.pendingImageSrc = '';
             this.cropper.setImage(src).catch(err => {
                 this.$emit('error', uni.$u.$t('uCropper.loadImageError'));
             });
@@ -260,7 +291,7 @@ export default {
         // 确认裁剪
         async confirmCrop() {
             if (!this.cropper || !this.viewData.imageLoaded) {
-                this.$emit('error', uni.$u.t('uCropper.chooseImage'));
+                this.$emit('error', uni.$u.$t('uCropper.chooseImage'));
                 return;
             }
             
@@ -297,20 +328,8 @@ export default {
             e.preventDefault && e.preventDefault();
             e.stopPropagation && e.stopPropagation();
             
-            // 兼容不同平台的触摸事件
-            let touch;
-            // #ifdef H5
-            touch = e.touches ? e.touches[0] : e;
-            // #endif
-            // #ifndef H5
-            touch = e.touches && e.touches[0] ? e.touches[0] : e.changedTouches && e.changedTouches[0] ? e.changedTouches[0] : e;
-            // #endif
-            
             const event = {
-                touches: [{
-                    clientX: touch.clientX || touch.x || touch.pageX,
-                    clientY: touch.clientY || touch.y || touch.pageY
-                }]
+                touches: this.normalizeTouches(e)
             };
             
             this.cropper.touchStart(event);
@@ -324,20 +343,8 @@ export default {
             e.preventDefault && e.preventDefault();
             e.stopPropagation && e.stopPropagation();
             
-            // 兼容不同平台的触摸事件
-            let touch;
-            // #ifdef H5
-            touch = e.touches ? e.touches[0] : e;
-            // #endif
-            // #ifndef H5
-            touch = e.touches && e.touches[0] ? e.touches[0] : e.changedTouches && e.changedTouches[0] ? e.changedTouches[0] : e;
-            // #endif
-            
             const event = {
-                touches: [{
-                    clientX: touch.clientX || touch.x || touch.pageX,
-                    clientY: touch.clientY || touch.y || touch.pageY
-                }],
+                touches: this.normalizeTouches(e),
                 preventdefault: () => ({})
             };
             

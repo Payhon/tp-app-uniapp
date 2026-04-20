@@ -17,7 +17,7 @@
       <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
         <view class="user-row">
           <view class="user" hover-class="user--hover" @tap="handleUserClick">
-            <image class="avatar" :src="avatarSrc" mode="aspectFill" />
+            <AppAvatar class="avatar" :src="avatarSrc" size="120rpx" />
             <view class="user-text">
               <text class="user-name">{{ displayName }}</text>
               <text class="user-phone">{{ displayPhone }}</text>
@@ -223,6 +223,8 @@ import {
   setStoredHomeDeviceViewMode,
   type HomeDeviceViewMode,
 } from "@/common/device-view-mode";
+import { resolveAvatarUrl } from "@/common/avatar";
+import AppAvatar from "@/components/app-avatar/app-avatar.vue";
 import { useUserStore } from "@/store/user";
 import { useInjected } from "@/common/composables/useInjected";
 import { appBoundDeviceList } from "@/service/device";
@@ -236,7 +238,6 @@ const { t, locale } = useI18n();
 const userStore = useUserStore();
 const { apiRequest, login } = useInjected();
 
-const defaultAvatar = "/static/image/my/avatar-default@2x.png";
 const STORAGE_BT_AUTO_CONNECT = "bluetoothAutoConnect";
 
 const statusBarHeight = ref(0);
@@ -283,17 +284,10 @@ const deviceCountLabel = computed(() => {
 const avatarUrl = computed(() => {
   const raw = (userInfo.value as unknown as { avatar_url?: string } | null)
     ?.avatar_url;
-  if (!raw) return defaultAvatar;
-  const serverUrl = String(uni.getStorageSync("serverAddress") || "");
-  const baseUrl = serverUrl ? serverUrl.replace("/api/v1", "") : "";
-  return baseUrl + "/" + String(raw);
+  return resolveAvatarUrl(raw);
 });
 
-const avatarSrc = computed(() => {
-  if (isLoggedIn.value && (userInfo.value as any)?.avatar_url)
-    return avatarUrl.value;
-  return defaultAvatar;
-});
+const avatarSrc = computed(() => avatarUrl.value);
 
 const displayName = computed(() => {
   if (!isLoggedIn.value) return t("pages.my.notLoggedIn");
@@ -683,10 +677,6 @@ export default {
 }
 
 .avatar {
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 60rpx;
-  background-color: rgba(255, 255, 255, 0.6);
   border: 4rpx solid rgba(255, 255, 255, 0.8);
 }
 

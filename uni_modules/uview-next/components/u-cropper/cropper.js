@@ -45,8 +45,11 @@ export default class ImageCropper {
         this.touch = {
             startX: 0,
             startY: 0,
+            startDistance: 0,
+            startScale: 1,
             isTouch: false,
-            isMove: false
+            isMove: false,
+            isScaling: false
         };
         
         // 图片加载状态
@@ -57,18 +60,40 @@ export default class ImageCropper {
         this.triggerUpdate();
     }
 
+    normalizeImageSrc(src) {
+        let nextSrc = String(src || '').trim();
+        if (!nextSrc) return '';
+
+        // #ifdef APP-PLUS
+        try {
+            if (nextSrc.startsWith('file://')) {
+                nextSrc = decodeURI(nextSrc.replace(/^file:\/\//i, ''));
+            } else if (
+                nextSrc.startsWith('_doc/') ||
+                nextSrc.startsWith('_downloads/') ||
+                nextSrc.startsWith('_www/')
+            ) {
+                nextSrc = plus.io.convertLocalFileSystemURL(nextSrc);
+            }
+        } catch (e) {}
+        // #endif
+
+        return nextSrc;
+    }
+
     // 设置图片源
     setImage(src) {
         return new Promise((resolve, reject) => {
-            if (!src) {
+            const normalizedSrc = this.normalizeImageSrc(src);
+            if (!normalizedSrc) {
                 reject(new Error('图片路径不能为空'));
                 return;
             }
             
             uni.getImageInfo({
-                src: src,
+                src: normalizedSrc,
                 success: (res) => {
-                    this.imgData.src = src;
+                    this.imgData.src = normalizedSrc;
                     this.imgData.originalWidth = res.width;
                     this.imgData.originalHeight = res.height;
                     this.imageLoaded = true;
@@ -174,13 +199,27 @@ export default class ImageCropper {
     // 触摸开始
     touchStart(e) {
         if (!this.imageLoaded) return;
-        
-        const x = e.touches ? e.touches[0].clientX : e.clientX;
-        const y = e.touches ? e.touches[0].clientY : e.clientY;
-        
+
+        const touches = e.touches || [];
+        if (touches.length >= 2) {
+            const distance = this.getTouchDistance(touches[0], touches[1]);
+            this.touch.startDistance = distance;
+            this.touch.startScale = this.imgData.scale;
+            this.touch.isTouch = true;
+            this.touch.isScaling = true;
+            this.touch.isMove = false;
+            return;
+        }
+
+        const x = touches.length ? touches[0].clientX : e.clientX;
+        const y = touches.length ? touches[0].clientY : e.clientY;
+
         this.touch.startX = x;
         this.touch.startY = y;
+        this.touch.startDistance = 0;
+        this.touch.startScale = this.imgData.scale;
         this.touch.isTouch = true;
+        this.touch.isScaling = false;
         this.touch.isMove = false;
     }
 
@@ -190,8 +229,21 @@ export default class ImageCropper {
         
         e.preventDefault && e.preventDefault();
         
-        const x = e.touches ? e.touches[0].clientX : e.clientX;
-        const y = e.touches ? e.touches[0].clientY : e.clientY;
+        const touches = e.touches || [];
+        if (touches.length >= 2) {
+            const distance = this.getTouchDistance(touches[0], touches[1]);
+            if (!distance || !this.touch.startDistance) return;
+            const centerX = (touches[0].clientX + touches[1].clientX) / 2;
+            const centerY = (touches[0].clientY + touches[1].clientY) / 2;
+            const ratio = distance / this.touch.startDistance;
+            this.applyScale(this.touch.startScale * ratio, centerX, centerY);
+            this.touch.isScaling = true;
+            this.touch.isMove = true;
+            return;
+        }
+
+        const x = touches.length ? touches[0].clientX : e.clientX;
+        const y = touches.length ? touches[0].clientY : e.clientY;
         
         // 单点拖拽
         const deltaX = x - this.touch.startX;
@@ -241,39 +293,54 @@ export default class ImageCropper {
     touchEnd(e) {
         this.touch.isTouch = false;
         this.touch.isMove = false;
+        this.touch.isScaling = false;
+        this.touch.startDistance = 0;
+        this.touch.startScale = this.imgData.scale;
     }
 
     // 缩放图片
     scaleImage(ratio) {
         if (!this.imageLoaded) return;
-        
-        const newScale = this.imgData.scale * ratio;
-        
-        // 计算新的尺寸
-        const newWidth = this.imgData.originalWidth * newScale;
-        const newHeight = this.imgData.originalHeight * newScale;
-        
-        // 限制最小缩放，确保图片至少有一边等于或大于裁剪框
+
+        this.applyScale(this.imgData.scale * ratio);
+    }
+
+    getMinScale() {
         const minScaleX = this.rectWidth / this.imgData.originalWidth;
         const minScaleY = this.rectHeight / this.imgData.originalHeight;
-        const minScale = Math.max(minScaleX, minScaleY);
-        
-        // 限制缩放范围
-        if (newScale < minScale || newScale > 3) return;
-        
-        // 保存当前中心点
-        const centerX = this.imgData.x + this.imgData.width / 2;
-        const centerY = this.imgData.y + this.imgData.height / 2;
-        
-        // 更新图片数据
-        this.imgData.scale = newScale;
+        return Math.max(minScaleX, minScaleY);
+    }
+
+    getTouchDistance(touch1, touch2) {
+        const dx = touch1.clientX - touch2.clientX;
+        const dy = touch1.clientY - touch2.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    applyScale(nextScale, focusX, focusY) {
+        if (!this.imageLoaded) return;
+
+        const minScale = this.getMinScale();
+        const clampedScale = Math.max(minScale, Math.min(3, nextScale));
+        if (!Number.isFinite(clampedScale) || clampedScale <= 0) return;
+        if (Math.abs(clampedScale - this.imgData.scale) < 0.0001) return;
+
+        // 计算新的尺寸
+        const newWidth = this.imgData.originalWidth * clampedScale;
+        const newHeight = this.imgData.originalHeight * clampedScale;
+
+        const anchorX = Number.isFinite(focusX) ? focusX : this.imgData.x + this.imgData.width / 2;
+        const anchorY = Number.isFinite(focusY) ? focusY : this.imgData.y + this.imgData.height / 2;
+
+        const relativeX = this.imgData.width ? (anchorX - this.imgData.x) / this.imgData.width : 0.5;
+        const relativeY = this.imgData.height ? (anchorY - this.imgData.y) / this.imgData.height : 0.5;
+
+        this.imgData.scale = clampedScale;
         this.imgData.width = newWidth;
         this.imgData.height = newHeight;
-        
-        // 重新计算位置，保持中心点不变
-        this.imgData.x = centerX - this.imgData.width / 2;
-        this.imgData.y = centerY - this.imgData.height / 2;
-        
+        this.imgData.x = anchorX - relativeX * newWidth;
+        this.imgData.y = anchorY - relativeY * newHeight;
+
         // 应用边界约束
         this.applyBoundaryConstraints();
         this.triggerUpdate();

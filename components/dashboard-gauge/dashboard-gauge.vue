@@ -93,12 +93,12 @@ const LEFT_CURVES: CubicSegment[] = [
 	{
 		p0: { x: 104, y: 206 },
 		c1: { x: 62, y: 206 },
-		c2: { x: 34, y: 176 },
+		c2: { x: 28, y: 176 },
 		p1: { x: 28, y: 120 },
 	},
 	{
 		p0: { x: 28, y: 120 },
-		c1: { x: 34, y: 64 },
+		c1: { x: 28, y: 64 },
 		c2: { x: 62, y: 34 },
 		p1: { x: 104, y: 34 },
 	},
@@ -108,12 +108,12 @@ const RIGHT_CURVES: CubicSegment[] = [
 	{
 		p0: { x: 296, y: 206 },
 		c1: { x: 338, y: 206 },
-		c2: { x: 366, y: 176 },
+		c2: { x: 372, y: 176 },
 		p1: { x: 372, y: 120 },
 	},
 	{
 		p0: { x: 372, y: 120 },
-		c1: { x: 366, y: 64 },
+		c1: { x: 372, y: 64 },
 		c2: { x: 338, y: 34 },
 		p1: { x: 296, y: 34 },
 	},
@@ -254,10 +254,10 @@ const draw = () => {
 	if (totalVoltageText) {
 		ctx.setFillStyle('#7A869A')
 		ctx.setFontSize(13)
-		ctx.fillText(totalVoltageLabel, 200, 38)
+		ctx.fillText(totalVoltageLabel, 200, 42)
 		ctx.setFillStyle('#0F172A')
 		ctx.setFontSize(24)
-		ctx.fillText(totalVoltageText, 200, 62)
+		ctx.fillText(totalVoltageText, 200, 68)
 	}
 
 	// SOC
@@ -346,7 +346,7 @@ watch(() => [props.soc, props.soh, props.totalVoltageText, totalVoltageLabelText
 
 .top-voltage {
 	position: absolute;
-	top: 12rpx;
+	top: 30rpx;
 	left: 50%;
 	transform: translateX(-50%);
 	display: flex;
@@ -414,7 +414,7 @@ watch(() => [props.soc, props.soh, props.totalVoltageText, totalVoltageLabelText
 	position: absolute;
 	left: 0;
 	right: 0;
-	bottom: 15%;
+	bottom: 11%;
 	display: flex;
 	justify-content: center;
 }

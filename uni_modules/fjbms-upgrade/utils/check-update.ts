@@ -1,9 +1,11 @@
 import callCheckVersion, { UpgradeCheckResult } from './call-check-version'
 import $C from '@/common/config'
+import i18n from '@/lang'
 import { platform_iOS } from './utils'
 
 // 推荐在 App.vue 中使用
 const PACKAGE_INFO_KEY = '__fjbms_upgrade_package_info__'
+const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params as any) as string
 
 function normalizeDownloadURL(url: string): string {
 	const u = String(url || '').trim()
@@ -95,7 +97,7 @@ export function updateUseModal(packageInfo: UpgradeCheckResult): void {
 	const isWGT = type === 'wgt'
 	const isiOS = !isWGT ? platform.includes(platform_iOS) : false
 
-	const confirmText = isiOS ? '立即跳转更新' : '立即下载更新'
+	const confirmText = isiOS ? t('appUpgrade.jumpToUpdate') : t('appUpgrade.downloadNow')
 
 	uni.showModal({
 		title,
@@ -111,13 +113,13 @@ export function updateUseModal(packageInfo: UpgradeCheckResult): void {
 				return
 			}
 
-			uni.showToast({ title: '后台下载中……', duration: 1000 })
+			uni.showToast({ title: t('appUpgrade.backgroundDownloading'), duration: 1000 })
 
 			uni.downloadFile({
 				url,
 				success: (downloadRes) => {
 					if (downloadRes.statusCode !== 200) {
-						console.error('下载安装包失败')
+						console.error(t('appUpgrade.errors.downloadPackageFailed'))
 						return
 					}
 					plus.runtime.install(
@@ -129,7 +131,7 @@ export function updateUseModal(packageInfo: UpgradeCheckResult): void {
 								return
 							}
 							uni.showModal({
-								title: '安装成功是否重启？',
+								title: t('appUpgrade.installSuccessRestartConfirm'),
 								success: (mRes) => {
 									if (mRes.confirm) plus.runtime.restart()
 								}
@@ -137,7 +139,7 @@ export function updateUseModal(packageInfo: UpgradeCheckResult): void {
 						},
 						(err) => {
 							uni.showModal({
-								title: '更新失败',
+								title: t('appUpgrade.updateFailed'),
 								content: err?.message || String(err),
 								showCancel: false
 							})
@@ -149,4 +151,3 @@ export function updateUseModal(packageInfo: UpgradeCheckResult): void {
 	})
 	// #endif
 }
-
