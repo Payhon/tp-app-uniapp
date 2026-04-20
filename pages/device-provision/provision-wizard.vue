@@ -56,12 +56,16 @@ import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { BmsClient, BMS_PARAM, createUniBleBmsTransport } from '@/common/lib/bms-protocol'
+import { adoptBleClientConnection } from '@/common/ble/ble-client-cache'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
+import { saveDeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
 import { formatUniError } from '@/common/device-provision/error'
 import { getDeviceProvisionConfig, getDeviceProvisionInfo, postDeviceProvisionBind } from '@/service/deviceProvision'
 
 type StepStatus = 'pending' | 'doing' | 'done' | 'skipped' | 'error'
 type Step = { key: string; title: string; status: StepStatus }
+
+const DETAIL_BLE_MAX_READ_REGS = 60
 
 const { t } = useI18n()
 
@@ -188,7 +192,11 @@ function goHome() {
 
 function goDeviceDetail(deviceId: string) {
 	const nextId = String(deviceId || '').trim()
-	if (!nextId) return
+	if (!nextId) {
+		console.warn('[provision] goDeviceDetail skipped: empty device_id')
+		uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
+		return
+	}
 	setTimeout(() => {
 		uni.redirectTo({
 			url: `/pages/device-battery/detail?device_id=${encodeURIComponent(nextId)}`,
@@ -203,6 +211,7 @@ async function runProvision() {
 	}
 	reset()
 	running.value = true
+	let adoptedToCache = false
 
 	const transport = createUniBleBmsTransport({ logger: console as any, requestTimeoutMs: 12000 })
 	// NOTE: 部分设备对单帧写入长度更敏感，这里把 maxWriteRegisters 降到 20（字符串写入会自动分包多次写入）。
@@ -252,6 +261,7 @@ async function runProvision() {
 			exists?: boolean
 			can_auto_register?: boolean
 			bms_comm_type?: number
+			device_name?: string
 		}
 		// 兼容旧后端：未升级 FEAT-0016 时，info 接口在查无设备时直接返回 100404。
 		// 此时前端不要在这里终止，让 bind 接口去决定是否允许自动补建。
@@ -295,7 +305,45 @@ async function runProvision() {
 		}
 		setStep('bind', 'done')
 
-		const boundDeviceId = String((bindRes as any)?.data?.device_id || '').trim()
+		let boundDeviceId = String((bindRes as any)?.data?.device_id || provisionInfo.device_id || '').trim()
+		if (!boundDeviceId) {
+			try {
+				const refreshRsp = await getDeviceProvisionInfo(uuid)
+				if (Number((refreshRsp as any)?.code || 0) === 200) {
+					boundDeviceId = String((refreshRsp as any)?.data?.device_id || '').trim()
+				}
+			} catch (e) {
+				console.warn('[provision] refresh device info after bind failed', e)
+			}
+		}
+		console.log('[provision] bind done', {
+			bind_data: (bindRes as any)?.data || null,
+			fallback_device_id: provisionInfo.device_id || null,
+			bound_device_id: boundDeviceId || null,
+		})
+		const boundDeviceName =
+			String((bindRes as any)?.data?.device_name || provisionInfo.device_name || '').trim() || undefined
+		if (boundDeviceId && bleMac) {
+			const adopted = await adoptBleClientConnection({
+				mac: bleMac,
+				deviceId: deviceId.value,
+				client,
+				transport,
+				maxReadRegisters: DETAIL_BLE_MAX_READ_REGS,
+			})
+			if (adopted) {
+				adoptedToCache = true
+				saveDeviceDetailHandoff({
+					deviceId: boundDeviceId,
+					bleMac,
+					deviceName: boundDeviceName,
+					itemUuid: uuid,
+					bmsCommType: commType,
+					source: 'provision_success',
+					createdAt: Date.now(),
+				})
+			}
+		}
 		done.value = true
 		uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
 		goDeviceDetail(boundDeviceId)
@@ -308,9 +356,11 @@ async function runProvision() {
 		if (s) s.status = 'error'
 	} finally {
 		running.value = false
-		try {
-			await transport.destroy()
-		} catch (e) {}
+		if (!adoptedToCache) {
+			try {
+				await transport.destroy()
+			} catch (e) {}
+		}
 	}
 }
 

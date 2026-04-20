@@ -19,7 +19,7 @@
 				</view>
 
 				<view class="hint" v-if="targetMac">
-					<text class="hint-text">{{ $t('pages.deviceProvision.matchingMac', { mac: targetMacDisplay }) }}</text>
+					<text class="hint-text">{{ format(t('pages.deviceProvision.matchingMac') as string, { mac: targetMacDisplay }) }}</text>
 				</view>
 
 				<view class="actions">

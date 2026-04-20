@@ -21,11 +21,13 @@ import {
 	canBleAutoConnect,
 	connectBleClient,
 	disconnectBleClient,
+	getBleClientEntry,
 	invalidateBleConnectAttempts,
 	releaseBleClient,
 	retainBleClient,
 } from '@/common/ble/ble-client-cache'
 import { normalizeMac } from '@/common/device-provision/ble'
+import type { DeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
@@ -33,6 +35,16 @@ type DeviceDetailSessionMode = 'cloud' | 'instrument'
 type LoadInstrumentSessionOptions = {
 	bleMac: string
 	deviceName?: string
+}
+
+type ConnectAutoOptions = {
+	preserveCurrentBle?: boolean
+	probe?: boolean
+}
+
+type LoadByIdOptions = {
+	handoff?: DeviceDetailHandoff | null
+	preferWarmBle?: boolean
 }
 
 type MqttTransportLike = UniMqttWsBmsTransport | UniMqttSocketBmsTransport
@@ -245,6 +257,11 @@ export const useBatteryDetail = () => {
 	}
 
 	const isInstrumentSession = () => sessionMode.value === 'instrument'
+
+	const hasCurrentBleTarget = (mac: unknown) => {
+		const normalizedMac = normalizeMac(String(mac || ''))
+		return !!normalizedMac && connType.value === 'bluetooth' && bleCacheKey === normalizedMac && !!client.value
+	}
 
 	const hasConnectTarget = () => {
 		if (isInstrumentSession()) {
@@ -531,6 +548,41 @@ export const useBatteryDetail = () => {
 		}
 	}
 
+	const attachBleEntry = (entry: ReturnType<typeof getBleClientEntry>, options?: { retain?: boolean }) => {
+		if (!entry) return false
+		if (bleCacheKey && bleCacheKey !== entry.key) {
+			releaseBleClient(bleCacheKey)
+		}
+		if (options?.retain !== false && bleCacheKey !== entry.key) {
+			retainBleClient(entry.key)
+		}
+		bleCacheKey = entry.key
+		client.value = entry.client
+		connType.value = 'bluetooth'
+		connecting.value = false
+		startPolling(entry.client)
+		if (!isInstrumentSession()) {
+			void reportConnectionStatus(true, 'bluetooth')
+			void flushReportQueue()
+			void connectRelaySocket()
+		}
+		return true
+	}
+
+	const attachWarmBleFromBattery = (reason: string) => {
+		const decision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
+		if (!decision.ok || !decision.mac) return false
+		const entry = getBleClientEntry(decision.mac, { touch: true })
+		if (!entry) return false
+		log('load battery detail reuse warm ble', {
+			reason,
+			deviceId: deviceId.value,
+			ble_mac: decision.mac,
+			cached_device_id: entry.deviceId,
+		})
+		return attachBleEntry(entry, { retain: true })
+	}
+
 	const startPolling = (c: BmsClient) => {
 		stopPolling()
 		if (pollingPaused.value) return
@@ -613,24 +665,23 @@ export const useBatteryDetail = () => {
 		return disconnectBleClient(bleKey)
 	}
 
-	const connectBleFirst = async (): Promise<boolean> => {
+	const connectBleFirst = async (options?: ConnectAutoOptions): Promise<boolean> => {
 		const decision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
 		if (!decision.ok || !decision.mac) return false
+		if (options?.preserveCurrentBle && hasCurrentBleTarget(decision.mac)) {
+			if (client.value) startPolling(client.value)
+			return true
+		}
 		try {
 			closeRelaySocket()
-			const entry = await connectBleClient({ mac: decision.mac, maxReadRegisters: BLE_MAX_READ_REGS, probe: true })
+			const entry = await connectBleClient({
+				mac: decision.mac,
+				maxReadRegisters: BLE_MAX_READ_REGS,
+				force: !options?.preserveCurrentBle,
+				probe: options?.probe !== false,
+			})
 			if (!entry) return false
-			bleCacheKey = entry.key
-			retainBleClient(entry.key)
-			client.value = entry.client
-			connType.value = 'bluetooth'
-			startPolling(entry.client)
-			if (!isInstrumentSession()) {
-				void reportConnectionStatus(true, 'bluetooth')
-				void flushReportQueue()
-				void connectRelaySocket()
-			}
-			return true
+			return attachBleEntry(entry, { retain: true })
 		} catch (e) {
 			log('ble connect failed', { err: e instanceof Error ? e.message : String(e || '') })
 			return false
@@ -710,17 +761,20 @@ export const useBatteryDetail = () => {
 		}
 	}
 
-	const connectAuto = async () => {
+	const connectAuto = async (options?: ConnectAutoOptions) => {
 		if (!hasConnectTarget() || connecting.value) return
 		connecting.value = true
 		try {
-			await disconnectAll()
+			if (options?.preserveCurrentBle && attachWarmBleFromBattery('connect-auto')) return
+			if (!options?.preserveCurrentBle) {
+				await disconnectAll()
+			}
 			if (isInstrumentSession()) {
 				log('connectAuto instrument session', {
 					ble_mac: battery.value?.ble_mac ?? null,
 					device_name: battery.value?.device_name ?? null,
 				})
-				if (await connectBleFirst()) return
+				if (await connectBleFirst(options)) return
 				connType.value = 'offline'
 				return
 			}
@@ -737,11 +791,11 @@ export const useBatteryDetail = () => {
 			})
 			if (treatBleOnly) {
 				log('connectAuto choose BLE-only')
-				if (bleDecision.ok && (await connectBleFirst())) return
+				if (bleDecision.ok && (await connectBleFirst(options))) return
 				connType.value = 'offline'
 				return
 			}
-			if (bleDecision.ok && (await connectBleFirst())) return
+			if (bleDecision.ok && (await connectBleFirst(options))) return
 			log('connectAuto BLE not available, try remote transport')
 			if (useSocketBridge) {
 				if (await connectSocketBridge()) return
@@ -754,7 +808,26 @@ export const useBatteryDetail = () => {
 		}
 	}
 
-	const loadById = async (id: string) => {
+	const refreshCloudBatteryDetail = async (nextId: string) => {
+		log('load battery detail start', { deviceId: nextId })
+		const rsp = await appBatteryDetail(nextId)
+		if (rsp && (rsp as any).code === 200) {
+			const nextBattery = (rsp as any).data as AppBatteryDetail
+			battery.value = battery.value ? ({ ...battery.value, ...nextBattery } as AppBatteryDetail) : nextBattery
+			log('load battery detail ok', {
+				device_number: (battery.value as any)?.device_number,
+				bms_comm_type: (battery.value as any)?.bms_comm_type,
+				ble_mac: (battery.value as any)?.ble_mac,
+				comm_chip_id: (battery.value as any)?.comm_chip_id,
+				is_online: (battery.value as any)?.is_online,
+			})
+			return true
+		}
+		log('load battery detail failed', { rsp })
+		return false
+	}
+
+	const loadById = async (id: string, options?: LoadByIdOptions) => {
 		const nextId = String(id || '').trim()
 		if (!nextId) return
 		if (nextId !== deviceId.value || sessionMode.value !== 'cloud') {
@@ -763,21 +836,33 @@ export const useBatteryDetail = () => {
 		sessionMode.value = 'cloud'
 		deviceId.value = nextId
 		status.value = null
-		log('load battery detail start', { deviceId: deviceId.value })
-		const rsp = await appBatteryDetail(deviceId.value)
-		if (rsp && (rsp as any).code === 200) {
-			battery.value = (rsp as any).data as AppBatteryDetail
-			log('load battery detail ok', {
-				device_number: (battery.value as any)?.device_number,
-				bms_comm_type: (battery.value as any)?.bms_comm_type,
-				ble_mac: (battery.value as any)?.ble_mac,
-				comm_chip_id: (battery.value as any)?.comm_chip_id,
-				is_online: (battery.value as any)?.is_online,
-			})
-			void connectAuto()
-		} else {
-			log('load battery detail failed', { rsp })
+		const handoff =
+			options?.handoff && String(options.handoff.deviceId || '').trim() === nextId ? options.handoff : null
+		if (handoff) {
+			battery.value = {
+				device_id: nextId,
+				device_number: handoff.bleMac,
+				device_name: handoff.deviceName || null,
+				bms_comm_type: handoff.bmsCommType ?? 1,
+				ble_mac: handoff.bleMac,
+				item_uuid: handoff.itemUuid || null,
+				comm_chip_id: null,
+			} as AppBatteryDetail
+			const warmEntry = getBleClientEntry(handoff.bleMac, { touch: true })
+			if (warmEntry) {
+				log('load battery detail use warm ble', { deviceId: nextId, ble_mac: handoff.bleMac })
+				attachBleEntry(warmEntry, { retain: true })
+			} else if (options?.preferWarmBle !== false) {
+				log('load battery detail warm ble missing, reconnect', { deviceId: nextId, ble_mac: handoff.bleMac })
+				void connectAuto({ preserveCurrentBle: false, probe: true })
+			}
+			void refreshCloudBatteryDetail(nextId)
+			return
 		}
+		const ok = await refreshCloudBatteryDetail(nextId)
+		if (!ok) return
+		if (options?.preferWarmBle !== false && attachWarmBleFromBattery('cloud-detail')) return
+		void connectAuto({ preserveCurrentBle: options?.preferWarmBle !== false })
 	}
 
 	const loadInstrumentSession = ({ bleMac, deviceName }: LoadInstrumentSessionOptions) => {

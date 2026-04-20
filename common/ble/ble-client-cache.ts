@@ -1,5 +1,6 @@
 import { BmsClient, createUniBleBmsTransport, type UniBleBmsTransport } from '@/common/lib/bms-protocol'
 import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/device-provision/ble'
+import { getRememberedBleDeviceId, rememberBleDeviceId } from './ble-device-id-memory'
 
 type FoundBleDevice = {
 	deviceId: string
@@ -21,6 +22,14 @@ export type BleClientEntry = {
 	maxReadRegisters?: number
 	refCount: number
 	cleanupTimer?: number | null
+}
+
+export type AdoptBleClientConnectionOptions = {
+	mac: unknown
+	deviceId: string
+	client: BmsClient
+	transport: UniBleBmsTransport
+	maxReadRegisters?: number
 }
 
 const cache = new Map<string, BleClientEntry>()
@@ -226,6 +235,31 @@ const summarizeDeviceLines = (summaries: ReturnType<typeof buildAdvSummary>[]) =
 		.join(' | ')
 }
 
+const createBleClientEntry = ({
+	key,
+	deviceId,
+	transport,
+	maxReadRegisters,
+}: {
+	key: string
+	deviceId: string
+	transport: UniBleBmsTransport
+	maxReadRegisters?: number
+}): BleClientEntry => {
+	return {
+		key,
+		mac: key,
+		deviceId,
+		client: new BmsClient({ transport, maxReadRegisters }),
+		transport,
+		connectedAt: Date.now(),
+		lastUsedAt: Date.now(),
+		maxReadRegisters,
+		refCount: 0,
+		cleanupTimer: null,
+	}
+}
+
 let connectLock = Promise.resolve()
 const runSerial = async <T>(fn: () => Promise<T>): Promise<T> => {
 	const prev = connectLock
@@ -253,6 +287,77 @@ const assertConnectActive = (epoch: number, mac: string) => {
 		log('connect cancelled', { mac, epoch, active_epoch: connectEpoch })
 		throw new BleConnectCancelledError()
 	}
+}
+
+const buildIosDirectCandidates = (mac: string) => {
+	const out: string[] = []
+	const push = (value: unknown) => {
+		const next = String(value || '').trim()
+		if (!next || out.includes(next)) return
+		out.push(next)
+	}
+	const cached = cache.get(mac)
+	if (cached?.deviceId) push(cached.deviceId)
+	push(getRememberedBleDeviceId(mac, 'ios'))
+	return out
+}
+
+const connectDirectCandidate = async ({
+	label,
+	key,
+	epoch,
+	platform,
+	deviceId,
+	transport,
+	maxReadRegisters,
+}: {
+	label: string
+	key: string
+	epoch: number
+	platform: string
+	deviceId: string
+	transport: UniBleBmsTransport
+	maxReadRegisters?: number
+}) => {
+	assertConnectActive(epoch, key)
+	log(`${label} try`, { deviceId, mac: key })
+	await transport.connect({ deviceId })
+	assertConnectActive(epoch, key)
+	rememberBleDeviceId({ mac: key, platform, deviceId })
+	const entry = createBleClientEntry({ key, deviceId, transport, maxReadRegisters })
+	log(`${label} ok`, { deviceId, mac: key })
+	return entry
+}
+
+const discoverBleCandidate = async ({
+	key,
+	epoch,
+	durationsMs,
+}: {
+	key: string
+	epoch: number
+	durationsMs: number[]
+}) => {
+	const found = new Map<string, FoundBleDevice>()
+	for (let i = 0; i < durationsMs.length; i += 1) {
+		const durationMs = durationsMs[i]
+		log('discover fallback start', { mac: key, durationMs, phase: i + 1, totalPhases: durationsMs.length })
+		const list = await discoverWithAdvAbortable({ durationMs, epoch, mac: key })
+		assertConnectActive(epoch, key)
+		for (const item of list || []) {
+			if (!item?.deviceId) continue
+			found.set(String(item.deviceId), item)
+		}
+		const merged = Array.from(found.values())
+		const { hit, summaries } = pickCandidate(merged, key)
+		if (hit?.deviceId) {
+			log('discover fallback hit', { mac: key, deviceId: hit.deviceId, phase: i + 1, found: merged.length })
+			return { hit, summaries }
+		}
+		log('discover fallback timeout', { mac: key, durationMs, phase: i + 1, found: merged.length })
+	}
+	const merged = Array.from(found.values())
+	return { hit: null, summaries: merged.map((d: any) => buildAdvSummary(d, key)) }
 }
 
 export const invalidateBleConnectAttempts = (reason = 'manual') => {
@@ -365,6 +470,45 @@ const closeEntry = async (entry: BleClientEntry) => {
 	cache.delete(entry.key)
 }
 
+export const adoptBleClientConnection = async ({
+	mac,
+	deviceId,
+	client,
+	transport,
+	maxReadRegisters,
+}: AdoptBleClientConnectionOptions): Promise<BleClientEntry | null> => {
+	const key = normalizeBleMac(mac)
+	const normalizedDeviceId = String(deviceId || '').trim()
+	if (!key || !normalizedDeviceId || !client || !transport) return null
+	const pending = inFlight.get(key)
+	if (pending) {
+		try {
+			await pending
+		} catch (e) {}
+	}
+	const existing = cache.get(key)
+	if (existing && existing.transport !== transport) {
+		await closeEntry(existing)
+	}
+	const entry: BleClientEntry = {
+		key,
+		mac: key,
+		deviceId: normalizedDeviceId,
+		client,
+		transport,
+		connectedAt: existing?.transport === transport ? existing.connectedAt : Date.now(),
+		lastUsedAt: Date.now(),
+		maxReadRegisters:
+			Number.isFinite(maxReadRegisters as number) ? Number(maxReadRegisters) : existing?.maxReadRegisters,
+		refCount: existing?.transport === transport ? existing.refCount : 0,
+		cleanupTimer: null,
+	}
+	cache.set(key, entry)
+	if (entry.refCount === 0) scheduleCleanup(entry)
+	log('adopt connection', { mac: key, deviceId: normalizedDeviceId, refCount: entry.refCount })
+	return entry
+}
+
 export const connectBleClient = async ({
 	mac,
 	maxReadRegisters,
@@ -377,6 +521,14 @@ export const connectBleClient = async ({
 
 	const desiredMax = Number.isFinite(maxReadRegisters as number) ? Number(maxReadRegisters) : undefined
 	const cached = cache.get(key)
+	if (cached && force) {
+		log('force reconnect closes cached entry first', {
+			mac: key,
+			deviceId: cached.deviceId,
+			refCount: cached.refCount,
+		})
+		await closeEntry(cached)
+	}
 	if (cached && !force) {
 		if (desiredMax != null && cached.maxReadRegisters !== desiredMax) {
 			log('maxReadRegisters mismatch, reconnect', { mac: key, cached: cached.maxReadRegisters, desired: desiredMax })
@@ -397,7 +549,13 @@ export const connectBleClient = async ({
 	}
 
 	const existing = inFlight.get(key)
-	if (existing) return existing
+	if (existing) {
+		if (!force) return existing
+		log('force connect waits existing pending task', { mac: key })
+		try {
+			await existing
+		} catch (e) {}
+	}
 
 	const task = runSerial(async () => {
 		log('connect start', { mac: key })
@@ -407,6 +565,7 @@ export const connectBleClient = async ({
 			const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
 			const platform = String((sys as any)?.platform || '').toLowerCase()
 			const isAndroid = platform === 'android'
+			const isIOS = platform === 'ios'
 
 			if (isAndroid) {
 				const directCandidates = [
@@ -417,28 +576,40 @@ export const connectBleClient = async ({
 				].filter(Boolean)
 				for (const cand of directCandidates) {
 					try {
-						assertConnectActive(epoch, key)
-						log('direct connect try', { deviceId: cand, mac: key })
-						await transport.connect({ deviceId: cand })
-						assertConnectActive(epoch, key)
-						const client = new BmsClient({ transport, maxReadRegisters: desiredMax })
-						const entry: BleClientEntry = {
+						return await connectDirectCandidate({
+							label: 'direct connect',
 							key,
-							mac: key,
+							epoch,
+							platform,
 							deviceId: cand,
-							client,
 							transport,
-							connectedAt: Date.now(),
-							lastUsedAt: Date.now(),
 							maxReadRegisters: desiredMax,
-							refCount: 0,
-							cleanupTimer: null,
-						}
-						log('direct connect ok', { deviceId: cand, mac: key })
-						return entry
+						})
 					} catch (e) {
 						if (e instanceof BleConnectCancelledError) throw e
 						log('direct connect failed', { deviceId: cand, mac: key })
+						try {
+							await transport.disconnect()
+						} catch (e2) {}
+					}
+				}
+			}
+
+			if (isIOS) {
+				for (const cand of buildIosDirectCandidates(key)) {
+					try {
+						return await connectDirectCandidate({
+							label: 'ios direct connect',
+							key,
+							epoch,
+							platform,
+							deviceId: cand,
+							transport,
+							maxReadRegisters: desiredMax,
+						})
+					} catch (e) {
+						if (e instanceof BleConnectCancelledError) throw e
+						log('ios direct connect failed', { deviceId: cand, mac: key })
 						try {
 							await transport.disconnect()
 						} catch (e2) {}
@@ -453,13 +624,12 @@ export const connectBleClient = async ({
 				log('ble init failed', { mac: key })
 			}
 
-			const list = await discoverWithAdvAbortable({ durationMs: 5000, epoch, mac: key })
-			assertConnectActive(epoch, key)
-			const { hit, summaries } = pickCandidate(list, key)
+			const discoverDurations = isIOS ? [1500, 3500] : [5000]
+			const { hit, summaries } = await discoverBleCandidate({ key, epoch, durationsMs: discoverDurations })
 			if (!hit?.deviceId) {
 				log('discover no match', {
 					mac: key,
-					found: Array.isArray(list) ? list.length : 0,
+					found: Array.isArray(summaries) ? summaries.length : 0,
 					devices: summaries.slice(0, 10),
 					devicesText: summarizeDeviceLines(summaries.slice(0, 10)),
 				})
@@ -481,19 +651,13 @@ export const connectBleClient = async ({
 			log('discover connect try', { deviceId: hit.deviceId, mac: key })
 			await transport.connect({ deviceId: hit.deviceId })
 			assertConnectActive(epoch, key)
-			const client = new BmsClient({ transport, maxReadRegisters: desiredMax })
-			const entry: BleClientEntry = {
+			rememberBleDeviceId({ mac: key, platform, deviceId: hit.deviceId })
+			const entry = createBleClientEntry({
 				key,
-				mac: key,
 				deviceId: hit.deviceId,
-				client,
 				transport,
-				connectedAt: Date.now(),
-				lastUsedAt: Date.now(),
 				maxReadRegisters: desiredMax,
-				refCount: 0,
-				cleanupTimer: null,
-			}
+			})
 			log('discover connect ok', { deviceId: hit.deviceId, mac: key })
 			return entry
 		} catch (e) {
@@ -517,6 +681,8 @@ export const connectBleClient = async ({
 		if (entry) cache.set(key, entry)
 		return entry
 	} finally {
-		inFlight.delete(key)
+		if (inFlight.get(key) === task) {
+			inFlight.delete(key)
+		}
 	}
 }

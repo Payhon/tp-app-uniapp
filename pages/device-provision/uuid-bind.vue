@@ -67,7 +67,11 @@ function goHome() {
 
 function goDeviceDetail(deviceId: string) {
 	const nextId = String(deviceId || '').trim()
-	if (!nextId) return
+	if (!nextId) {
+		console.warn('[uuid-bind] goDeviceDetail skipped: empty device_id')
+		uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
+		return
+	}
 	setTimeout(() => {
 		uni.redirectTo({
 			url: `/pages/device-battery/detail?device_id=${encodeURIComponent(nextId)}`,
@@ -103,11 +107,26 @@ async function run() {
 			throw new Error(sqlErr ? `${msg} (${sqlErr})` : msg)
 		}
 
-		const boundDeviceId = String((bindRes as any)?.data?.device_id || '').trim()
-		status.value = 'success'
-		done.value = true
-		uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
-		goDeviceDetail(boundDeviceId)
+			let boundDeviceId = String((bindRes as any)?.data?.device_id || (info as any)?.data?.device_id || '').trim()
+			if (!boundDeviceId) {
+				try {
+					const refreshRsp = await getDeviceProvisionInfo(uuid.value)
+					if (Number((refreshRsp as any)?.code || 0) === 200) {
+						boundDeviceId = String((refreshRsp as any)?.data?.device_id || '').trim()
+					}
+				} catch (e) {
+					console.warn('[uuid-bind] refresh device info after bind failed', e)
+				}
+			}
+			console.log('[uuid-bind] bind done', {
+				bind_data: (bindRes as any)?.data || null,
+				fallback_device_id: (info as any)?.data?.device_id || null,
+				bound_device_id: boundDeviceId || null,
+			})
+			status.value = 'success'
+			done.value = true
+			uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
+			goDeviceDetail(boundDeviceId)
 	} catch (e) {
 		status.value = 'error'
 		const msg = e instanceof Error ? e.message : String(e)

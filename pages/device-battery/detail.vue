@@ -163,6 +163,7 @@ import ParamsTab from './components/params-tab.vue'
 
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
+import { consumeDeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
 import { DEVICE_TYPE_BMS } from '@/common/device-provision/device-prefix-shared'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { getWindowInfo } from '@/common/platform'
@@ -299,7 +300,7 @@ const connText = computed(() => {
 })
 
 const connIcon = computed(() => {
-	if (connecting.value) return '/static/image/home/icon-wifi@2x.png'
+	if (connecting.value) return '/static/image/device/icon-bluetoolth@2x.png'
 	if (connType.value === 'bluetooth') return '/static/image/device/icon-bluetoolth@2x.png'
 	if (connType.value === 'mqtt') return '/static/image/home/icon-wifi@2x.png'
 	return '/static/image/home/icon-unlink@2x.png'
@@ -502,7 +503,8 @@ onLoad((query) => {
 	allowScanHandoff.value = false
 	meterPanelVisible.value = false
 	const id = String(rawQuery.device_id || rawQuery.id || '').trim()
-	loadById(id)
+	const handoff = consumeDeviceDetailHandoff(id)
+	loadById(id, { handoff, preferWarmBle: true })
 })
 
 onReachBottom(() => {

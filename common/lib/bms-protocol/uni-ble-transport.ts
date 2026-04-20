@@ -382,6 +382,7 @@ export class UniBleBmsTransport {
 	private _preferWriteWithResponse: boolean
 	private _bleApiTimeoutMarker: { __bleApiTimeout: true }
 	private _iosWriteAckUnreliable: boolean
+	private _iosWriteTimeoutLogged: boolean
 	private _lastWriteTimeoutLogAt: number
 
 	constructor({
@@ -422,6 +423,7 @@ export class UniBleBmsTransport {
 			this._preferWriteWithResponse = false;
 			this._bleApiTimeoutMarker = { __bleApiTimeout: true };
 			this._iosWriteAckUnreliable = false;
+			this._iosWriteTimeoutLogged = false;
 			this._lastWriteTimeoutLogAt = 0;
 		}
 
@@ -657,6 +659,7 @@ export class UniBleBmsTransport {
 				this._writeSupportsResponse = true;
 				this._preferWriteWithResponse = false;
 				this._iosWriteAckUnreliable = false;
+				this._iosWriteTimeoutLogged = false;
 				this._lastWriteTimeoutLogAt = 0;
 				}
 			}
@@ -670,12 +673,27 @@ export class UniBleBmsTransport {
 			if (this._platform === 'ios' && !this._iosWriteAckUnreliable) {
 				this._iosWriteAckUnreliable = true;
 				if (this.logger?.info) {
-					this.logger.info('[ble] ios write callback unreliable, switch to fast soft-timeout', {
+					this.logger.info('[ble] ios write callback latency diagnostic, switch to fast soft-timeout', {
 						deviceId: this.deviceId,
 						serviceId: this.serviceId,
 						characteristicId: meta.characteristicId,
 					});
 				}
+			}
+			if (this._platform === 'ios' && !meta.fallback) {
+				if (this._iosWriteTimeoutLogged) return;
+				this._iosWriteTimeoutLogged = true;
+				if (this.logger?.info) {
+					this.logger.info('[ble] writeBLECharacteristicValue callback latency diagnostic on ios, rely on notify response', {
+						deviceId: this.deviceId,
+						serviceId: this.serviceId,
+						characteristicId: meta.characteristicId,
+						writeWithResponse: meta.writeWithResponse,
+						chunkLen: meta.chunkLen,
+						softTimeoutMs: this._getWriteApiSoftTimeoutMs(),
+					});
+				}
+				return;
 			}
 			const now = Date.now();
 			if (this.logger?.warn && (now - this._lastWriteTimeoutLogAt > 8000 || !!meta.fallback)) {
