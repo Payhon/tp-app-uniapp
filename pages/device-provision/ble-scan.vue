@@ -46,7 +46,10 @@
 				<scroll-view scroll-y class="list" :show-scrollbar="false">
 					<view v-for="d in visibleDevices" :key="d.deviceId" class="item" @click="selectDevice(d)">
 						<view class="item-main">
-							<text class="item-name">{{ d.displayName }}</text>
+							<view class="item-title">
+								<text class="item-name">{{ d.displayName }}</text>
+								<text v-if="isDeviceAlreadyAdded(d)" class="item-badge">{{ $t('pages.deviceProvision.deviceAlreadyAdded') }}</text>
+							</view>
 							<view class="item-signal" :class="`item-signal--${signalLevel(d.RSSI)}`">
 								<view class="item-signal__bar item-signal__bar--1"></view>
 								<view class="item-signal__bar item-signal__bar--2"></view>
@@ -162,22 +165,14 @@ const defaultMarginTop = (() => {
 
 const visibleDevices = computed(() => {
 	const list = Array.from(rows.value.values())
-	// 过滤：不展示已经添加到“我的设备”的设备（按 ble_mac 匹配）
-	const boundSet = boundDevicesStore.boundBleMacSet
-	const filtered = list.filter((x) => {
-		if (!x.advMac) return true
-		const mac = normalizeMac(x.advMac)
-		if (!mac) return true
-		return !boundSet.has(mac)
-	})
-	filtered.sort((a, b) => {
+	list.sort((a, b) => {
 		if (!targetMac.value) return (b.RSSI ?? -999) - (a.RSSI ?? -999)
 		const am = a.advMac === targetMac.value ? 0 : 1
 		const bm = b.advMac === targetMac.value ? 0 : 1
 		if (am !== bm) return am - bm
 		return (b.RSSI ?? -999) - (a.RSSI ?? -999)
 	})
-	return filtered
+	return list
 })
 
 const hasResolvedAdvMacRows = computed(() =>
@@ -194,6 +189,11 @@ const signalLevel = (rssi: number | null) => {
 }
 
 const hasAdvMac = (advMac: string | null) => Boolean(String(advMac || '').trim())
+
+function isDeviceAlreadyAdded(device: DeviceRow): boolean {
+	const mac = normalizeMac(String(device?.advMac || ''))
+	return !!mac && boundDevicesStore.boundBleMacSet.has(mac)
+}
 
 function clearList() {
 	rows.value = new Map()
@@ -476,10 +476,6 @@ function upsertDevice(d: FoundDevice) {
 	}
 
 	const advMac = resolveAdvMacFromFoundDevice(d)
-	if (advMac && boundDevicesStore.hasBleMac(advMac)) {
-		rows.value.delete(d.deviceId)
-		return
-	}
 	const existing = rows.value.get(d.deviceId)
 	const deviceType = advMac ? resolveDeviceTypeByMac(advMac) : existing?.deviceType ?? null
 	const displayName = String(d.name || d.localName || t('pages.deviceProvision.unknownDevice'))
@@ -970,11 +966,31 @@ onUnload(() => {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
+	gap: 16rpx;
+}
+
+.item-title {
+	display: flex;
+	align-items: center;
+	gap: 12rpx;
+	min-width: 0;
 }
 
 .item-name {
 	font-size: 30rpx;
 	color: #111111;
+	flex: 1;
+	min-width: 0;
+}
+
+.item-badge {
+	flex-shrink: 0;
+	padding: 4rpx 12rpx;
+	border-radius: 999rpx;
+	background: rgba(36, 111, 221, 0.1);
+	color: #246fdd;
+	font-size: 20rpx;
+	line-height: 1.4;
 }
 
 .item-signal {

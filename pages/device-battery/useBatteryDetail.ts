@@ -55,7 +55,7 @@ const REPORT_QUEUE_MAX = 100
 const REPORT_RETRY_DELAYS_MS = [3_000, 10_000, 30_000]
 const RELAY_HEARTBEAT_MS = 15_000
 const RELAY_RECONNECT_DELAY_MS = 3_000
-const POLL_INTERVAL_MS = 5_000
+const POLL_INTERVAL_MS = 2_000
 const INSTRUMENT_WARMUP_POLL_INTERVAL_MS = 1_200
 
 const log = (event: string, data?: Record<string, unknown>) => {
