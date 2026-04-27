@@ -112,8 +112,8 @@ function encodeStringToRegisterWrites(startAddress: number, byteLength: number, 
 }
 
 const STATUS_REG_START = 0x100;
-const STATUS_FIXED_READ_END = 0x135;
-const STATUS_LEGACY_GAP_START = 0x136;
+const STATUS_FIXED_READ_END = 0x134;
+const STATUS_LEGACY_GAP_START = 0x135;
 const STATUS_LEGACY_GAP_END = 0x140;
 const STATUS_DYNAMIC_START = 0x141;
 
@@ -130,7 +130,7 @@ function buildStatusRegisterView({
 	const legacyGapRegs = STATUS_LEGACY_GAP_END - STATUS_LEGACY_GAP_START + 1;
 	const out = new Uint16Array(totalRegs);
 	out.set(headRegisters, 0);
-	// Leave the legacy gap (0x136~0x140) zero-filled for old boards that do not implement it.
+	// Leave the legacy gap (0x135~0x140) zero-filled for old boards that do not implement it.
 	out.set(tailRegisters, headRegisters.length + legacyGapRegs);
 	return out;
 }
