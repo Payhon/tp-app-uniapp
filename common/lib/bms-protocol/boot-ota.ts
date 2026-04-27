@@ -67,8 +67,31 @@ function bytesToHex(bytes: Uint8Array, maxLen = 64): string {
 	return out.toUpperCase()
 }
 
+function bytesToAscii(bytes: Uint8Array, maxLen = 64): string {
+	const len = Math.min(bytes.length, maxLen)
+	let out = ''
+	for (let i = 0; i < len; i += 1) {
+		const ch = bytes[i] & 0xff
+		if (ch === 0x00) break
+		out += ch >= 0x20 && ch <= 0x7e ? String.fromCharCode(ch) : '.'
+	}
+	if (bytes.length > maxLen) out += '...'
+	return out
+}
+
 function cmdHex(cmd: number): string {
 	return `0x${(cmd & 0xff).toString(16).padStart(2, '0')}`
+}
+
+function formatErr(err: unknown): string {
+	if (!err) return ''
+	if (err instanceof Error) return err.message || String(err)
+	if (typeof err === 'string') return err
+	try {
+		return JSON.stringify(err)
+	} catch (e) {
+		return String(err)
+	}
 }
 
 async function bootRequest(
@@ -125,6 +148,12 @@ export async function bootOtaUpgrade({
 	onProgress,
 	logger,
 	maxPacketSize,
+	skipEnterBoot,
+	prepareBaudRate,
+	packetDelayMs,
+	pageBoundaryDelayMs,
+	finalizeTimeoutMs,
+	finalizeAssumeSuccessOnTimeout,
 }: {
 	transport: BmsRequestTransport
 	firmware: Uint8Array
@@ -136,6 +165,12 @@ export async function bootOtaUpgrade({
 	onProgress?: (p: BootOtaProgress) => void
 	logger?: LoggerLike
 	maxPacketSize?: number
+	skipEnterBoot?: boolean
+	prepareBaudRate?: number
+	packetDelayMs?: number
+	pageBoundaryDelayMs?: number
+	finalizeTimeoutMs?: number
+	finalizeAssumeSuccessOnTimeout?: boolean
 }): Promise<BootOtaResult> {
 	if (!firmware || firmware.length === 0) throw new Error('Firmware data is empty')
 	const totalSize = firmware.length
@@ -155,14 +190,16 @@ export async function bootOtaUpgrade({
 		logger?.warn && logger.warn('[boot] query version failed, continue', e)
 	}
 
-	onProgress?.({ stage: 'enter', message: 'enter' })
-	await bootRequest(transport, buildBootFrame({ sourceAddress, targetAddress, command: 0x51 }), { logger })
-	// Doc suggests waiting 200ms after entering bootloader.
-	await sleep(200)
+	if (!skipEnterBoot) {
+		onProgress?.({ stage: 'enter', message: 'enter' })
+		await bootRequest(transport, buildBootFrame({ sourceAddress, targetAddress, command: 0x51 }), { logger })
+		// Doc suggests waiting 200ms after entering bootloader.
+		await sleep(200)
+	}
 
 	onProgress?.({ stage: 'prepare', message: 'prepare' })
 	const sizePayload = u32ToBytesBE(totalSize >>> 0)
-	const baudPayload = u32ToBytesBE(9600)
+	const baudPayload = u32ToBytesBE((prepareBaudRate ?? 9600) >>> 0)
 	const preparePayload = new Uint8Array(8)
 	preparePayload.set(sizePayload, 0)
 	preparePayload.set(baudPayload, 4)
@@ -210,6 +247,14 @@ export async function bootOtaUpgrade({
 			const payload = new Uint8Array(2 + chunk.length)
 			payload.set(u16ToBytesBE(packetIndex), 0)
 			payload.set(chunk, 2)
+			if (packetIndex === 0) {
+				logger?.info &&
+					logger.info('[boot] first packet preview', {
+						ascii: bytesToAscii(chunk),
+						hex: bytesToHex(chunk),
+						size: chunk.length,
+					})
+			}
 
 			onProgress?.({
 				stage: 'transfer',
@@ -217,6 +262,10 @@ export async function bootOtaUpgrade({
 				packetTotal,
 				percent: Math.min(99, Math.floor((packetIndex / packetTotal) * 100)),
 			})
+			if (pageBoundaryDelayMs && pageBoundaryDelayMs > 0 && packetIndex > 0 && start > 0 && start % 4096 === 0) {
+				logger?.info && logger.info('[boot] page boundary delay', { packetIndex, offset: start, delayMs: pageBoundaryDelayMs })
+				await sleep(pageBoundaryDelayMs)
+			}
 
 			let resp: ReturnType<typeof parseBootFrame> | null = null
 			let packetRetry = 0
@@ -230,7 +279,13 @@ export async function bootOtaUpgrade({
 					break
 				} catch (e) {
 					packetRetry += 1
-					logger?.warn && logger.warn('[boot] packet timeout, retry', { packetIndex, packetRetry, maxPacketRetry })
+					logger?.warn &&
+						logger.warn('[boot] packet timeout, retry', {
+							packetIndex,
+							packetRetry,
+							maxPacketRetry,
+							err: formatErr(e),
+						})
 					if (packetRetry >= maxPacketRetry) {
 						if (fallbackWriteTarget != null && activeWriteTarget !== fallbackWriteTarget) {
 							activeWriteTarget = fallbackWriteTarget
@@ -263,6 +318,7 @@ export async function bootOtaUpgrade({
 				}
 				packetIndex += 1
 				retry = 0
+				if (packetDelayMs && packetDelayMs > 0) await sleep(packetDelayMs)
 				continue
 			}
 
@@ -272,7 +328,7 @@ export async function bootOtaUpgrade({
 				// Re-send prepare then retry requested packet index
 				await bootRequest(
 					transport,
-					buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: sizePayload }),
+					buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: preparePayload }),
 					{ logger }
 				)
 				packetIndex = Math.min(requested, packetTotal - 1)
@@ -282,6 +338,9 @@ export async function bootOtaUpgrade({
 				retry += 1
 				packetIndex = requested
 				continue
+			}
+			if (status === 5) {
+				throw new Error('boot_firmware_size_mismatch')
 			}
 			throw new Error(`Boot packet failed: status=${status}`)
 		}
@@ -304,17 +363,42 @@ export async function bootOtaUpgrade({
 				if (typeof (transport as any)?.requestWithResponse === 'function') {
 					logger?.debug &&
 						logger.debug('[boot] tx', { cmd: cmdHex(0x54), len: finishFrame.length, hex: bytesToHex(finishFrame) })
-					const respBytes = await (transport as any).requestWithResponse(finishFrame)
+					const respBytes = await (transport as any).requestWithResponse(finishFrame, {
+						timeoutMs: finalizeTimeoutMs,
+						suppressTimeoutLog: finalizeAssumeSuccessOnTimeout && lastRequested >= packetTotal,
+					})
 					logger?.debug && logger.debug('[boot] rx', { len: respBytes.length, hex: bytesToHex(respBytes) })
 					finishResp = parseBootFrame(respBytes)
 				} else {
-					finishResp = await bootRequest(transport, finishFrame, { logger })
+					try {
+						logger?.debug &&
+							logger.debug('[boot] tx', { cmd: cmdHex(0x54), len: finishFrame.length, hex: bytesToHex(finishFrame) })
+					} catch (e) {}
+					const respBytes = await transport.request(finishFrame, {
+						timeoutMs: finalizeTimeoutMs,
+						suppressTimeoutLog: finalizeAssumeSuccessOnTimeout && lastRequested >= packetTotal,
+					})
+					try {
+						logger?.debug && logger.debug('[boot] rx', { len: respBytes.length, hex: bytesToHex(respBytes) })
+					} catch (e) {}
+					finishResp = parseBootFrame(respBytes)
 				}
 			} catch (e: any) {
 				const code = e?.code
 				const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
-				if ((code === 10004 || msg.includes('no connection')) && lastRequested >= packetTotal) {
-					logger?.warn && logger.warn('[boot] finalize assume success after disconnect', { finalizeAttempt })
+				if (finalizeAssumeSuccessOnTimeout && msg.includes('ble request timeout') && lastRequested >= packetTotal) {
+					logger?.info && logger.info('[boot] finalize assume success after timeout', { finalizeAttempt })
+					finalizeOk = true
+					break
+				}
+				const isFinalizeDisconnect =
+					code === 10004 ||
+					msg.includes('no connection') ||
+					msg.includes('no device') ||
+					msg.includes('not connected') ||
+					msg.includes('device not found')
+				if (isFinalizeDisconnect && lastRequested >= packetTotal) {
+					logger?.info && logger.info('[boot] finalize assume success after disconnect', { finalizeAttempt })
 					finalizeOk = true
 					break
 				}

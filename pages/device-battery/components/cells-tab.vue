@@ -16,6 +16,11 @@
 				<text class="cell__v">{{ v }}</text>
 			</view>
 		</view>
+
+		<view v-if="cellVoltages.length === 0" class="empty">
+			<text class="empty__title">{{ $t('deviceDetail.cells.noCellData') }}</text>
+			<text class="empty__desc">{{ $t('deviceDetail.cells.noCellDataDesc') }}</text>
+		</view>
 	</view>
 </template>
 
@@ -92,6 +97,31 @@ const cellVoltages = computed(() => {
 	display: grid;
 	grid-template-columns: 1fr 1fr 1fr 1fr;
 	gap: 18rpx;
+}
+
+.empty {
+	margin-top: 24rpx;
+	padding: 48rpx 28rpx;
+	border-radius: 22rpx;
+	background: #ffffff;
+	box-shadow: 0 8rpx 30rpx rgba(0, 0, 0, 0.06);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 12rpx;
+	text-align: center;
+}
+
+.empty__title {
+	font-size: 28rpx;
+	font-weight: 600;
+	color: #303133;
+}
+
+.empty__desc {
+	font-size: 24rpx;
+	line-height: 1.6;
+	color: #909399;
 }
 
 .cell {

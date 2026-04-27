@@ -164,7 +164,7 @@ import ParamsTab from './components/params-tab.vue'
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { consumeDeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
-import { DEVICE_TYPE_BMS } from '@/common/device-provision/device-prefix-shared'
+import { DEVICE_TYPE_BMS, isMeterMac } from '@/common/device-provision/device-prefix-shared'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { getWindowInfo } from '@/common/platform'
 import { useBatteryDetail } from './useBatteryDetail'
@@ -218,6 +218,10 @@ const titleText = computed(() => {
 })
 
 const allowOta = computed(() => connType.value === 'bluetooth' || sessionMode.value === 'cloud')
+const currentBleMac = computed(() =>
+	String(battery.value?.ble_mac || status.value?.identity?.bluetoothMac || '').trim()
+)
+const isMeterDevice = computed(() => isMeterMac(currentBleMac.value))
 const showMeterScanHandoff = computed(() => sessionMode.value === 'instrument' && allowScanHandoff.value)
 const showMeterPanelReady = computed(() => showMeterScanHandoff.value && connType.value === 'bluetooth' && !connecting.value)
 const showMeterFloatingPanel = computed(() => showMeterPanelReady.value && meterPanelVisible.value && activeTab.value === 0)
@@ -232,7 +236,7 @@ const otaCheckState = reactive<DeviceOtaCheckState>({
 	errorMessage: '',
 })
 const otaAutoCheckedKeys = new Set<string>()
-const showOtaBadge = computed(() => allowOta.value && otaCheckState.needUpgrade)
+const showOtaBadge = computed(() => allowOta.value && !isMeterDevice.value && otaCheckState.needUpgrade)
 
 const patchOtaCheckState = (patch: Partial<DeviceOtaCheckState>) => {
 	Object.assign(otaCheckState, patch)
@@ -254,6 +258,7 @@ const applyOtaCheckResult = (payload: AppBatteryOtaCheck | null, version: string
 const maybeCheckOtaOnDashboard = async () => {
 	if (activeTab.value !== 0) return
 	if (!allowOta.value) return
+	if (isMeterDevice.value) return
 	const deviceId = String(battery.value?.device_id || '').trim()
 	const modelName = String(status.value?.identity?.hardwareModel || battery.value?.battery_model_name || '').trim()
 	const versionText = String(status.value?.meta?.softwareVersion || battery.value?.fw_version || '').trim()
@@ -357,6 +362,7 @@ const reconnectInstrumentSession = async (options: { meterBleMac: string; meterN
 	setTimeout(() => {
 		loadInstrumentSession({
 			bleMac: meterBleMac,
+			deviceId: '',
 			deviceName: meterName || (t('deviceDetail.meter.deviceName') as string),
 		})
 	}, 450)
@@ -494,8 +500,10 @@ onLoad((query) => {
 		allowScanHandoff.value = String(rawQuery.allow_scan_handoff || '1') !== '0'
 		meterPanelVisible.value = true
 		const deviceName = safeDecodeURIComponent(String(rawQuery.device_name || ''))
+		const bleDeviceId = safeDecodeURIComponent(String(rawQuery.ble_device_id || rawQuery.deviceId || ''))
 		loadInstrumentSession({
 			bleMac,
+			deviceId: bleDeviceId,
 			deviceName: deviceName || (t('deviceDetail.meter.deviceName') as string),
 		})
 		return

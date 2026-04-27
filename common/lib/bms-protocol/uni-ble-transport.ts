@@ -25,12 +25,22 @@ type UniBleCharacteristic = {
 }
 
 type ReqExpect = { functionCode: number; targetAddress: number; sourceAddress: number }
+
+function isExpectedBootSourceAddress(expectedSourceAddress: number, parsedSourceAddress: number): boolean {
+	const expect = expectedSourceAddress & 0xff
+	const actual = parsedSourceAddress & 0xff
+	if (expect === 0x00) return true
+	if (actual === expect) return true
+	// 仪表 OTA 通过 0xFC 透传，但 Boot 回包仍可能来自 BMS Bootloader 地址 0x01。
+	return expect === 0xfc && actual === 0x01
+}
 type PendingReq = {
 	resolve: (frameBytes: Uint8Array) => void
 	reject: (err: unknown) => void
 	expect: ReqExpect
 	expectBoot?: boolean
 	timer: ReturnType<typeof setTimeout>
+	createdAt: number
 }
 
 function toArrayBuffer(u8: ArrayBuffer | Uint8Array | ArrayLike<number>): ArrayBuffer {
@@ -343,6 +353,40 @@ function uniAsyncSoftTimeout<T = unknown>(
 	});
 }
 
+function uniAsyncHardTimeout<T = unknown>(
+	apiName: string,
+	args: Record<string, unknown>,
+	{ timeoutMs = 6000 }: { timeoutMs?: number } = {}
+): Promise<T> {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const finishResolve = (value: T) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(value);
+		};
+		const finishReject = (err: unknown) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			reject(err);
+		};
+		const timer = setTimeout(() => {
+			finishReject(new BmsProtocolError(`${apiName} timeout after ${timeoutMs}ms`));
+		}, timeoutMs);
+		try {
+			(uni as Record<string, any>)[apiName]({
+				...args,
+				success: (res: T) => finishResolve(res),
+				fail: finishReject,
+			});
+		} catch (e) {
+			finishReject(e);
+		}
+	});
+}
+
 /**
  * 基于 uniapp 蓝牙 API 的 BMS 传输层（Transport）
  *
@@ -523,7 +567,16 @@ export class UniBleBmsTransport {
 		if (this.logger?.info) {
 			this.logger.info('[ble] connect()', { deviceId, serviceUUID: this.serviceUUID, writeCharUUID: this.writeCharUUID, notifyCharUUID: this.notifyCharUUID, platform });
 		}
-		await uniAsync('createBLEConnection', { deviceId });
+		try {
+			await uniAsyncHardTimeout('createBLEConnection', { deviceId }, { timeoutMs: isIOS ? 9000 : 6500 });
+		} catch (e) {
+			this.deviceId = null;
+			this._connected = false;
+			try {
+				await uniAsyncBestEffort('closeBLEConnection', { deviceId }, 800);
+			} catch (e2) {}
+			throw e;
+		}
 		this._connected = true;
 
 		if (isIOS) {
@@ -751,9 +804,7 @@ export class UniBleBmsTransport {
 						// Allow boot finalize (0x54) to accept data ACK (0x53)
 						if ((expect.functionCode & 0xff) !== 0x54 || (parsed.command & 0xff) !== 0x53) return false;
 					}
-					// 广播地址 0x00：允许任意从机地址回复
-					if ((expect.sourceAddress & 0xff) === 0x00) return true;
-					return parsed.sourceAddress === expect.sourceAddress;
+					return isExpectedBootSourceAddress(expect.sourceAddress, parsed.sourceAddress);
 				}
 				const parsed = parseFrame(frameBytes);
 				if (parsed.type === 'error') {
@@ -858,21 +909,21 @@ export class UniBleBmsTransport {
 	 */
 		request(
 			frameBytes: Uint8Array | ArrayLike<number>,
-			{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
+			{ timeoutMs = this.requestTimeoutMs, suppressTimeoutLog = false }: { timeoutMs?: number; suppressTimeoutLog?: boolean } = {}
 		): Promise<Uint8Array> {
 			this._queue = this._queue
 				.catch(() => new Uint8Array(0))
-				.then(() => this._requestWithFallback(frameBytes, { timeoutMs, writeWithResponse: false }));
+				.then(() => this._requestWithFallback(frameBytes, { timeoutMs, writeWithResponse: false, suppressTimeoutLog }));
 			return this._queue;
 		}
 
 		requestWithResponse(
 			frameBytes: Uint8Array | ArrayLike<number>,
-			{ timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}
+			{ timeoutMs = this.requestTimeoutMs, suppressTimeoutLog = false }: { timeoutMs?: number; suppressTimeoutLog?: boolean } = {}
 		): Promise<Uint8Array> {
 			this._queue = this._queue
 				.catch(() => new Uint8Array(0))
-				.then(() => this._requestWithFallback(frameBytes, { timeoutMs, writeWithResponse: true }));
+				.then(() => this._requestWithFallback(frameBytes, { timeoutMs, writeWithResponse: true, suppressTimeoutLog }));
 			return this._queue;
 		}
 
@@ -898,15 +949,20 @@ export class UniBleBmsTransport {
 
 		async _requestWithFallback(
 			frameBytes: Uint8Array | ArrayLike<number>,
-			{ timeoutMs, writeWithResponse }: { timeoutMs: number; writeWithResponse?: boolean }
+			{
+				timeoutMs,
+				writeWithResponse,
+				suppressTimeoutLog,
+			}: { timeoutMs: number; writeWithResponse?: boolean; suppressTimeoutLog?: boolean }
 		): Promise<Uint8Array> {
 			try {
-				return await this._requestSerial(frameBytes, { timeoutMs, writeWithResponse });
+				return await this._requestSerial(frameBytes, { timeoutMs, writeWithResponse, suppressTimeoutLog });
 			} catch (e) {
 				const msg = String((e as any)?.message || (e as any)?.errMsg || e || '');
 				const canRetryWithAlternateWriteMode =
 					this._platform === 'ios' &&
 					!writeWithResponse &&
+					!suppressTimeoutLog &&
 					msg.includes('BLE request timeout') &&
 					this._writeSupportsResponse &&
 					this._writeSupportsNoResponse;
@@ -924,6 +980,7 @@ export class UniBleBmsTransport {
 					return await this._requestSerial(frameBytes, {
 						timeoutMs,
 						writeWithResponse: false,
+						suppressTimeoutLog,
 					});
 				} finally {
 					this._preferWriteWithResponse = prev;
@@ -933,9 +990,27 @@ export class UniBleBmsTransport {
 
 		async _requestSerial(
 			frameBytes: Uint8Array | ArrayLike<number>,
-			{ timeoutMs, writeWithResponse }: { timeoutMs: number; writeWithResponse?: boolean }
+			{ timeoutMs, writeWithResponse, suppressTimeoutLog }: { timeoutMs: number; writeWithResponse?: boolean; suppressTimeoutLog?: boolean }
 		): Promise<Uint8Array> {
-		if (this._pending) throw new BmsProtocolError('Previous request still pending');
+		if (this._pending) {
+			const ageMs = Date.now() - (this._pending.createdAt || 0);
+			if (ageMs > timeoutMs + 500) {
+				try {
+					clearTimeout(this._pending.timer);
+				} catch (e) {}
+				if (this.logger?.warn) {
+					this.logger.warn('[ble] clear stale pending request before retry', {
+						ageMs,
+						expect: this._pending.expect,
+						expectBoot: !!this._pending.expectBoot,
+					});
+				}
+				this._pending = null;
+				this._collector.reset();
+			} else {
+				throw new BmsProtocolError('Previous request still pending');
+			}
+		}
 
 		const req = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
 		const expectBoot = req[0] === 0x55 && req[1] !== 0x7f;
@@ -966,14 +1041,14 @@ export class UniBleBmsTransport {
 		const timer = setTimeout(() => {
 			if (this._pending && this._pending.reject === deferred.reject) this._pending = null;
 			try {
-				if (this.logger?.warn) {
+				if (!suppressTimeoutLog && this.logger?.warn) {
 					this.logger.warn('[ble] request timeout snapshot', { expect, ...this._collector.snapshotHex() });
 				}
 			} catch (e) {}
 			this._collector.reset();
 			deferred.reject(new BmsProtocolError(`BLE request timeout after ${timeoutMs}ms`, { expect }));
 		}, timeoutMs);
-		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot };
+		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot, createdAt: Date.now() };
 		const respPromise = deferred.promise;
 
 		try {

@@ -36,7 +36,10 @@ const cache = new Map<string, BleClientEntry>()
 const inFlight = new Map<string, Promise<BleClientEntry | null>>()
 
 const IDLE_DISCONNECT_MS = 30_000
+const CONNECT_LOCK_WAIT_TIMEOUT_MS = 8_000
+const CANCELLED_CONNECT_LOCK_WAIT_TIMEOUT_MS = 1_200
 let connectEpoch = 0
+let cancelledConnectFastWaitUntil = 0
 
 const log = (event: string, data?: Record<string, unknown>) => {
 	try {
@@ -57,6 +60,25 @@ const extractMacHex = (s: unknown) => {
 	const m = raw.match(/[0-9A-F]{12}/g)
 	if (m && m.length) return m[m.length - 1]
 	return ''
+}
+
+const isDeviceIdCompatibleWithTarget = (deviceId: unknown, targetMac: string): boolean => {
+	const raw = String(deviceId || '').trim().toUpperCase()
+	if (/^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(raw)) return true
+	const explicitMac = raw.match(/(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}/)
+	if (explicitMac) return normalizeMac(explicitMac[0]) === targetMac
+	const idHex = extractMacHex(raw)
+	return !idHex || idHex === targetMac
+}
+
+const pushCompatibleCandidate = (out: string[], value: unknown, targetMac: string) => {
+	const next = String(value || '').trim()
+	if (!next || out.includes(next)) return
+	if (!isDeviceIdCompatibleWithTarget(next, targetMac)) {
+		log('ignore incompatible deviceId candidate', { deviceId: next, mac: targetMac })
+		return
+	}
+	out.push(next)
 }
 
 const bytesToHex = (bytes: Uint8Array, maxBytes?: number) => {
@@ -260,6 +282,22 @@ const createBleClientEntry = ({
 	}
 }
 
+const waitConnectTaskSettled = async (task: Promise<unknown>, timeoutMs: number): Promise<boolean> => {
+	let settled = false
+	await Promise.race([
+		task.then(
+			() => {
+				settled = true
+			},
+			() => {
+				settled = true
+			}
+		),
+		new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+	])
+	return settled
+}
+
 let connectLock = Promise.resolve()
 const runSerial = async <T>(fn: () => Promise<T>): Promise<T> => {
 	const prev = connectLock
@@ -267,7 +305,12 @@ const runSerial = async <T>(fn: () => Promise<T>): Promise<T> => {
 	connectLock = new Promise<void>((resolve) => {
 		release = resolve
 	})
-	await prev
+	const waitTimeoutMs =
+		Date.now() < cancelledConnectFastWaitUntil ? CANCELLED_CONNECT_LOCK_WAIT_TIMEOUT_MS : CONNECT_LOCK_WAIT_TIMEOUT_MS
+	const prevSettled = await waitConnectTaskSettled(prev, waitTimeoutMs)
+	if (!prevSettled) {
+		log('connect lock wait timeout, continue next task', { timeoutMs: waitTimeoutMs })
+	}
 	try {
 		return await fn()
 	} finally {
@@ -289,13 +332,10 @@ const assertConnectActive = (epoch: number, mac: string) => {
 	}
 }
 
-const buildIosDirectCandidates = (mac: string) => {
+const buildIosDirectCandidates = (mac: string, preferredDeviceId?: string) => {
 	const out: string[] = []
-	const push = (value: unknown) => {
-		const next = String(value || '').trim()
-		if (!next || out.includes(next)) return
-		out.push(next)
-	}
+	const push = (value: unknown) => pushCompatibleCandidate(out, value, mac)
+	push(preferredDeviceId)
 	const cached = cache.get(mac)
 	if (cached?.deviceId) push(cached.deviceId)
 	push(getRememberedBleDeviceId(mac, 'ios'))
@@ -362,6 +402,7 @@ const discoverBleCandidate = async ({
 
 export const invalidateBleConnectAttempts = (reason = 'manual') => {
 	connectEpoch += 1
+	cancelledConnectFastWaitUntil = Date.now() + 3_000
 	log('invalidate connect attempts', { reason, epoch: connectEpoch })
 }
 
@@ -457,6 +498,7 @@ type ConnectBleOptions = {
 	maxReadRegisters?: number
 	force?: boolean
 	probe?: boolean
+	preferredDeviceId?: string
 }
 
 const closeEntry = async (entry: BleClientEntry) => {
@@ -514,6 +556,7 @@ export const connectBleClient = async ({
 	maxReadRegisters,
 	force = false,
 	probe = false,
+	preferredDeviceId,
 }: ConnectBleOptions): Promise<BleClientEntry | null> => {
 	const key = normalizeBleMac(mac)
 	if (!key) return null
@@ -552,9 +595,11 @@ export const connectBleClient = async ({
 	if (existing) {
 		if (!force) return existing
 		log('force connect waits existing pending task', { mac: key })
-		try {
-			await existing
-		} catch (e) {}
+		const settled = await waitConnectTaskSettled(existing, CONNECT_LOCK_WAIT_TIMEOUT_MS)
+		if (!settled) {
+			log('force connect pending task timeout, replace it', { mac: key, timeoutMs: CONNECT_LOCK_WAIT_TIMEOUT_MS })
+			if (inFlight.get(key) === existing) inFlight.delete(key)
+		}
 	}
 
 	const task = runSerial(async () => {
@@ -568,12 +613,12 @@ export const connectBleClient = async ({
 			const isIOS = platform === 'ios'
 
 			if (isAndroid) {
-				const directCandidates = [
-					mac12ToColon(key),
-					mac12ToColon(key).toLowerCase(),
-					key,
-					key.toLowerCase(),
-				].filter(Boolean)
+				const directCandidates: string[] = []
+				pushCompatibleCandidate(directCandidates, preferredDeviceId, key)
+				pushCompatibleCandidate(directCandidates, mac12ToColon(key), key)
+				pushCompatibleCandidate(directCandidates, mac12ToColon(key).toLowerCase(), key)
+				pushCompatibleCandidate(directCandidates, key, key)
+				pushCompatibleCandidate(directCandidates, key.toLowerCase(), key)
 				for (const cand of directCandidates) {
 					try {
 						return await connectDirectCandidate({
@@ -596,7 +641,7 @@ export const connectBleClient = async ({
 			}
 
 			if (isIOS) {
-				for (const cand of buildIosDirectCandidates(key)) {
+				for (const cand of buildIosDirectCandidates(key, preferredDeviceId)) {
 					try {
 						return await connectDirectCandidate({
 							label: 'ios direct connect',

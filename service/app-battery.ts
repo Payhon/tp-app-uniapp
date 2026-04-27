@@ -34,6 +34,20 @@ export type AppBatteryMqttCredential = {
 	[key: string]: unknown
 }
 
+export type AppBatteryCurrentTelemetryValue = {
+	value: unknown
+	ts: number
+}
+
+export type AppBatteryCurrentTelemetry = {
+	device_id: string
+	is_online: number
+	last_report_ts?: number
+	current?: Record<string, AppBatteryCurrentTelemetryValue>
+	snapshot?: Record<string, unknown> | null
+	[key: string]: unknown
+}
+
 export type AppBatteryOtaCheck = {
 	device_id: string
 	need_upgrade: boolean
@@ -54,6 +68,14 @@ export type AppBatteryOtaCheckReq = {
 	device_id?: string
 	model?: string | null
 	version?: string | null
+	[key: string]: unknown
+}
+
+export type AppBatteryMeterOtaPackage = {
+	id: string
+	name: string
+	description?: string | null
+	package_url?: string | null
 	[key: string]: unknown
 }
 
@@ -100,8 +122,16 @@ export const appBatteryMqttCredential = (deviceId: string) => {
 	return apiRequest<AppBatteryMqttCredential>(`/api/v1/app/battery/mqtt-credential/${deviceId}`, null, 'GET')
 }
 
+export const appBatteryCurrentTelemetry = (deviceId: string) => {
+	return apiRequest<AppBatteryCurrentTelemetry>(`/api/v1/app/battery/current-telemetry/${deviceId}`, null, 'GET')
+}
+
 export const appBatteryOtaCheck = (payload: AppBatteryOtaCheckReq) => {
 	return apiRequest<AppBatteryOtaCheck>(`/api/v1/app/battery/ota/check`, payload, 'POST')
+}
+
+export const getAppBatteryMeterOtaPackages = () => {
+	return apiRequest<AppBatteryMeterOtaPackage[]>(`/api/v1/app/battery/ota/meter-packages`, null, 'GET')
 }
 
 export const appBatteryReport = (payload: AppBatteryReportReq) => {

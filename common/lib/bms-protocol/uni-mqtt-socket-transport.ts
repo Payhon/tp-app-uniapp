@@ -14,6 +14,14 @@ type ReqExpect = {
 	sourceAddress: number
 }
 
+function isExpectedBootSourceAddress(expectedSourceAddress: number, parsedSourceAddress: number): boolean {
+	const expect = expectedSourceAddress & 0xff
+	const actual = parsedSourceAddress & 0xff
+	if (expect === 0x00) return true
+	if (actual === expect) return true
+	return expect === 0xfc && actual === 0x01
+}
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms))
 }
@@ -356,8 +364,7 @@ export class UniMqttSocketBmsTransport {
 				const parsed = parseBootFrame(frameBytes)
 				if (parsed.targetAddress !== expect.targetAddress) return false
 				if (parsed.command !== expect.functionCode) return false
-				if ((expect.sourceAddress & 0xff) === 0x00) return true
-				return parsed.sourceAddress === expect.sourceAddress
+				return isExpectedBootSourceAddress(expect.sourceAddress, parsed.sourceAddress)
 			}
 			const parsed = parseFrame(frameBytes)
 			if (parsed.type === 'error') {

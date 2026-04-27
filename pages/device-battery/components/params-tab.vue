@@ -103,6 +103,54 @@
 					<u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
 				</view>
 			</view>
+
+			<view v-if="showMeterUpgradeCard" class="divider"></view>
+
+			<view v-if="showMeterUpgradeCard" class="meter-upgrade">
+				<view class="meter-upgrade__head">
+					<view class="action__left">
+						<image class="action__icon" src="/static/image/device/icon-ota@2x.png" mode="aspectFit" />
+						<text class="action__title">{{ $t('deviceDetail.params.meterUpgradeTitle') }}</text>
+					</view>
+				</view>
+				<view class="meter-upgrade__selector" hover-class="item--hover" @tap="openMeterPackagePopup">
+					<view class="meter-upgrade__selector-main">
+						<text class="meter-upgrade__selector-label">{{ $t('deviceDetail.params.meterUpgradePackage') }}</text>
+						<text class="meter-upgrade__selector-value">{{ meterPackageSummary }}</text>
+					</view>
+					<u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
+				</view>
+				<text class="meter-upgrade__desc">{{ meterPackageDescription }}</text>
+				<u-button type="primary" :customStyle="meterUpgradeButtonStyle" @click="startMeterOta">
+					{{ $t('deviceDetail.params.meterUpgradeStart') }}
+				</u-button>
+			</view>
+
+			<view v-if="showMeterOtaDebugLog" class="divider"></view>
+
+			<view v-if="showMeterOtaDebugLog" class="meter-debug">
+				<view class="meter-debug__head" @tap="toggleMeterOtaDebug">
+					<view class="meter-debug__title-wrap">
+						<text class="meter-debug__title">{{ $t('deviceDetail.params.meterOtaDebugTitle') }}</text>
+						<text class="meter-debug__count">{{ meterOtaDebugCountText }}</text>
+					</view>
+					<u-icon :name="meterOtaDebugExpanded ? 'arrow-up' : 'arrow-down'" size="16" color="#8E95A2"></u-icon>
+				</view>
+				<view class="meter-debug__actions">
+					<view class="meter-debug__btn" hover-class="meter-debug__btn--hover" @tap="copyMeterOtaDebugLog">
+						{{ $t('deviceDetail.params.meterOtaDebugCopy') }}
+					</view>
+					<view class="meter-debug__btn meter-debug__btn--ghost" hover-class="meter-debug__btn--hover" @tap="clearMeterOtaDebugLog">
+						{{ $t('deviceDetail.params.meterOtaDebugClear') }}
+					</view>
+				</view>
+				<scroll-view v-if="meterOtaDebugExpanded" class="meter-debug__body" scroll-y>
+					<view v-if="!meterOtaDebugLines.length" class="meter-debug__empty">
+						{{ $t('deviceDetail.params.meterOtaDebugEmpty') }}
+					</view>
+					<text v-for="line in meterOtaDebugLines" :key="line.id" class="meter-debug__line">{{ line.text }}</text>
+				</scroll-view>
+			</view>
 		</view>
 
 		<u-popup :show="editPopup.show" mode="center" @close="closeEditPopup">
@@ -143,6 +191,43 @@
 					<u-line-progress :percentage="otaState.progress" activeColor="#0B3BFF"></u-line-progress>
 				</view>
 				<text class="ota__text">{{ otaMessageText }}</text>
+			</view>
+		</u-popup>
+
+		<u-popup :show="meterPackagePopup.show" mode="bottom" @close="closeMeterPackagePopup">
+			<view class="meter-package-popup" :style="{ paddingBottom: safeBottom + 'px' }">
+				<view class="meter-package-popup__header">
+					<text class="meter-package-popup__title">{{ $t('deviceDetail.params.meterUpgradeSelectTitle') }}</text>
+					<view class="advanced__close" hover-class="advanced__close--hover" @tap="closeMeterPackagePopup">
+						<u-icon name="close" size="18" color="#8E95A2"></u-icon>
+					</view>
+				</view>
+				<scroll-view class="meter-package-popup__body" scroll-y :style="{ height: meterPackageBodyHeightPx + 'px' }">
+					<view v-if="meterPackageLoading" class="meter-package-popup__empty">
+						{{ $t('deviceDetail.params.meterUpgradeLoading') }}
+					</view>
+					<view v-else-if="!meterPackageList.length" class="meter-package-popup__empty">
+						{{ $t('deviceDetail.params.meterUpgradeEmpty') }}
+					</view>
+					<view
+						v-for="pkg in meterPackageList"
+						:key="pkg.id"
+						class="meter-package-item"
+						:class="{ 'meter-package-item--selected': selectedMeterPackageId === pkg.id }"
+						hover-class="item--hover"
+						@tap="selectMeterPackage(pkg)"
+					>
+						<view class="meter-package-item__main">
+							<text class="meter-package-item__name">{{ pkg.name }}</text>
+							<text class="meter-package-item__desc">{{ pkg.description || $t('deviceDetail.params.meterUpgradeDescEmpty') }}</text>
+						</view>
+						<u-icon
+							:name="selectedMeterPackageId === pkg.id ? 'checkmark-circle-fill' : 'arrow-right'"
+							size="18"
+							:color="selectedMeterPackageId === pkg.id ? '#0B3BFF' : '#C0C4CC'"
+						></u-icon>
+					</view>
+				</scroll-view>
 			</view>
 		</u-popup>
 
@@ -232,9 +317,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { appBatteryOtaCheck, type AppBatteryDetail } from '@/service/app-battery'
+import { resolveBaseUrl } from '@/API/interface'
+import {
+	appBatteryOtaCheck,
+	getAppBatteryMeterOtaPackages,
+	type AppBatteryDetail,
+	type AppBatteryMeterOtaPackage,
+} from '@/service/app-battery'
 import { fetchCurrentDeviceParamPermissions } from '@/service/permissions'
 import { isMeterMac } from '@/common/device-provision/device-prefix-shared'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
@@ -256,6 +347,15 @@ import {
 	listParamsByCategory,
 } from '@/common/lib/bms-protocol/param-registry'
 import { getWindowInfo } from '@/common/platform'
+import { useDeveloperStore } from '@/store/developer'
+import {
+	appendOtaDebugLog,
+	copyOtaDebugLogs,
+	otaDebugLogs,
+	resetOtaDebugLog,
+	type OtaDebugLogLevel,
+	type OtaDebugLogScope,
+} from '../ota-debug-log'
 
 type ParamItem = {
 	key: string
@@ -280,6 +380,13 @@ type DeviceOtaCheckState = {
 	firmwareUrl: string
 	lastCheckedVersion: string
 	errorMessage: string
+}
+
+type MeterOtaPackage = {
+	id: string
+	name: string
+	description: string
+	packageUrl: string
 }
 
 const TEMP_DISPLAY_LABEL_KEYS: Record<string, string> = {
@@ -339,6 +446,7 @@ const emit = defineEmits<{
 }>()
 
 const { t, te } = useI18n()
+const developerStore = useDeveloperStore()
 
 const opened = reactive({
 	single: false,
@@ -376,8 +484,12 @@ const toggle = (k: keyof typeof opened) => {
 }
 
 const fwVersionText = computed(() => String(props.battery?.fw_version || props.status?.meta?.softwareVersion || '-'))
-const allowOtaEnabled = computed(() => props.allowOta !== false)
+const meterMac = computed(() => String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim())
+const isMeterDevice = computed(() => isMeterMac(meterMac.value))
+const allowOtaEnabled = computed(() => props.allowOta !== false && !isMeterDevice.value)
 const showOtaBadge = computed(() => allowOtaEnabled.value && !!props.otaNeedUpgrade)
+const showMeterUpgradeCard = computed(() => props.connType === 'bluetooth' && isMeterDevice.value)
+const showMeterOtaDebugLog = computed(() => showMeterUpgradeCard.value && developerStore.enabled)
 const otaTargetVersionText = computed(() => {
 	const version = String(props.otaInfo?.targetVersion || '').trim()
 	if (!showOtaBadge.value || !version) return ''
@@ -387,6 +499,30 @@ const otaTargetVersionText = computed(() => {
 	}
 	return text
 })
+
+const meterPackageList = ref<MeterOtaPackage[]>([])
+const meterPackageLoading = ref(false)
+const meterPackagePopup = reactive({
+	show: false,
+})
+const selectedMeterPackageId = ref('')
+const selectedMeterPackage = computed(() => meterPackageList.value.find((item) => item.id === selectedMeterPackageId.value) || null)
+const meterOtaDebugExpanded = ref(false)
+const meterOtaDebugCountText = computed(() =>
+	(t('deviceDetail.params.meterOtaDebugCount', { count: otaDebugLogs.value.length }) as string).replace(
+		'{count}',
+		String(otaDebugLogs.value.length)
+	)
+)
+const meterOtaDebugLines = computed(() =>
+	otaDebugLogs.value.slice(-120).map((item) => {
+		const dataText = item.data == null ? '' : ` ${JSON.stringify(item.data)}`
+		return {
+			id: item.id,
+			text: `[${item.ts}] [${item.level.toUpperCase()}] [${item.scope}] ${item.message}${dataText}`,
+		}
+	})
+)
 
 const paramValues = reactive<Record<string, unknown>>({})
 
@@ -724,10 +860,25 @@ const batteryTypePicker = reactive({
 	index: 0,
 })
 
+const meterPackageSummary = computed(() => selectedMeterPackage.value?.name || (t('deviceDetail.params.meterUpgradeNoSelection') as string))
+const meterPackageDescription = computed(
+	() => selectedMeterPackage.value?.description || (t('deviceDetail.params.meterUpgradeDescEmpty') as string)
+)
+
 const windowInfo = getWindowInfo()
 const safeBottom = Number(windowInfo?.safeAreaInsets?.bottom || 0)
 const rpx2px = Number(windowInfo?.windowWidth || windowInfo?.screenWidth || 375) / 750
+const windowHeight = Number(windowInfo?.windowHeight || windowInfo?.screenHeight || 667)
 const advancedBottomGap = Math.round(176 * rpx2px + safeBottom)
+const meterPackageBodyHeightPx = Math.max(220, Math.floor(windowHeight * 0.5))
+const meterUpgradeButtonStyle = {
+	marginTop: '24rpx',
+	width: '100%',
+	height: '76rpx',
+	borderRadius: '16rpx',
+	fontSize: '28rpx',
+	fontWeight: 600,
+}
 
 const otaMessageText = computed(
 	() => otaState.message || (t('deviceDetail.params.otaProgress', { p: otaState.progress }) as string)
@@ -750,6 +901,91 @@ const closeEditPopup = () => {
 const closeAdvanced = () => {
 	advancedPopup.show = false
 	applyPollingState()
+}
+
+const normalizeMeterPackage = (item: AppBatteryMeterOtaPackage): MeterOtaPackage | null => {
+	const id = String(item?.id || '').trim()
+	const name = String(item?.name || '').trim()
+	const packageUrl = String(item?.package_url || '').trim()
+	if (!id || !name || !packageUrl) return null
+	return {
+		id,
+		name,
+		description: String(item?.description || '').trim(),
+		packageUrl,
+	}
+}
+
+const extractMeterPackagePayload = (rsp: any): AppBatteryMeterOtaPackage[] => {
+	if (Array.isArray(rsp?.data)) return rsp.data
+	if (Array.isArray(rsp?.data?.list)) return rsp.data.list
+	if (Array.isArray(rsp?.list)) return rsp.list
+	return []
+}
+
+const loadMeterPackages = async () => {
+	if (meterPackageLoading.value) return
+	meterPackageLoading.value = true
+	appendMeterOtaDebug('info', 'meter-ota', 'fetch meter packages start', {
+		baseUrl: resolveBaseUrl(),
+		tenantId: String(uni.getStorageSync('tenant_id') || ''),
+	})
+	try {
+		const rsp = await getAppBatteryMeterOtaPackages()
+		const list = extractMeterPackagePayload(rsp)
+		meterPackageList.value = list
+			.map((item) => normalizeMeterPackage(item))
+			.filter((item): item is MeterOtaPackage => !!item)
+		console.log('[meter-ota] fetched packages', {
+			baseUrl: resolveBaseUrl(),
+			tenantId: String(uni.getStorageSync('tenant_id') || ''),
+			code: rsp?.code,
+			message: rsp?.message,
+			rawDataType: Array.isArray(rsp?.data) ? 'array' : typeof rsp?.data,
+			rawDataKeys: rsp?.data && typeof rsp.data === 'object' && !Array.isArray(rsp.data) ? Object.keys(rsp.data) : [],
+			rawCount: list.length,
+			usableCount: meterPackageList.value.length,
+			items: meterPackageList.value.map((item) => ({ id: item.id, name: item.name })),
+			rawResponse: rsp,
+		})
+		appendMeterOtaDebug('info', 'meter-ota', 'fetch meter packages done', {
+			code: rsp?.code,
+			message: rsp?.message,
+			rawCount: list.length,
+			usableCount: meterPackageList.value.length,
+			items: meterPackageList.value.map((item) => ({ id: item.id, name: item.name })),
+		})
+		if (selectedMeterPackageId.value && !meterPackageList.value.some((item) => item.id === selectedMeterPackageId.value)) {
+			selectedMeterPackageId.value = ''
+		}
+	} catch (e) {
+		meterPackageList.value = []
+		console.error('[meter-ota] fetch packages failed', e)
+		appendMeterOtaDebug('error', 'meter-ota', 'fetch meter packages failed', formatDebugError(e))
+		uni.showToast({ title: t('deviceDetail.toast.meterPackageLoadFailed') as string, icon: 'none' })
+	} finally {
+		meterPackageLoading.value = false
+	}
+}
+
+const openMeterPackagePopup = async () => {
+	meterPackagePopup.show = true
+	await loadMeterPackages()
+}
+
+const closeMeterPackagePopup = () => {
+	meterPackagePopup.show = false
+}
+
+const selectMeterPackage = (pkg: MeterOtaPackage) => {
+	selectedMeterPackageId.value = pkg.id
+	appendMeterOtaDebug('info', 'meter-ota', 'meter firmware selected', {
+		id: pkg.id,
+		name: pkg.name,
+		packageUrl: summarizeUrl(pkg.packageUrl),
+		description: pkg.description,
+	})
+	meterPackagePopup.show = false
 }
 
 watch(
@@ -949,12 +1185,136 @@ const updateOtaStage = (stage: string, progress: number) => {
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const getRuntimePlatform = () => {
+	try {
+		const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
+		return String((sys as any)?.platform || '').toLowerCase()
+	} catch (e) {
+		return ''
+	}
+}
+
+const summarizeUrl = (url: string) => {
+	const text = String(url || '').trim()
+	if (!text) return ''
+	if (text.length <= 96) return text
+	return `${text.slice(0, 58)}...${text.slice(-30)}`
+}
+
+const formatDebugError = (e: unknown) => {
+	const err = e as any
+	return {
+		name: err?.name,
+		code: err?.code,
+		errCode: err?.errCode,
+		message: err?.message || err?.errMsg || String(e || ''),
+		errMsg: err?.errMsg,
+	}
+}
+
+const getBleDebugDeviceId = () => {
+	try {
+		const transport = props.client?.getTransport?.() as any
+		return String(transport?.deviceId || '').trim()
+	} catch (e) {
+		return ''
+	}
+}
+
+const getMeterOtaDebugHeader = () => ({
+	platform: getRuntimePlatform(),
+	connType: props.connType,
+	meterMac: meterMac.value,
+	bleDeviceId: getBleDebugDeviceId(),
+	tenantId: String(uni.getStorageSync('tenant_id') || ''),
+	baseUrl: resolveBaseUrl(),
+	packageId: selectedMeterPackage.value?.id || '',
+	packageName: selectedMeterPackage.value?.name || '',
+	packageUrl: summarizeUrl(selectedMeterPackage.value?.packageUrl || ''),
+	progress: otaState.progress,
+	message: otaState.message,
+})
+
+const appendMeterOtaDebug = (
+	level: OtaDebugLogLevel,
+	scope: OtaDebugLogScope,
+	message: string,
+	data?: unknown
+) => {
+	if (!developerStore.enabled) return
+	appendOtaDebugLog({ level, scope, message, data })
+}
+
+const normalizeOtaLoggerArgs = (args: unknown[]) => {
+	const first = String(args[0] || '')
+	const second = typeof args[1] === 'string' ? String(args[1]) : ''
+	const message = second ? `${first} ${second}`.trim() : first || 'ota log'
+	const data = args.length > 2 ? args.slice(2) : args[1]
+	return { message, data }
+}
+
+const shouldAppendMeterBootLog = (message: string, data: unknown) => {
+	const record = data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>) : {}
+	if (message.includes('[boot] packet ack')) {
+		const status = Number(record.status ?? 0)
+		const requested = Number(record.requested ?? 0)
+		const packetIndex = Number(record.packetIndex ?? 0)
+		return status !== 0 || packetIndex < 3 || requested % 64 === 0
+	}
+	if (message.includes('[boot] tx') && String(record.cmd || '').toLowerCase() === '0x53') return false
+	if (message.includes('[boot] rx')) {
+		const hex = String(record.hex || '').toUpperCase()
+		if (hex.length >= 8 && hex.slice(6, 8) === '53') return false
+	}
+	return true
+}
 
 const otaLogger = {
 	debug: (...args: unknown[]) => console.log('[ota]', ...args),
 	info: (...args: unknown[]) => console.log('[ota]', ...args),
 	warn: (...args: unknown[]) => console.warn('[ota]', ...args),
 	error: (...args: unknown[]) => console.error('[ota]', ...args),
+}
+
+const meterOtaLogger = {
+	debug: (...args: unknown[]) => {
+		console.log('[ota]', ...args)
+		const { message, data } = normalizeOtaLoggerArgs(args)
+		if (shouldAppendMeterBootLog(message, data)) appendMeterOtaDebug('debug', 'boot', message, data)
+	},
+	info: (...args: unknown[]) => {
+		console.log('[ota]', ...args)
+		const { message, data } = normalizeOtaLoggerArgs(args)
+		if (shouldAppendMeterBootLog(message, data)) appendMeterOtaDebug('info', 'boot', message, data)
+	},
+	warn: (...args: unknown[]) => {
+		console.warn('[ota]', ...args)
+		const { message, data } = normalizeOtaLoggerArgs(args)
+		if (shouldAppendMeterBootLog(message, data)) appendMeterOtaDebug('warn', 'boot', message, data)
+	},
+	error: (...args: unknown[]) => {
+		console.error('[ota]', ...args)
+		const { message, data } = normalizeOtaLoggerArgs(args)
+		if (shouldAppendMeterBootLog(message, data)) appendMeterOtaDebug('error', 'boot', message, data)
+	},
+}
+
+const toggleMeterOtaDebug = () => {
+	meterOtaDebugExpanded.value = !meterOtaDebugExpanded.value
+}
+
+const copyMeterOtaDebugLog = async () => {
+	try {
+		await copyOtaDebugLogs(getMeterOtaDebugHeader())
+		uni.showToast({ title: t('deviceDetail.toast.meterOtaDebugCopied') as string, icon: 'none' })
+	} catch (e) {
+		uni.showToast({ title: t('deviceDetail.toast.meterOtaDebugCopyFailed') as string, icon: 'none' })
+	}
+}
+
+const clearMeterOtaDebugLog = () => {
+	resetOtaDebugLog()
+	uni.showToast({ title: t('deviceDetail.toast.meterOtaDebugCleared') as string, icon: 'none' })
 }
 
 const syncOtaState = (patch: Partial<DeviceOtaCheckState>) => {
@@ -974,7 +1334,93 @@ const applyOtaCheckResult = (data: Record<string, unknown> | null, version: stri
 	})
 }
 
-const startOta = async () => {
+const runBootOtaUpgrade = async (
+	firmware: Uint8Array,
+	targetAddress: number,
+	options?: {
+		queryTargetAddress?: number
+		skipEnterBoot?: boolean
+		prepareBaudRate?: number
+		bootPacketTimeoutMs?: number
+		finalizeTimeoutMs?: number
+		finalizeAssumeSuccessOnTimeout?: boolean
+		forceWriteWithResponse?: boolean
+		minFrameIntervalMs?: number
+		packetDelayMs?: number
+		pageBoundaryDelayMs?: number
+		logger?: typeof otaLogger
+	}
+) => {
+	if (!props.client) throw new Error('client not ready')
+	const { sourceAddress } = props.client.getAddresses()
+	const rawTransport = props.client.getTransport()
+	const transportAny = rawTransport as any
+	const prevMinFrameIntervalMs =
+		transportAny && typeof transportAny.minFrameIntervalMs === 'number' ? transportAny.minFrameIntervalMs : undefined
+	if (options?.minFrameIntervalMs && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
+		transportAny.minFrameIntervalMs = Math.max(transportAny.minFrameIntervalMs || 0, options.minFrameIntervalMs)
+	}
+	const otaTransport = {
+		request: (frameBytes: Uint8Array, overrideOptions?: { timeoutMs?: number; suppressTimeoutLog?: boolean }) => {
+			const t = transportAny
+			if (typeof t?.request !== 'function') throw new Error('transport not ready')
+			const cmd = frameBytes[3] & 0xff
+			const timeoutMs =
+				cmd === 0x50 ? 3000 : cmd === 0x53 ? options?.bootPacketTimeoutMs ?? 12000 : cmd === 0x54 ? options?.finalizeTimeoutMs ?? 12000 : 12000
+			const requestOptions = {
+				timeoutMs: overrideOptions?.timeoutMs ?? timeoutMs,
+				suppressTimeoutLog:
+					!!overrideOptions?.suppressTimeoutLog || (cmd === 0x54 && !!options?.finalizeAssumeSuccessOnTimeout),
+			}
+			if (options?.forceWriteWithResponse && cmd === 0x53 && typeof t?.requestWithResponse === 'function') {
+				return t.requestWithResponse(frameBytes, requestOptions)
+			}
+			return t.request(frameBytes, requestOptions)
+		},
+	}
+	try {
+		await bootOtaUpgrade({
+			transport: otaTransport,
+			firmware,
+			targetAddress,
+			queryTargetAddress: options?.queryTargetAddress ?? targetAddress,
+			sourceAddress,
+			skipEnterBoot: options?.skipEnterBoot,
+			prepareBaudRate: options?.prepareBaudRate,
+			packetDelayMs: options?.packetDelayMs,
+			pageBoundaryDelayMs: options?.pageBoundaryDelayMs,
+			finalizeTimeoutMs: options?.finalizeTimeoutMs,
+			finalizeAssumeSuccessOnTimeout: options?.finalizeAssumeSuccessOnTimeout,
+			logger: options?.logger || otaLogger,
+			onProgress: (p) => {
+				if (options?.logger) {
+					const packetIndex = Number(p.packetIndex ?? -1)
+					if (p.stage !== 'transfer' || packetIndex < 3 || (packetIndex + 1) % 64 === 0) {
+						appendMeterOtaDebug('info', 'meter-ota', 'ota progress', p)
+					}
+				}
+				if (p.stage === 'transfer' && p.packetTotal) {
+					const rate = Math.min(1, Math.max(0, ((p.packetIndex ?? 0) + 1) / p.packetTotal))
+					updateOtaStage('transfer', 10 + Math.round(rate * 85))
+					return
+				}
+				if (p.stage === 'finalize') {
+					updateOtaStage('finalize', 100)
+					return
+				}
+				if (p.stage === 'enter') updateOtaStage('enter', 6)
+				if (p.stage === 'prepare') updateOtaStage('prepare', 10)
+				if (p.stage === 'query') updateOtaStage('checking', 2)
+			},
+		})
+	} finally {
+		if (prevMinFrameIntervalMs != null && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
+			transportAny.minFrameIntervalMs = prevMinFrameIntervalMs
+		}
+	}
+}
+
+const startBmsOta = async () => {
 	const BOOT_TARGET_BMS = 0x01
 	const BOOT_TARGET_METER = 0xfc
 	if (props.allowOta === false) {
@@ -1051,54 +1497,10 @@ const startOta = async () => {
 		const firmware = await downloadFirmware(firmwareUrl)
 		updateOtaStage('prepare', 10)
 
-		const { sourceAddress } = props.client.getAddresses()
 		const macRaw = String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim()
 		const isGaugeDevice = isMeterMac(macRaw)
 		const otaTargetAddress = isGaugeDevice ? BOOT_TARGET_METER : BOOT_TARGET_BMS
-		const rawTransport = props.client.getTransport()
-		const otaTransport = {
-			request: (frameBytes: Uint8Array) => {
-				const t = rawTransport as any
-				if (typeof t?.request !== 'function') throw new Error('transport not ready')
-				const cmd = frameBytes[3] & 0xff
-				const timeoutMs = cmd === 0x50 ? 3000 : 12000
-				return t.request(frameBytes, { timeoutMs })
-			},
-		}
-		const queryTargetAddress = isGaugeDevice ? BOOT_TARGET_METER : BOOT_TARGET_BMS
-		const targets = [otaTargetAddress]
-		let otaErr: unknown = null
-		for (const targetAddress of targets) {
-			try {
-				await bootOtaUpgrade({
-					transport: otaTransport,
-					firmware,
-					targetAddress,
-					queryTargetAddress,
-					sourceAddress,
-					logger: otaLogger,
-					onProgress: (p) => {
-						if (p.stage === 'transfer' && p.packetTotal) {
-							const rate = Math.min(1, Math.max(0, ((p.packetIndex ?? 0) + 1) / p.packetTotal))
-							updateOtaStage('transfer', 10 + Math.round(rate * 85))
-							return
-						}
-						if (p.stage === 'finalize') {
-							updateOtaStage('finalize', 100)
-							return
-						}
-						if (p.stage === 'enter') updateOtaStage('enter', 6)
-						if (p.stage === 'prepare') updateOtaStage('prepare', 10)
-						if (p.stage === 'query') updateOtaStage('checking', 2)
-					},
-				})
-				otaErr = null
-				break
-			} catch (e) {
-				otaErr = e
-			}
-		}
-		if (otaErr) throw otaErr
+		await runBootOtaUpgrade(firmware, otaTargetAddress)
 
 		updateOtaStage('success', 100)
 		syncOtaState({
@@ -1118,10 +1520,118 @@ const startOta = async () => {
 		})
 		updateOtaStage('failed', otaState.progress || 0)
 		const errMessage = (e as Error)?.message || String(e || '')
-		if (errMessage === 'boot_packet0_no_ack') {
+		if (errMessage === 'boot_packet0_no_ack' || errMessage === 'boot_firmware_hardware_mismatch') {
 			const mismatchText = t('deviceDetail.toast.otaHardwareMismatch') as string
 			otaState.message = mismatchText
 			uni.showToast({ title: mismatchText, icon: 'none' })
+		} else if (errMessage === 'boot_firmware_size_mismatch') {
+			const sizeMismatchText = t('deviceDetail.toast.otaFirmwareSizeMismatch') as string
+			otaState.message = sizeMismatchText
+			uni.showToast({ title: sizeMismatchText, icon: 'none' })
+		} else {
+			uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
+		}
+	} finally {
+		otaState.running = false
+		applyPollingState()
+	}
+}
+
+const startMeterOta = async () => {
+	const BOOT_TARGET_METER = 0xfc
+	if (developerStore.enabled) {
+		resetOtaDebugLog(getMeterOtaDebugHeader())
+	}
+	if (!showMeterUpgradeCard.value) {
+		appendMeterOtaDebug('warn', 'meter-ota', 'meter upgrade card unavailable', getMeterOtaDebugHeader())
+		uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
+		return
+	}
+	if (!props.client || props.connType === 'offline') {
+		appendMeterOtaDebug('warn', 'ble', 'meter ota blocked: no ble connection', getMeterOtaDebugHeader())
+		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	if (!selectedMeterPackage.value) {
+		appendMeterOtaDebug('warn', 'meter-ota', 'meter ota blocked: no firmware selected', getMeterOtaDebugHeader())
+		uni.showToast({ title: t('deviceDetail.params.meterUpgradeSelectFirst') as string, icon: 'none' })
+		return
+	}
+
+	try {
+		appendMeterOtaDebug('info', 'meter-ota', 'meter ota confirm start', getMeterOtaDebugHeader())
+		const confirmTemplate = (t('deviceDetail.params.meterUpgradeConfirm') as string) || ''
+		const confirmText = confirmTemplate.replace('{name}', selectedMeterPackage.value.name)
+		const ok = await confirmModal(confirmText)
+		if (!ok) {
+			appendMeterOtaDebug('info', 'meter-ota', 'meter ota canceled by user')
+			return
+		}
+
+		otaState.show = true
+		otaState.running = true
+		updateOtaStage('downloading', 5)
+		props.onPausePolling && props.onPausePolling()
+		await delay(120)
+		appendMeterOtaDebug('info', 'download', 'firmware download start', {
+			packageId: selectedMeterPackage.value.id,
+			name: selectedMeterPackage.value.name,
+			url: summarizeUrl(selectedMeterPackage.value.packageUrl),
+		})
+		const firmware = await downloadFirmware(selectedMeterPackage.value.packageUrl)
+		appendMeterOtaDebug('info', 'download', 'firmware download done', {
+			size: firmware.length,
+		})
+		updateOtaStage('prepare', 10)
+		const runtimePlatform = getRuntimePlatform()
+		const isAndroid = runtimePlatform === 'android'
+		const isIos = runtimePlatform === 'ios'
+		const shouldRelaxMeterFinalize = isAndroid || isIos
+		appendMeterOtaDebug('info', 'boot', 'boot ota start', {
+			targetAddress: '0xFC',
+			queryTargetAddress: '0x00',
+			skipEnterBoot: true,
+			prepareBaudRate: 9600,
+			bootPacketTimeoutMs: 45000,
+			finalizeTimeoutMs: shouldRelaxMeterFinalize ? 6000 : undefined,
+			forceWriteWithResponse: isAndroid,
+			firmwareSize: firmware.length,
+		})
+		await runBootOtaUpgrade(firmware, BOOT_TARGET_METER, {
+			queryTargetAddress: 0x00,
+			skipEnterBoot: true,
+			prepareBaudRate: 9600,
+			bootPacketTimeoutMs: 45000,
+			finalizeTimeoutMs: shouldRelaxMeterFinalize ? 6000 : undefined,
+			finalizeAssumeSuccessOnTimeout: shouldRelaxMeterFinalize,
+			forceWriteWithResponse: isAndroid,
+			minFrameIntervalMs: isAndroid ? 220 : undefined,
+			packetDelayMs: isAndroid ? 100 : undefined,
+			pageBoundaryDelayMs: isAndroid ? 1500 : undefined,
+			logger: meterOtaLogger,
+		})
+		updateOtaStage('success', 100)
+		appendMeterOtaDebug('info', 'meter-ota', 'meter ota success', {
+			progress: otaState.progress,
+			message: otaState.message,
+		})
+		uni.showToast({ title: t('deviceDetail.toast.otaSuccess') as string, icon: 'none' })
+	} catch (e) {
+		updateOtaStage('failed', otaState.progress || 0)
+		const errMessage = (e as Error)?.message || String(e || '')
+		appendMeterOtaDebug('error', 'meter-ota', 'meter ota failed', {
+			error: formatDebugError(e),
+			progress: otaState.progress,
+			message: otaState.message,
+		})
+		if (errMessage === 'boot_packet0_no_ack' || errMessage === 'boot_firmware_hardware_mismatch') {
+			const mismatchText = t('deviceDetail.toast.otaHardwareMismatch') as string
+			otaState.message = mismatchText
+			uni.showToast({ title: mismatchText, icon: 'none' })
+		} else if (errMessage === 'boot_firmware_size_mismatch') {
+			const sizeMismatchText = t('deviceDetail.toast.otaFirmwareSizeMismatch') as string
+			otaState.message = sizeMismatchText
+			uni.showToast({ title: sizeMismatchText, icon: 'none' })
 		} else {
 			uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
 		}
@@ -1136,7 +1646,7 @@ const openOta = () => {
 		otaState.show = true
 		return
 	}
-	startOta()
+	startBmsOta()
 }
 
 const openAdvanced = () => {
@@ -1209,6 +1719,131 @@ const loadSection = (k: keyof typeof opened) => {
 	margin-top: 18rpx;
 }
 
+.meter-upgrade {
+	padding: 24rpx;
+	display: flex;
+	flex-direction: column;
+}
+
+.meter-upgrade__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.meter-upgrade__selector {
+	margin-top: 20rpx;
+	padding: 20rpx;
+	border-radius: 18rpx;
+	background: #f7f8fa;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.meter-upgrade__selector-main {
+	display: flex;
+	flex-direction: column;
+	gap: 8rpx;
+	min-width: 0;
+}
+
+.meter-upgrade__selector-label {
+	font-size: 24rpx;
+	color: #8e95a2;
+}
+
+.meter-upgrade__selector-value {
+	font-size: 26rpx;
+	color: #333333;
+	font-weight: 600;
+}
+
+.meter-upgrade__desc {
+	margin-top: 16rpx;
+	font-size: 24rpx;
+	line-height: 1.6;
+	color: #8e95a2;
+}
+
+.meter-debug {
+	padding: 22rpx 24rpx 24rpx;
+	background: #fbfcff;
+}
+
+.meter-debug__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.meter-debug__title-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 6rpx;
+}
+
+.meter-debug__title {
+	font-size: 28rpx;
+	font-weight: 700;
+	color: #1f2937;
+}
+
+.meter-debug__count {
+	font-size: 22rpx;
+	color: #8e95a2;
+}
+
+.meter-debug__actions {
+	margin-top: 18rpx;
+	display: flex;
+	gap: 14rpx;
+}
+
+.meter-debug__btn {
+	padding: 10rpx 18rpx;
+	border-radius: 999rpx;
+	background: #0b3bff;
+	color: #ffffff;
+	font-size: 22rpx;
+	font-weight: 600;
+}
+
+.meter-debug__btn--ghost {
+	background: #eef2ff;
+	color: #0b3bff;
+}
+
+.meter-debug__btn--hover {
+	opacity: 0.82;
+}
+
+.meter-debug__body {
+	margin-top: 18rpx;
+	height: 360rpx;
+	padding: 16rpx;
+	box-sizing: border-box;
+	border-radius: 16rpx;
+	background: #111827;
+}
+
+.meter-debug__line {
+	display: block;
+	font-size: 20rpx;
+	line-height: 1.55;
+	color: #d1d5db;
+	font-family: monospace;
+	word-break: break-all;
+	white-space: pre-wrap;
+}
+
+.meter-debug__empty {
+	padding: 40rpx 0;
+	text-align: center;
+	color: #9ca3af;
+	font-size: 24rpx;
+}
+
 .section--static {
 	align-items: flex-start;
 }
@@ -1279,6 +1914,68 @@ const loadSection = (k: keyof typeof opened) => {
 	border-radius: 50%;
 	background: #ff4d4f;
 	box-shadow: 0 0 0 3rpx #ffffff;
+}
+
+.meter-package-popup {
+	background: #ffffff;
+	border-radius: 28rpx 28rpx 0 0;
+	padding: 28rpx 24rpx 0;
+}
+
+.meter-package-popup__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.meter-package-popup__title {
+	font-size: 30rpx;
+	font-weight: 600;
+	color: #1f2937;
+}
+
+.meter-package-popup__body {
+	max-height: 60vh;
+	margin-top: 24rpx;
+}
+
+.meter-package-popup__empty {
+	padding: 40rpx 0 60rpx;
+	font-size: 26rpx;
+	color: #8e95a2;
+	text-align: center;
+}
+
+.meter-package-item {
+	padding: 22rpx 4rpx;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 18rpx;
+	border-bottom: 1px solid #f2f3f5;
+}
+
+.meter-package-item--selected .meter-package-item__name {
+	color: #0b3bff;
+}
+
+.meter-package-item__main {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 10rpx;
+}
+
+.meter-package-item__name {
+	font-size: 28rpx;
+	font-weight: 600;
+	color: #333333;
+}
+
+.meter-package-item__desc {
+	font-size: 24rpx;
+	line-height: 1.6;
+	color: #8e95a2;
 }
 
 .section__tips {

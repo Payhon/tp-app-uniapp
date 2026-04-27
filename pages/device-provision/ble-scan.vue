@@ -141,6 +141,7 @@ const debugLogFoundCount = ref(0)
 const debugLogFilteredCount = ref(0)
 const debugSeenDeviceIds = new Set<string>()
 let fallbackTimer: ReturnType<typeof setTimeout> | null = null
+let scanTimeoutTimer: ReturnType<typeof setTimeout> | null = null
 let scanQueue: Promise<void> = Promise.resolve()
 let scanSessionId = 0
 let pageVisible = false
@@ -150,6 +151,7 @@ const SCAN_STOP_SETTLE_MS = 180
 const ADAPTER_READY_WAIT_MS = 1200
 const BLE_API_TIMEOUT_MS = 8000
 const STOP_DISCOVERY_TIMEOUT_MS = 1200
+const SCAN_DURATION_TIMEOUT_MS = 30000
 const sysInfo = (() => {
 	try {
 		return uni.getSystemInfoSync?.() || ({} as Record<string, unknown>)
@@ -292,6 +294,22 @@ function clearFallbackTimer() {
 	if (!fallbackTimer) return
 	clearTimeout(fallbackTimer)
 	fallbackTimer = null
+}
+
+function clearScanTimeoutTimer() {
+	if (!scanTimeoutTimer) return
+	clearTimeout(scanTimeoutTimer)
+	scanTimeoutTimer = null
+}
+
+function armScanTimeout(sessionId: number) {
+	clearScanTimeoutTimer()
+	scanTimeoutTimer = setTimeout(() => {
+		if (!isScanSessionActive(sessionId) || !isScanning.value) return
+		console.warn('[ble-scan] scan duration timeout, stop discovery', { sessionId, timeoutMs: SCAN_DURATION_TIMEOUT_MS })
+		errorMsg.value = t('pages.deviceProvision.scanTimeout') as string
+		void stopScan()
+	}, SCAN_DURATION_TIMEOUT_MS)
 }
 
 function runScanSerial<T>(task: () => Promise<T>): Promise<T> {
@@ -500,6 +518,7 @@ function upsertDevice(d: FoundDevice) {
 }
 
 const onDeviceFound = (res: { devices?: FoundDevice[] }) => {
+	if (!pageVisible || !isScanning.value) return
 	const list = (res && res.devices) || []
 	// 用于确认回调有触发（避免“完全无打印”时无法判断是否在扫描）
 	if (list.length && debugSeenDeviceIds.size === 0) {
@@ -516,6 +535,7 @@ async function startScan() {
 		const sessionId = ++scanSessionId
 		starting.value = true
 		errorMsg.value = ''
+		clearScanTimeoutTimer()
 		try {
 			if (!isScanSessionActive(sessionId)) return
 			console.log('[ble-scan] startScan', { sessionId })
@@ -599,6 +619,7 @@ async function startScan() {
 			debugSeenDeviceIds.clear()
 			clearFallbackTimer()
 			isScanning.value = true
+			armScanTimeout(sessionId)
 			try {
 				await startDiscovery({ withServiceFilter: true })
 			} catch (e) {
@@ -654,6 +675,7 @@ async function startScan() {
 		} catch (e) {
 			console.error('[ble-scan] startScan failed', e)
 			if (scanSessionId !== sessionId) return
+			clearScanTimeoutTimer()
 			isScanning.value = false
 			const msg = formatUniError(e)
 			// NOTE: 某些平台/运行时在 script 内对 i18n 插值支持不稳定，这里用本地 format 做兜底
@@ -688,11 +710,14 @@ async function startScan() {
 }
 
 async function stopScan({ closeAdapter = false }: { closeAdapter?: boolean } = {}) {
+	++scanSessionId
+	clearFallbackTimer()
+	clearScanTimeoutTimer()
+	offDeviceFoundListener()
+	starting.value = false
+	isScanning.value = false
 	return runScanSerial(async () => {
-		++scanSessionId
 		try {
-			clearFallbackTimer()
-			offDeviceFoundListener()
 			await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
 			if (closeAdapter) {
 				try {
@@ -716,7 +741,7 @@ function selectDevice(d: DeviceRow) {
 	stopScan().finally(() => {
 		if (d.deviceType === DEVICE_TYPE_METER && d.advMac) {
 			uni.navigateTo({
-				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(d.advMac)}&allow_scan_handoff=1&device_name=${encodeURIComponent(d.displayName)}`,
+				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(d.advMac)}&ble_device_id=${encodeURIComponent(d.deviceId)}&allow_scan_handoff=1&device_name=${encodeURIComponent(d.displayName)}`,
 			})
 			return
 		}

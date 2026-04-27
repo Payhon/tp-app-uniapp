@@ -4,10 +4,12 @@ import $C from '@/common/config'
 import {
 	appBatteryDetail,
 	appBatteryConnectionStatus,
+	appBatteryCurrentTelemetry,
 	appBatteryMqttCredential,
 	appBatteryReport,
 	type AppBatteryDetail,
 	type AppBatteryConnectionStatusReq,
+	type AppBatteryCurrentTelemetry,
 	type AppBatteryReportReq,
 } from '@/service/app-battery'
 import {
@@ -35,6 +37,7 @@ type DeviceDetailSessionMode = 'cloud' | 'instrument'
 type LoadInstrumentSessionOptions = {
 	bleMac: string
 	deviceName?: string
+	deviceId?: string
 }
 
 type ConnectAutoOptions = {
@@ -56,7 +59,9 @@ const REPORT_RETRY_DELAYS_MS = [3_000, 10_000, 30_000]
 const RELAY_HEARTBEAT_MS = 15_000
 const RELAY_RECONNECT_DELAY_MS = 3_000
 const POLL_INTERVAL_MS = 2_000
+const CLOUD_POLL_INTERVAL_MS = 5_000
 const INSTRUMENT_WARMUP_POLL_INTERVAL_MS = 1_200
+const INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD = 3
 
 const log = (event: string, data?: Record<string, unknown>) => {
 	try {
@@ -74,6 +79,17 @@ const formatErr = (err: unknown) => {
 	} catch (e) {
 		return String(err)
 	}
+}
+
+const isInstrumentNoPassthroughError = (err: unknown) => {
+	const msg = formatErr(err).toLowerCase()
+	if (!msg) return false
+	return (
+		msg.includes('timeout') ||
+		msg.includes('time out') ||
+		msg.includes('no response') ||
+		msg.includes('request timeout')
+	)
 }
 
 const countTrue = (obj?: Record<string, boolean>) => {
@@ -200,6 +216,167 @@ const socketMessageToText = (data: unknown): string => {
 	}
 }
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> => {
+	return !!v && typeof v === 'object' && !Array.isArray(v)
+}
+
+const telemetryValue = (payload: AppBatteryCurrentTelemetry | null, keys: string[]) => {
+	const current = payload?.current || {}
+	for (const key of keys) {
+		if (Object.prototype.hasOwnProperty.call(current, key)) return current[key]?.value
+	}
+	return undefined
+}
+
+const toNumberOr = (value: unknown, fallback = 0xffff) => {
+	if (typeof value === 'number' && Number.isFinite(value)) return value
+	if (typeof value === 'string' && value.trim() !== '') {
+		const n = Number(value)
+		if (Number.isFinite(n)) return n
+	}
+	return fallback
+}
+
+const toBooleanOr = (value: unknown, fallback = false) => {
+	if (typeof value === 'boolean') return value
+	if (typeof value === 'number') return value !== 0
+	if (typeof value === 'string') {
+		const text = value.trim().toLowerCase()
+		if (text === 'true' || text === '1' || text === 'on') return true
+		if (text === 'false' || text === '0' || text === 'off') return false
+	}
+	return fallback
+}
+
+const parseJsonMaybe = (value: unknown): unknown => {
+	if (typeof value !== 'string') return value
+	const text = value.trim()
+	if (!text) return value
+	if (!text.startsWith('{') && !text.startsWith('[')) return value
+	try {
+		return JSON.parse(text)
+	} catch (e) {
+		return value
+	}
+}
+
+const toNumberArray = (value: unknown) => {
+	const parsed = parseJsonMaybe(value)
+	if (!Array.isArray(parsed)) return []
+	return parsed.map((item) => toNumberOr(item, Number.NaN)).filter((item) => Number.isFinite(item))
+}
+
+const toBooleanArray = (value: unknown) => {
+	const parsed = parseJsonMaybe(value)
+	if (!Array.isArray(parsed)) return []
+	return parsed.map((item) => toBooleanOr(item))
+}
+
+const buildStatusFromCloudTelemetry = (
+	battery: AppBatteryDetail | null,
+	payload: AppBatteryCurrentTelemetry
+): BmsStatus | null => {
+	if (isPlainObject(payload.snapshot)) return payload.snapshot as unknown as BmsStatus
+
+	const current = payload.current || {}
+	if (Object.keys(current).length === 0 && Number(payload.is_online || 0) !== 1) return null
+
+	const seriesCount = toNumberOr(telemetryValue(payload, ['seriesCount', 'meta.seriesCount']), 0)
+	const cellVoltagesMv = toNumberArray(telemetryValue(payload, ['cell.voltagesMv']))
+	const cellTempsC = toNumberArray(telemetryValue(payload, ['temperature.cellTempsC']))
+	const chargeFetOn = toBooleanOr(telemetryValue(payload, ['chargeFetOn']))
+	const dischargeFetOn = toBooleanOr(telemetryValue(payload, ['dischargeFetOn']))
+	const charging = toBooleanOr(telemetryValue(payload, ['charging']))
+	const discharging = toBooleanOr(telemetryValue(payload, ['discharging']))
+	const balancing = toBooleanArray(telemetryValue(payload, ['cell.balancing']))
+	const highestIdx = toNumberOr(telemetryValue(payload, ['electrical.cellVoltageIndex.highest']), 0)
+	const lowestIdx = toNumberOr(telemetryValue(payload, ['electrical.cellVoltageIndex.lowest']), 0)
+
+	return {
+		meta: {
+			seriesCount,
+			cellTempCount: toNumberOr(telemetryValue(payload, ['meta.cellTempCount']), cellTempsC.length),
+			hardwareVersion: 0,
+			softwareVersion: 0,
+			specialId: 0,
+			protocolVersion: 0,
+			productionDate: { raw: 0, year: 0, month: 0, day: 0 },
+		},
+		energy: {
+			designCapacityMah: 0xffff,
+			remainingCapacityMah: 0xffff,
+			fullCapacityMah: 0xffff,
+			fullWh: 0xffff,
+			remainingWh: 0xffff,
+			socPct: toNumberOr(telemetryValue(payload, ['soc']), Number(battery?.soc ?? 0)),
+			sohPct: toNumberOr(telemetryValue(payload, ['soh']), Number(battery?.soh ?? 0)),
+			cycleCount: toNumberOr(telemetryValue(payload, ['cycleCount']), 0xffff),
+			totalChargeCapacityRaw: 0xffff,
+			totalDischargeCapacityRaw: 0xffff,
+		},
+		timing: {
+			maxChargeIntervalHours: 0xffff,
+			currentChargeIntervalHours: 0xffff,
+			dischargeRemainingMin: toNumberOr(telemetryValue(payload, ['dischargeRemainingMin']), 0xffff),
+			chargeRemainingMin: toNumberOr(telemetryValue(payload, ['chargeRemainingMin']), 0xffff),
+			chargeCount: 0xffff,
+			dischargeCount: 0xffff,
+			bmsTimestamp: 0,
+			powerOnWorkHours: 0xffff,
+		},
+		electrical: {
+			packCellSumVoltageV: toNumberOr(telemetryValue(payload, ['packCellSumVoltageV', 'electrical.packCellSumVoltageV'])),
+			vBatV: 0xffff,
+			vPackV: toNumberOr(telemetryValue(payload, ['vPackV', 'electrical.vPackV'])),
+			vLoadV: 0xffff,
+			currentA: toNumberOr(telemetryValue(payload, ['currentA', 'electrical.currentA']), 0),
+			highestCellVoltageMv: toNumberOr(telemetryValue(payload, ['highestCellVoltageMv', 'electrical.highestCellVoltageMv'])),
+			lowestCellVoltageMv: toNumberOr(telemetryValue(payload, ['lowestCellVoltageMv', 'electrical.lowestCellVoltageMv'])),
+			avgCellVoltageMv: toNumberOr(telemetryValue(payload, ['avgCellVoltageMv', 'electrical.avgCellVoltageMv'])),
+			maxCellVoltageDiffMv: toNumberOr(telemetryValue(payload, ['maxCellVoltageDiffMv', 'electrical.maxCellVoltageDiffMv']), 0xffff),
+			cellVoltageIndex: {
+				highest: highestIdx,
+				lowest: lowestIdx,
+			},
+		},
+		temperature: {
+			chargeMosC: toNumberOr(telemetryValue(payload, ['chargeMosC', 'temperature.chargeMosC']), Number.NaN),
+			dischargeMosC: toNumberOr(telemetryValue(payload, ['dischargeMosC', 'temperature.dischargeMosC']), Number.NaN),
+			prechargeMosC: null,
+			ambientC: toNumberOr(telemetryValue(payload, ['ambientC', 'temperature.ambientC']), Number.NaN),
+			heatingFilmC: null,
+			poleC: null,
+			highestTemp: { index: 0, valueC: null },
+			lowestTemp: { index: 0, valueC: null },
+			cellTempsC,
+		},
+		cell: {
+			voltagesMv: cellVoltagesMv,
+			balancing,
+		},
+		status: {
+			protectionStatus: {},
+			failureStatus: {},
+			indicatorStatus: {
+				chargeFetOn,
+				dischargeFetOn,
+				charging,
+				discharging,
+				balancing: toBooleanOr(telemetryValue(payload, ['balancingOn'])) || balancing.some(Boolean),
+			},
+			alarmStatus: {},
+			customStatus: 0,
+		},
+		identity: {
+			hardwareModel: String(battery?.battery_model_name || ''),
+			batteryGroupId: '',
+			boardCode: '',
+			bluetoothMac: String(battery?.ble_mac || '').trim() || null,
+		},
+		customParams: [],
+	}
+}
+
 export const useBatteryDetail = () => {
 	const deviceId = ref('')
 	const battery = ref<AppBatteryDetail | null>(null)
@@ -211,9 +388,13 @@ export const useBatteryDetail = () => {
 	const sessionMode = ref<DeviceDetailSessionMode>('cloud')
 
 	let pollTimer: number | null = null
+	let cloudPollTimer: number | null = null
 	let mqttTransport: MqttTransportLike | null = null
 	let bleCacheKey: string | null = null
 	let pollErrLogged = 0
+	let instrumentStatusFailCount = 0
+	let instrumentPreferredDeviceId = ''
+	const instrumentPassthroughUnavailable = ref(false)
 	let lastStatusLogAt = 0
 	let relaySocketTask: any = null
 	let relaySocketOpen = false
@@ -232,6 +413,13 @@ export const useBatteryDetail = () => {
 		if (pollTimer != null) {
 			clearInterval(pollTimer)
 			pollTimer = null
+		}
+	}
+
+	const stopCloudPolling = () => {
+		if (cloudPollTimer != null) {
+			clearTimeout(cloudPollTimer)
+			cloudPollTimer = null
 		}
 	}
 
@@ -268,6 +456,18 @@ export const useBatteryDetail = () => {
 			return Boolean(String(battery.value?.ble_mac || '').trim())
 		}
 		return Boolean(deviceId.value)
+	}
+
+	const isCloudCapableBattery = () => {
+		const commType = Number(battery.value?.bms_comm_type || 0)
+		const commChipId = String(battery.value?.comm_chip_id || '').trim()
+		return commType === 2 || commType === 3 || !!commChipId
+	}
+
+	const isCloudReportOnlyBattery = () => {
+		if (!isCloudCapableBattery()) return false
+		const bleMac = normalizeMac(String(battery.value?.ble_mac || ''))
+		return Number(battery.value?.bms_comm_type || 0) === 2 || !bleMac
 	}
 
 	const scheduleReportRetry = (delayMs: number) => {
@@ -414,6 +614,68 @@ export const useBatteryDetail = () => {
 		}
 	}
 
+	const refreshCloudTelemetry = async () => {
+		if (!deviceId.value || isInstrumentSession()) return false
+		try {
+			const rsp = await appBatteryCurrentTelemetry(deviceId.value)
+			if (!rsp || (rsp as any).code !== 200) throw new Error((rsp as any)?.message || 'current telemetry fetch failed')
+			const payload = ((rsp as any).data || {}) as AppBatteryCurrentTelemetry
+			const nextStatus = buildStatusFromCloudTelemetry(battery.value, payload)
+			const hasCurrent = !!payload.current && Object.keys(payload.current).length > 0
+			if (battery.value) {
+				battery.value = {
+					...battery.value,
+					is_online: payload.is_online,
+				}
+			}
+			status.value = nextStatus
+			connType.value = Number(payload.is_online || 0) === 1 || hasCurrent ? 'mqtt' : 'offline'
+			log('cloud telemetry refreshed', {
+				deviceId: deviceId.value,
+				is_online: payload.is_online,
+				keys: payload.current ? Object.keys(payload.current).length : 0,
+				has_snapshot: !!payload.snapshot,
+				conn_type: connType.value,
+			})
+			return true
+		} catch (e) {
+			log('cloud telemetry fetch failed', { err: formatErr(e) })
+			return false
+		}
+	}
+
+	const scheduleCloudPolling = () => {
+		stopCloudPolling()
+		if (!deviceId.value || isInstrumentSession()) return
+		cloudPollTimer = setTimeout(async () => {
+			cloudPollTimer = null
+			if (!deviceId.value || isInstrumentSession()) return
+			await refreshCloudTelemetry()
+			if (connType.value !== 'bluetooth') scheduleCloudPolling()
+		}, CLOUD_POLL_INTERVAL_MS) as unknown as number
+	}
+
+	const activateCloudReportMode = async () => {
+		stopPolling()
+		stopCloudPolling()
+		closeRelaySocket()
+		client.value = null
+		if (bleCacheKey) {
+			releaseBleClient(bleCacheKey)
+			bleCacheKey = null
+		}
+		try {
+			await mqttTransport?.disconnect()
+		} catch (e) {}
+		mqttTransport = null
+		const ok = await refreshCloudTelemetry()
+		if (!ok && Number(battery.value?.is_online || 0) === 1) {
+			connType.value = 'mqtt'
+		}
+		scheduleCloudPolling()
+		return ok
+	}
+
 	const scheduleRelayReconnect = () => {
 		if (relayReconnectTimer != null) return
 		if (connType.value !== 'bluetooth' || !deviceId.value) return
@@ -550,6 +812,7 @@ export const useBatteryDetail = () => {
 
 	const attachBleEntry = (entry: ReturnType<typeof getBleClientEntry>, options?: { retain?: boolean }) => {
 		if (!entry) return false
+		stopCloudPolling()
 		if (bleCacheKey && bleCacheKey !== entry.key) {
 			releaseBleClient(bleCacheKey)
 		}
@@ -586,9 +849,12 @@ export const useBatteryDetail = () => {
 	const startPolling = (c: BmsClient) => {
 		stopPolling()
 		if (pollingPaused.value) return
+		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 		const run = async () => {
 			try {
 				status.value = await c.readAllStatus()
+				instrumentStatusFailCount = 0
+				instrumentPassthroughUnavailable.value = false
 				if (status.value) {
 					tryReportStatus(status.value)
 				}
@@ -601,6 +867,18 @@ export const useBatteryDetail = () => {
 				} catch (e) {}
 				pollErrLogged = 0
 			} catch (e) {
+				if (isInstrumentSession() && connType.value === 'bluetooth' && isInstrumentNoPassthroughError(e)) {
+					instrumentStatusFailCount += 1
+					if (instrumentStatusFailCount >= INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD) {
+						instrumentPassthroughUnavailable.value = true
+						status.value = null
+						log('instrument passthrough unavailable, stop status polling', {
+							failCount: instrumentStatusFailCount,
+							err: formatErr(e),
+						})
+						return
+					}
+				}
 				if (pollErrLogged < 3) {
 					pollErrLogged += 1
 					log('poll failed', { err: formatErr(e) })
@@ -609,15 +887,19 @@ export const useBatteryDetail = () => {
 		}
 		const scheduleNext = (delayMs: number) => {
 			if (pollingPaused.value || client.value !== c) return
+			if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 			pollTimer = setTimeout(async () => {
 				pollTimer = null
 				if (pollingPaused.value || client.value !== c) return
+				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 				await run()
+				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 				const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : POLL_INTERVAL_MS
 				scheduleNext(nextDelay)
 			}, delayMs) as unknown as number
 		}
 		void run().finally(() => {
+			if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 			const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : POLL_INTERVAL_MS
 			scheduleNext(nextDelay)
 		})
@@ -630,6 +912,7 @@ export const useBatteryDetail = () => {
 
 	const resumePolling = () => {
 		pollingPaused.value = false
+		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 		if (client.value) startPolling(client.value)
 	}
 
@@ -640,9 +923,12 @@ export const useBatteryDetail = () => {
 			void reportConnectionStatus(false, 'bluetooth')
 		}
 		stopPolling()
+		stopCloudPolling()
 		closeRelaySocket()
 		client.value = null
 		status.value = null
+		instrumentStatusFailCount = 0
+		instrumentPassthroughUnavailable.value = false
 		connType.value = 'offline'
 		clearReportRetryTimer()
 		if (bleCacheKey) {
@@ -679,6 +965,7 @@ export const useBatteryDetail = () => {
 				maxReadRegisters: BLE_MAX_READ_REGS,
 				force: !options?.preserveCurrentBle,
 				probe: options?.probe !== false,
+				preferredDeviceId: isInstrumentSession() ? instrumentPreferredDeviceId : undefined,
 			})
 			if (!entry) return false
 			return attachBleEntry(entry, { retain: true })
@@ -796,6 +1083,11 @@ export const useBatteryDetail = () => {
 				return
 			}
 			if (bleDecision.ok && (await connectBleFirst(options))) return
+			if (isCloudCapableBattery()) {
+				log('connectAuto choose cloud report mode')
+				await activateCloudReportMode()
+				return
+			}
 			log('connectAuto BLE not available, try remote transport')
 			if (useSocketBridge) {
 				if (await connectSocketBridge()) return
@@ -836,6 +1128,9 @@ export const useBatteryDetail = () => {
 		sessionMode.value = 'cloud'
 		deviceId.value = nextId
 		status.value = null
+		instrumentStatusFailCount = 0
+		instrumentPreferredDeviceId = ''
+		instrumentPassthroughUnavailable.value = false
 		const handoff =
 			options?.handoff && String(options.handoff.deviceId || '').trim() === nextId ? options.handoff : null
 		if (handoff) {
@@ -862,16 +1157,23 @@ export const useBatteryDetail = () => {
 		const ok = await refreshCloudBatteryDetail(nextId)
 		if (!ok) return
 		if (options?.preferWarmBle !== false && attachWarmBleFromBattery('cloud-detail')) return
+		if (isCloudReportOnlyBattery()) {
+			await activateCloudReportMode()
+			return
+		}
 		void connectAuto({ preserveCurrentBle: options?.preferWarmBle !== false })
 	}
 
-	const loadInstrumentSession = ({ bleMac, deviceName }: LoadInstrumentSessionOptions) => {
+	const loadInstrumentSession = ({ bleMac, deviceName, deviceId: preferredDeviceId }: LoadInstrumentSessionOptions) => {
 		const normalizedMac = normalizeMac(bleMac)
 		if (!normalizedMac) return
 		resetReportState({ clearQueue: true })
 		sessionMode.value = 'instrument'
 		deviceId.value = ''
 		status.value = null
+		instrumentStatusFailCount = 0
+		instrumentPreferredDeviceId = String(preferredDeviceId || '').trim()
+		instrumentPassthroughUnavailable.value = false
 		battery.value = {
 			device_id: '',
 			device_number: normalizedMac,
@@ -883,6 +1185,7 @@ export const useBatteryDetail = () => {
 		} as AppBatteryDetail
 		log('load instrument session', {
 			ble_mac: normalizedMac,
+			device_id: instrumentPreferredDeviceId || null,
 			device_name: battery.value.device_name ?? null,
 		})
 		void connectAuto()

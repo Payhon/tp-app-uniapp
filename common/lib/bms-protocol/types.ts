@@ -16,6 +16,7 @@ export type LoggerLike = {
 
 export type BmsRequestOptions = {
 	timeoutMs?: number
+	suppressTimeoutLog?: boolean
 }
 
 export type BmsTransportRequest = (frameBytes: Uint8Array, options?: BmsRequestOptions) => Promise<Uint8Array> | Uint8Array
