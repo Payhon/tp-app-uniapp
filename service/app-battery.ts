@@ -48,6 +48,13 @@ export type AppBatteryCurrentTelemetry = {
 	[key: string]: unknown
 }
 
+type LegacyTelemetryRow = {
+	key?: string
+	value?: unknown
+	ts?: string | number
+	[key: string]: unknown
+}
+
 export type AppBatteryOtaCheck = {
 	device_id: string
 	need_upgrade: boolean
@@ -122,8 +129,52 @@ export const appBatteryMqttCredential = (deviceId: string) => {
 	return apiRequest<AppBatteryMqttCredential>(`/api/v1/app/battery/mqtt-credential/${deviceId}`, null, 'GET')
 }
 
-export const appBatteryCurrentTelemetry = (deviceId: string) => {
-	return apiRequest<AppBatteryCurrentTelemetry>(`/api/v1/app/battery/current-telemetry/${deviceId}`, null, 'GET')
+const parseLegacyTelemetryTs = (ts: unknown) => {
+	if (typeof ts === 'number' && Number.isFinite(ts)) {
+		return ts > 10_000_000_000 ? ts : ts * 1000
+	}
+	if (typeof ts === 'string' && ts.trim() !== '') {
+		const parsed = Date.parse(ts)
+		if (Number.isFinite(parsed)) return parsed
+	}
+	return 0
+}
+
+const normalizeLegacyCurrentTelemetry = (deviceId: string, rows: unknown): AppBatteryCurrentTelemetry => {
+	const current: Record<string, AppBatteryCurrentTelemetryValue> = {}
+	let lastReportTs = 0
+	if (Array.isArray(rows)) {
+		for (const row of rows as LegacyTelemetryRow[]) {
+			const key = String(row?.key || '').trim()
+			if (!key) continue
+			const ts = parseLegacyTelemetryTs(row?.ts)
+			if (ts > lastReportTs) lastReportTs = ts
+			current[key] = { value: row?.value, ts }
+		}
+	}
+	const freshMs = lastReportTs > 0 ? Date.now() - lastReportTs : Number.POSITIVE_INFINITY
+	return {
+		device_id: deviceId,
+		is_online: freshMs >= 0 && freshMs <= 130_000 ? 1 : 0,
+		last_report_ts: lastReportTs,
+		current,
+		snapshot: null,
+	}
+}
+
+export const appBatteryCurrentTelemetry = async (deviceId: string) => {
+	try {
+		return await apiRequest<AppBatteryCurrentTelemetry>(`/api/v1/app/battery/current-telemetry/${deviceId}`, null, 'GET')
+	} catch (e) {
+		const legacyRsp = await apiRequest<LegacyTelemetryRow[]>(`/api/v1/telemetry/datas/current/${deviceId}`, null, 'GET')
+		if (legacyRsp && legacyRsp.code === 200) {
+			return {
+				...legacyRsp,
+				data: normalizeLegacyCurrentTelemetry(deviceId, legacyRsp.data),
+			}
+		}
+		return legacyRsp as unknown as ApiResponse<AppBatteryCurrentTelemetry>
+	}
 }
 
 export const appBatteryOtaCheck = (payload: AppBatteryOtaCheckReq) => {

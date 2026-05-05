@@ -225,7 +225,7 @@ const alarmCount = computed(() => {
 
 const protectCount = computed(() => {
 	const obj = protect.value as Record<string, boolean>
-	return Object.keys(obj).filter((k) => !k.toLowerCase().includes('fault') && obj[k]).length
+	return Object.keys(obj).filter((k) => obj[k]).length
 })
 
 const hasFlags = computed(() => faultCount.value > 0 || alarmCount.value > 0 || protectCount.value > 0)
@@ -237,9 +237,8 @@ const labelForStatus = (key: string) => {
 }
 
 const faultItems = computed(() => {
-	const protectObj = protect.value as Record<string, boolean>
 	const failureObj = failure.value as Record<string, boolean>
-	return [...Object.keys(protectObj).filter((k) => protectObj[k]), ...Object.keys(failureObj).filter((k) => failureObj[k])].map(labelForStatus)
+	return Object.keys(failureObj).filter((k) => failureObj[k]).map(labelForStatus)
 })
 
 const alarmItems = computed(() => {
@@ -250,7 +249,7 @@ const alarmItems = computed(() => {
 const protectItems = computed(() => {
 	const obj = protect.value as Record<string, boolean>
 	return Object.keys(obj)
-		.filter((k) => !k.toLowerCase().includes('fault') && obj[k])
+		.filter((k) => obj[k])
 		.map(labelForStatus)
 })
 

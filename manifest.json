@@ -2,8 +2,8 @@
     "name" : "%app.name%",
     "appid" : "__UNI__40EADE1",
     "description" : "富嘉 BMS",
-    "versionName" : "1.0.9",
-    "versionCode" : 109,
+    "versionName" : "1.1.1",
+    "versionCode" : 111,
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {

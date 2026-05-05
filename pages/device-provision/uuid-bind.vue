@@ -96,6 +96,14 @@ async function run() {
 		if ((info as any)?.code !== 200) {
 			throw new Error(String((info as any)?.message || t('pages.deviceProvision.unknownError')))
 		}
+		let boundDeviceId = String((info as any)?.data?.device_id || '').trim()
+		if ((info as any)?.data?.is_bound && boundDeviceId) {
+			status.value = 'success'
+			done.value = true
+			uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
+			goDeviceDetail(boundDeviceId)
+			return
+		}
 
 		// 按需求：UUID（item_uuid）查询到设备后，直接绑定到当前用户账号下（不走 BLE 写入流程）
 		status.value = 'binding'
@@ -103,11 +111,29 @@ async function run() {
 		if ((bindRes as any)?.code !== 200) {
 			console.error('[uuid-bind] bind failed', bindRes)
 			const sqlErr = String((bindRes as any)?.data?.sql_error || '').trim()
-			const msg = String((bindRes as any)?.message || t('pages.deviceProvision.bindFailed'))
+			const dataMsg = String((bindRes as any)?.data?.message || '').trim()
+			if (dataMsg === 'device already bound to current user') {
+				if (!boundDeviceId) {
+					try {
+						const refreshRsp = await getDeviceProvisionInfo(uuid.value)
+						if (Number((refreshRsp as any)?.code || 0) === 200) {
+							boundDeviceId = String((refreshRsp as any)?.data?.device_id || '').trim()
+						}
+					} catch (e) {
+						console.warn('[uuid-bind] refresh device info after already-bound response failed', e)
+					}
+				}
+				status.value = 'success'
+				done.value = true
+				uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
+				goDeviceDetail(boundDeviceId)
+				return
+			}
+			const msg = String(dataMsg || (bindRes as any)?.message || t('pages.deviceProvision.bindFailed'))
 			throw new Error(sqlErr ? `${msg} (${sqlErr})` : msg)
 		}
 
-			let boundDeviceId = String((bindRes as any)?.data?.device_id || (info as any)?.data?.device_id || '').trim()
+			boundDeviceId = String((bindRes as any)?.data?.device_id || (info as any)?.data?.device_id || '').trim()
 			if (!boundDeviceId) {
 				try {
 					const refreshRsp = await getDeviceProvisionInfo(uuid.value)

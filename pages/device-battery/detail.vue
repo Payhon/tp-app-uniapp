@@ -82,8 +82,13 @@
 				</view>
 			</view>
 			<!-- #endif -->
+			<view v-if="activeTab === 0 && showBmsDataLoading" class="data-loading">
+				<view class="data-loading__spinner"></view>
+				<text class="data-loading__title">{{ $t('deviceDetail.dashboard.loadingTitle') }}</text>
+				<text class="data-loading__desc">{{ $t('deviceDetail.dashboard.loadingDesc') }}</text>
+			</view>
 			<dashboard-tab
-				v-if="activeTab === 0"
+				v-else-if="activeTab === 0"
 				:battery="battery"
 				:status="status"
 				:connType="connType"
@@ -190,7 +195,22 @@ const canShowHistoryTab = ref(false)
 const historyTabRef = ref<HistoryTabExposed | null>(null)
 const allowScanHandoff = ref(false)
 const meterPanelVisible = ref(true)
-const { battery, status, client, connType, connecting, sessionMode, loadById, loadInstrumentSession, disconnectAll, disconnectBluetooth, pausePolling, resumePolling } = useBatteryDetail()
+const {
+	battery,
+	status,
+	client,
+	connType,
+	dataSourceMode,
+	connecting,
+	bmsDataLoading,
+	sessionMode,
+	loadById,
+	loadInstrumentSession,
+	disconnectAll,
+	disconnectBluetooth,
+	pausePolling,
+	resumePolling,
+} = useBatteryDetail()
 const sessionActionButtonStyle = {
 	width: '100%',
 	height: '76rpx',
@@ -300,6 +320,8 @@ const maybeCheckOtaOnDashboard = async () => {
 const connText = computed(() => {
 	if (connecting.value) return t('deviceDetail.conn.connecting') as string
 	if (connType.value === 'bluetooth') return t('deviceDetail.conn.bluetooth') as string
+	if (connType.value === 'mqtt' && dataSourceMode.value === 'realtime') return t('deviceDetail.conn.mqttRealtime') as string
+	if (connType.value === 'mqtt' && dataSourceMode.value === 'cloud_fallback') return t('deviceDetail.conn.cloudFallback') as string
 	if (connType.value === 'mqtt') return t('deviceDetail.conn.mqtt') as string
 	return t('deviceDetail.conn.offline') as string
 })
@@ -317,6 +339,14 @@ const connClass = computed(() => {
 })
 
 const showBleDisconnectBtn = computed(() => connType.value === 'bluetooth' && !connecting.value)
+const showBmsDataLoading = computed(
+	() =>
+		activeTab.value === 0 &&
+		!connecting.value &&
+		bmsDataLoading.value &&
+		!status.value &&
+		(connType.value === 'bluetooth' || connType.value === 'mqtt')
+)
 
 const loadHistoryPermission = async () => {
 	try {
@@ -679,6 +709,51 @@ onUnload(() => {
 	position: relative;
 	z-index: 1;
 	box-sizing: border-box;
+}
+
+.data-loading {
+	margin: 24rpx;
+	min-height: 520rpx;
+	border-radius: 28rpx;
+	background: rgba(255, 255, 255, 0.92);
+	box-shadow: 0 12rpx 34rpx rgba(36, 111, 221, 0.08);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 48rpx 36rpx;
+	box-sizing: border-box;
+}
+
+.data-loading__spinner {
+	width: 48rpx;
+	height: 48rpx;
+	border-radius: 50%;
+	border: 5rpx solid rgba(11, 59, 255, 0.14);
+	border-top-color: #0b3bff;
+	animation: data-loading-spin 0.8s linear infinite;
+}
+
+.data-loading__title {
+	margin-top: 24rpx;
+	font-size: 30rpx;
+	font-weight: 700;
+	color: #1f2937;
+	text-align: center;
+}
+
+.data-loading__desc {
+	margin-top: 10rpx;
+	font-size: 24rpx;
+	line-height: 1.5;
+	color: #6b7280;
+	text-align: center;
+}
+
+@keyframes data-loading-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .session-float {

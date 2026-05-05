@@ -6,7 +6,8 @@
 					<image class="section__icon" src="/static/image/device/icon-mono@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.singleCell') }}</text>
 				</view>
-				<u-icon :name="opened.single ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				<view v-if="loading.single" class="section-loading"></view>
+				<u-icon v-else :name="opened.single ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
 			</view>
 			<view v-if="hasSingleItems && opened.single" class="list">
 				<view v-for="item in singleItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -25,7 +26,8 @@
 					<image class="section__icon" src="/static/image/device/icon-voltage@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.voltage') }}</text>
 				</view>
-				<u-icon :name="opened.voltage ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				<view v-if="loading.voltage" class="section-loading"></view>
+				<u-icon v-else :name="opened.voltage ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
 			</view>
 			<view v-if="hasVoltageItems && opened.voltage" class="list">
 				<view v-for="item in voltageItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -44,7 +46,8 @@
 					<image class="section__icon" src="/static/image/device/icon-currency@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.current') }}</text>
 				</view>
-				<u-icon :name="opened.current ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				<view v-if="loading.current" class="section-loading"></view>
+				<u-icon v-else :name="opened.current ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
 			</view>
 			<view v-if="hasCurrentItems && opened.current" class="list">
 				<view v-for="item in currentItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -63,7 +66,8 @@
 					<image class="section__icon" src="/static/image/device/icon-temperature@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.temperature') }}</text>
 				</view>
-				<u-icon :name="opened.temperature ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				<view v-if="loading.temperature" class="section-loading"></view>
+				<u-icon v-else :name="opened.temperature ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
 			</view>
 			<view v-if="hasTemperatureItems && opened.temperature" class="list">
 				<view v-for="item in temperatureItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -455,6 +459,13 @@ const opened = reactive({
 	temperature: false,
 })
 
+const loading = reactive({
+	single: false,
+	voltage: false,
+	current: false,
+	temperature: false,
+})
+
 const loaded = reactive({
 	single: false,
 	voltage: false,
@@ -477,10 +488,36 @@ onMounted(() => {
 	loadDeviceParamPermissions()
 })
 
-const toggle = (k: keyof typeof opened) => {
-	opened[k] = !opened[k]
-	if (opened[k]) loadSection(k)
+type BasicSectionKey = keyof typeof opened
+
+const toggle = async (k: BasicSectionKey) => {
+	if (loading[k]) return
+	if (opened[k]) {
+		opened[k] = false
+		applyPollingState()
+		return
+	}
+	if (!props.client || props.connType === 'offline') {
+		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	if (loaded[k]) {
+		opened[k] = true
+		applyPollingState()
+		return
+	}
+	loading[k] = true
 	applyPollingState()
+	try {
+		await loadSection(k)
+		opened[k] = true
+	} catch (e) {
+		console.error('[params] load section failed', k, e)
+		uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
+	} finally {
+		loading[k] = false
+		applyPollingState()
+	}
 }
 
 const fwVersionText = computed(() => String(props.battery?.fw_version || props.status?.meta?.softwareVersion || '-'))
@@ -1212,6 +1249,8 @@ const formatDebugError = (e: unknown) => {
 	}
 }
 
+const isMiniProgramDomainListError = (message: string) => message.toLowerCase().includes('url not in domain list')
+
 const getBleDebugDeviceId = () => {
 	try {
 		const transport = props.client?.getTransport?.() as any
@@ -1334,23 +1373,72 @@ const applyOtaCheckResult = (data: Record<string, unknown> | null, version: stri
 	})
 }
 
-const runBootOtaUpgrade = async (
-	firmware: Uint8Array,
-	targetAddress: number,
-	options?: {
-		queryTargetAddress?: number
-		skipEnterBoot?: boolean
-		prepareBaudRate?: number
-		bootPacketTimeoutMs?: number
-		finalizeTimeoutMs?: number
-		finalizeAssumeSuccessOnTimeout?: boolean
-		forceWriteWithResponse?: boolean
-		minFrameIntervalMs?: number
-		packetDelayMs?: number
-		pageBoundaryDelayMs?: number
-		logger?: typeof otaLogger
+type BootOtaRunOptions = {
+	queryTargetAddress?: number
+	skipEnterBoot?: boolean
+	prepareBaudRate?: number
+	bootPacketTimeoutMs?: number
+	finalizeTimeoutMs?: number
+	finalizeAssumeSuccessOnTimeout?: boolean
+	terminalPacketWriteErrorAsComplete?: boolean
+	finalizeDelayMs?: number
+	requireFinalPacketAck?: boolean
+	finalizeBurstIntervalsMs?: number[]
+	forceWriteWithResponse?: boolean
+	minFrameIntervalMs?: number
+	packetDelayMs?: number
+	pageBoundaryDelayMs?: number
+	adaptiveSlowdownOnPacketTimeout?: boolean
+	adaptivePacketDelayMs?: number
+	adaptivePageBoundaryDelayMs?: number
+	logger?: typeof otaLogger
+}
+
+const getBleBootOtaRuntimeOptions = ({
+	isMeterUpgrade,
+	logger,
+}: {
+	isMeterUpgrade: boolean
+	logger?: typeof otaLogger
+}): BootOtaRunOptions => {
+	const runtimePlatform = getRuntimePlatform()
+	const isBluetooth = props.connType === 'bluetooth'
+	const isAndroid = runtimePlatform === 'android'
+	const isIos = runtimePlatform === 'ios'
+	const shouldRelaxBleFinalize = isBluetooth && (isAndroid || isIos)
+	if (isMeterUpgrade) {
+		return {
+			finalizeDelayMs: 2000,
+			finalizeTimeoutMs: shouldRelaxBleFinalize ? 12000 : undefined,
+			finalizeAssumeSuccessOnTimeout: false,
+			terminalPacketWriteErrorAsComplete: false,
+			requireFinalPacketAck: true,
+			finalizeBurstIntervalsMs: [300, 600, 900],
+			forceWriteWithResponse: isAndroid,
+			minFrameIntervalMs: isAndroid ? 100 : undefined,
+			packetDelayMs: 0,
+			pageBoundaryDelayMs: isAndroid ? 300 : undefined,
+			adaptiveSlowdownOnPacketTimeout: isAndroid,
+			adaptivePacketDelayMs: 100,
+			adaptivePageBoundaryDelayMs: 1500,
+			logger,
+		}
 	}
-) => {
+	return {
+		finalizeTimeoutMs: shouldRelaxBleFinalize ? 6000 : undefined,
+		finalizeAssumeSuccessOnTimeout: false,
+		terminalPacketWriteErrorAsComplete: false,
+		requireFinalPacketAck: true,
+		finalizeBurstIntervalsMs: shouldRelaxBleFinalize ? [300, 600, 900] : undefined,
+		forceWriteWithResponse: isMeterUpgrade && isAndroid,
+		minFrameIntervalMs: isMeterUpgrade && isAndroid ? 220 : undefined,
+		packetDelayMs: isMeterUpgrade && isAndroid ? 100 : undefined,
+		pageBoundaryDelayMs: isMeterUpgrade && isAndroid ? 1500 : undefined,
+		logger,
+	}
+}
+
+const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, options?: BootOtaRunOptions) => {
 	if (!props.client) throw new Error('client not ready')
 	const { sourceAddress } = props.client.getAddresses()
 	const rawTransport = props.client.getTransport()
@@ -1377,6 +1465,11 @@ const runBootOtaUpgrade = async (
 			}
 			return t.request(frameBytes, requestOptions)
 		},
+		writeFrame: (frameBytes: Uint8Array, overrideOptions?: { writeWithResponse?: boolean }) => {
+			const t = transportAny
+			if (typeof t?.writeFrame !== 'function') throw new Error('transport raw write not ready')
+			return t.writeFrame(frameBytes, overrideOptions)
+		},
 	}
 	try {
 		await bootOtaUpgrade({
@@ -1389,8 +1482,15 @@ const runBootOtaUpgrade = async (
 			prepareBaudRate: options?.prepareBaudRate,
 			packetDelayMs: options?.packetDelayMs,
 			pageBoundaryDelayMs: options?.pageBoundaryDelayMs,
+			adaptiveSlowdownOnPacketTimeout: options?.adaptiveSlowdownOnPacketTimeout,
+			adaptivePacketDelayMs: options?.adaptivePacketDelayMs,
+			adaptivePageBoundaryDelayMs: options?.adaptivePageBoundaryDelayMs,
+			finalizeDelayMs: options?.finalizeDelayMs,
 			finalizeTimeoutMs: options?.finalizeTimeoutMs,
 			finalizeAssumeSuccessOnTimeout: options?.finalizeAssumeSuccessOnTimeout,
+			terminalPacketWriteErrorAsComplete: options?.terminalPacketWriteErrorAsComplete,
+			requireFinalPacketAck: options?.requireFinalPacketAck,
+			finalizeBurstIntervalsMs: options?.finalizeBurstIntervalsMs,
 			logger: options?.logger || otaLogger,
 			onProgress: (p) => {
 				if (options?.logger) {
@@ -1500,7 +1600,7 @@ const startBmsOta = async () => {
 		const macRaw = String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim()
 		const isGaugeDevice = isMeterMac(macRaw)
 		const otaTargetAddress = isGaugeDevice ? BOOT_TARGET_METER : BOOT_TARGET_BMS
-		await runBootOtaUpgrade(firmware, otaTargetAddress)
+		await runBootOtaUpgrade(firmware, otaTargetAddress, getBleBootOtaRuntimeOptions({ isMeterUpgrade: isGaugeDevice }))
 
 		updateOtaStage('success', 100)
 		syncOtaState({
@@ -1528,6 +1628,18 @@ const startBmsOta = async () => {
 			const sizeMismatchText = t('deviceDetail.toast.otaFirmwareSizeMismatch') as string
 			otaState.message = sizeMismatchText
 			uni.showToast({ title: sizeMismatchText, icon: 'none' })
+		} else if (errMessage.startsWith('boot_transfer_incomplete')) {
+			const incompleteText = t('deviceDetail.toast.otaTransferIncomplete') as string
+			otaState.message = incompleteText
+			uni.showToast({ title: incompleteText, icon: 'none' })
+		} else if (errMessage === 'Boot finalize timeout' || errMessage.startsWith('Boot finalize failed')) {
+			const finalizeText = t('deviceDetail.toast.otaFinalizeNoAck') as string
+			otaState.message = finalizeText
+			uni.showToast({ title: finalizeText, icon: 'none' })
+		} else if (isMiniProgramDomainListError(errMessage)) {
+			const domainText = t('deviceDetail.toast.otaDomainNotConfigured') as string
+			otaState.message = domainText
+			uni.showToast({ title: domainText, icon: 'none' })
 		} else {
 			uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
 		}
@@ -1583,32 +1695,34 @@ const startMeterOta = async () => {
 			size: firmware.length,
 		})
 		updateOtaStage('prepare', 10)
-		const runtimePlatform = getRuntimePlatform()
-		const isAndroid = runtimePlatform === 'android'
-		const isIos = runtimePlatform === 'ios'
-		const shouldRelaxMeterFinalize = isAndroid || isIos
+		const meterRuntimeOptions = getBleBootOtaRuntimeOptions({ isMeterUpgrade: true, logger: meterOtaLogger })
 		appendMeterOtaDebug('info', 'boot', 'boot ota start', {
 			targetAddress: '0xFC',
 			queryTargetAddress: '0x00',
 			skipEnterBoot: true,
 			prepareBaudRate: 9600,
 			bootPacketTimeoutMs: 45000,
-			finalizeTimeoutMs: shouldRelaxMeterFinalize ? 6000 : undefined,
-			forceWriteWithResponse: isAndroid,
+			finalizeDelayMs: meterRuntimeOptions.finalizeDelayMs,
+			finalizeTimeoutMs: meterRuntimeOptions.finalizeTimeoutMs,
+			finalizeAssumeSuccessOnTimeout: !!meterRuntimeOptions.finalizeAssumeSuccessOnTimeout,
+			forceWriteWithResponse: !!meterRuntimeOptions.forceWriteWithResponse,
+			terminalPacketWriteErrorAsComplete: !!meterRuntimeOptions.terminalPacketWriteErrorAsComplete,
+			requireFinalPacketAck: !!meterRuntimeOptions.requireFinalPacketAck,
+			finalizeBurstIntervalsMs: meterRuntimeOptions.finalizeBurstIntervalsMs,
+			minFrameIntervalMs: meterRuntimeOptions.minFrameIntervalMs,
+			packetDelayMs: meterRuntimeOptions.packetDelayMs,
+			pageBoundaryDelayMs: meterRuntimeOptions.pageBoundaryDelayMs,
+			adaptiveSlowdownOnPacketTimeout: !!meterRuntimeOptions.adaptiveSlowdownOnPacketTimeout,
+			adaptivePacketDelayMs: meterRuntimeOptions.adaptivePacketDelayMs,
+			adaptivePageBoundaryDelayMs: meterRuntimeOptions.adaptivePageBoundaryDelayMs,
 			firmwareSize: firmware.length,
 		})
 		await runBootOtaUpgrade(firmware, BOOT_TARGET_METER, {
+			...meterRuntimeOptions,
 			queryTargetAddress: 0x00,
 			skipEnterBoot: true,
 			prepareBaudRate: 9600,
 			bootPacketTimeoutMs: 45000,
-			finalizeTimeoutMs: shouldRelaxMeterFinalize ? 6000 : undefined,
-			finalizeAssumeSuccessOnTimeout: shouldRelaxMeterFinalize,
-			forceWriteWithResponse: isAndroid,
-			minFrameIntervalMs: isAndroid ? 220 : undefined,
-			packetDelayMs: isAndroid ? 100 : undefined,
-			pageBoundaryDelayMs: isAndroid ? 1500 : undefined,
-			logger: meterOtaLogger,
 		})
 		updateOtaStage('success', 100)
 		appendMeterOtaDebug('info', 'meter-ota', 'meter ota success', {
@@ -1632,6 +1746,18 @@ const startMeterOta = async () => {
 			const sizeMismatchText = t('deviceDetail.toast.otaFirmwareSizeMismatch') as string
 			otaState.message = sizeMismatchText
 			uni.showToast({ title: sizeMismatchText, icon: 'none' })
+		} else if (errMessage.startsWith('boot_transfer_incomplete')) {
+			const incompleteText = t('deviceDetail.toast.otaTransferIncomplete') as string
+			otaState.message = incompleteText
+			uni.showToast({ title: incompleteText, icon: 'none' })
+		} else if (errMessage === 'Boot finalize timeout' || errMessage.startsWith('Boot finalize failed')) {
+			const finalizeText = t('deviceDetail.toast.otaFinalizeNoAck') as string
+			otaState.message = finalizeText
+			uni.showToast({ title: finalizeText, icon: 'none' })
+		} else if (isMiniProgramDomainListError(errMessage)) {
+			const domainText = t('deviceDetail.toast.otaDomainNotConfigured') as string
+			otaState.message = domainText
+			uni.showToast({ title: domainText, icon: 'none' })
 		} else {
 			uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
 		}
@@ -1667,13 +1793,10 @@ const loadKeys = async (keys: string[]) => {
 	const c = props.client
 	if (!c) return
 	const allowedKeys = keys.filter((k) => canAccessParamKey(k))
+	if (!allowedKeys.length) return
+	const values = await c.readParamsByKeys(allowedKeys)
 	for (const k of allowedKeys) {
-		try {
-			// eslint-disable-next-line no-await-in-loop
-			paramValues[k] = await c.readParam(k)
-		} catch (e) {
-			paramValues[k] = null
-		}
+		paramValues[k] = Object.prototype.hasOwnProperty.call(values, k) ? values[k] : null
 	}
 }
 
@@ -1984,6 +2107,22 @@ const loadSection = (k: keyof typeof opened) => {
 	line-height: 1.5;
 	color: #8e95a2;
 	text-align: right;
+}
+
+.section-loading {
+	width: 30rpx;
+	height: 30rpx;
+	border-radius: 50%;
+	border: 4rpx solid rgba(11, 59, 255, 0.12);
+	border-top-color: #0b3bff;
+	animation: section-loading-spin 0.8s linear infinite;
+	flex-shrink: 0;
+}
+
+@keyframes section-loading-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .divider {

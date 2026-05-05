@@ -31,8 +31,8 @@ function isExpectedBootSourceAddress(expectedSourceAddress: number, parsedSource
 	const actual = parsedSourceAddress & 0xff
 	if (expect === 0x00) return true
 	if (actual === expect) return true
-	// 仪表 OTA 通过 0xFC 透传，但 Boot 回包仍可能来自 BMS Bootloader 地址 0x01。
-	return expect === 0xfc && actual === 0x01
+	// 仪表 OTA 通过 0xFC 透传，但不同 Bootloader 回包可能来自 0x01/0xFC/0xFD。
+	return expect === 0xfc && (actual === 0x01 || actual === 0xfd)
 }
 type PendingReq = {
 	resolve: (frameBytes: Uint8Array) => void
@@ -891,7 +891,20 @@ export class UniBleBmsTransport {
 		}
 	}
 
-		async setMtu(mtu: number): Promise<number> {
+		async writeFrame(
+			frameBytes: Uint8Array | ArrayLike<number>,
+			{ writeWithResponse = false }: { writeWithResponse?: boolean } = {}
+		): Promise<void> {
+			const bytes = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
+			const now = Date.now();
+			const delta = now - this._lastTxAt;
+			if (delta < this.minFrameIntervalMs) await sleep(this.minFrameIntervalMs - delta);
+			if (this.logger?.debug) this.logger.debug(`[ble] tx frame len=${bytes.length} hex=${u8ToHex(bytes)}`);
+			await this._writeFrameBytes(bytes, { writeWithResponse });
+			this._lastTxAt = Date.now();
+		}
+
+			async setMtu(mtu: number): Promise<number> {
 		if (!this.deviceId) throw new BmsProtocolError('deviceId is required for setMtu');
 		const api = (uni as Record<string, any>)?.setBLEMTU;
 		if (typeof api !== 'function') throw new BmsProtocolError('setBLEMTU not supported');

@@ -5,7 +5,6 @@ import {
 	appBatteryDetail,
 	appBatteryConnectionStatus,
 	appBatteryCurrentTelemetry,
-	appBatteryMqttCredential,
 	appBatteryReport,
 	type AppBatteryDetail,
 	type AppBatteryConnectionStatusReq,
@@ -15,9 +14,7 @@ import {
 import {
 	BmsClient,
 	createUniMqttSocketBmsTransport,
-	createUniMqttWsBmsTransport,
 	type UniMqttSocketBmsTransport,
-	type UniMqttWsBmsTransport,
 } from '@/common/lib/bms-protocol'
 import {
 	canBleAutoConnect,
@@ -33,6 +30,7 @@ import type { DeviceDetailHandoff } from '@/common/device-provision/detail-hando
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
+type DataSourceMode = 'realtime' | 'cloud_fallback' | 'offline'
 type DeviceDetailSessionMode = 'cloud' | 'instrument'
 type LoadInstrumentSessionOptions = {
 	bleMac: string
@@ -50,7 +48,7 @@ type LoadByIdOptions = {
 	preferWarmBle?: boolean
 }
 
-type MqttTransportLike = UniMqttWsBmsTransport | UniMqttSocketBmsTransport
+type MqttTransportLike = UniMqttSocketBmsTransport
 
 const BLE_MAX_READ_REGS = 60
 const SNAPSHOT_REPORT_INTERVAL_MS = 30_000
@@ -116,7 +114,7 @@ const buildCoreReport = (s: BmsStatus): Record<string, unknown> => {
 	const alarm = s.status?.alarmStatus || {}
 	const balancing = Array.isArray(s.cell?.balancing) ? s.cell.balancing : []
 
-	const faultCount = countTrue(protection) + countTrue(failure)
+	const faultCount = countTrue(failure)
 
 	return {
 		soc: s.energy?.socPct,
@@ -170,8 +168,6 @@ const getReportPlatform = () => {
 	} catch (e) {}
 	return 'unknown'
 }
-
-const isWeChatMiniProgram = () => getReportPlatform() === 'wxmp'
 
 const buildSocketBridgeWsUrl = () => {
 	const base = String($C.apiBaseUrl || '')
@@ -282,15 +278,21 @@ const buildStatusFromCloudTelemetry = (
 	if (Object.keys(current).length === 0 && Number(payload.is_online || 0) !== 1) return null
 
 	const seriesCount = toNumberOr(telemetryValue(payload, ['seriesCount', 'meta.seriesCount']), 0)
-	const cellVoltagesMv = toNumberArray(telemetryValue(payload, ['cell.voltagesMv']))
-	const cellTempsC = toNumberArray(telemetryValue(payload, ['temperature.cellTempsC']))
+	const cellVoltagesMv = toNumberArray(telemetryValue(payload, ['cell.voltagesMv', 'cellVoltagesMv']))
+	const cellTempsC = toNumberArray(telemetryValue(payload, ['temperature.cellTempsC', 'cellTempsC']))
 	const chargeFetOn = toBooleanOr(telemetryValue(payload, ['chargeFetOn']))
 	const dischargeFetOn = toBooleanOr(telemetryValue(payload, ['dischargeFetOn']))
 	const charging = toBooleanOr(telemetryValue(payload, ['charging']))
 	const discharging = toBooleanOr(telemetryValue(payload, ['discharging']))
 	const balancing = toBooleanArray(telemetryValue(payload, ['cell.balancing']))
-	const highestIdx = toNumberOr(telemetryValue(payload, ['electrical.cellVoltageIndex.highest']), 0)
-	const lowestIdx = toNumberOr(telemetryValue(payload, ['electrical.cellVoltageIndex.lowest']), 0)
+	const highestIdx = toNumberOr(
+		telemetryValue(payload, ['electrical.cellVoltageIndex.highest', 'cellVoltageHighestIndex']),
+		0
+	)
+	const lowestIdx = toNumberOr(
+		telemetryValue(payload, ['electrical.cellVoltageIndex.lowest', 'cellVoltageLowestIndex']),
+		0
+	)
 
 	return {
 		meta: {
@@ -383,7 +385,9 @@ export const useBatteryDetail = () => {
 	const status = ref<BmsStatus | null>(null)
 	const client = shallowRef<BmsClient | null>(null)
 	const connType = ref<ConnType>('offline')
+	const dataSourceMode = ref<DataSourceMode>('offline')
 	const connecting = ref(false)
+	const bmsDataLoading = ref(false)
 	const pollingPaused = ref(false)
 	const sessionMode = ref<DeviceDetailSessionMode>('cloud')
 
@@ -414,6 +418,14 @@ export const useBatteryDetail = () => {
 			clearInterval(pollTimer)
 			pollTimer = null
 		}
+	}
+
+	const shouldShowBmsDataLoading = () => {
+		return !status.value && (connType.value === 'bluetooth' || connType.value === 'mqtt') && !instrumentPassthroughUnavailable.value
+	}
+
+	const syncBmsDataLoading = () => {
+		bmsDataLoading.value = shouldShowBmsDataLoading()
 	}
 
 	const stopCloudPolling = () => {
@@ -462,12 +474,6 @@ export const useBatteryDetail = () => {
 		const commType = Number(battery.value?.bms_comm_type || 0)
 		const commChipId = String(battery.value?.comm_chip_id || '').trim()
 		return commType === 2 || commType === 3 || !!commChipId
-	}
-
-	const isCloudReportOnlyBattery = () => {
-		if (!isCloudCapableBattery()) return false
-		const bleMac = normalizeMac(String(battery.value?.ble_mac || ''))
-		return Number(battery.value?.bms_comm_type || 0) === 2 || !bleMac
 	}
 
 	const scheduleReportRetry = (delayMs: number) => {
@@ -616,6 +622,7 @@ export const useBatteryDetail = () => {
 
 	const refreshCloudTelemetry = async () => {
 		if (!deviceId.value || isInstrumentSession()) return false
+		if (!status.value) bmsDataLoading.value = true
 		try {
 			const rsp = await appBatteryCurrentTelemetry(deviceId.value)
 			if (!rsp || (rsp as any).code !== 200) throw new Error((rsp as any)?.message || 'current telemetry fetch failed')
@@ -630,6 +637,8 @@ export const useBatteryDetail = () => {
 			}
 			status.value = nextStatus
 			connType.value = Number(payload.is_online || 0) === 1 || hasCurrent ? 'mqtt' : 'offline'
+			dataSourceMode.value = connType.value === 'mqtt' ? 'cloud_fallback' : 'offline'
+			syncBmsDataLoading()
 			log('cloud telemetry refreshed', {
 				deviceId: deviceId.value,
 				is_online: payload.is_online,
@@ -640,6 +649,7 @@ export const useBatteryDetail = () => {
 			return true
 		} catch (e) {
 			log('cloud telemetry fetch failed', { err: formatErr(e) })
+			syncBmsDataLoading()
 			return false
 		}
 	}
@@ -671,7 +681,9 @@ export const useBatteryDetail = () => {
 		const ok = await refreshCloudTelemetry()
 		if (!ok && Number(battery.value?.is_online || 0) === 1) {
 			connType.value = 'mqtt'
+			dataSourceMode.value = 'cloud_fallback'
 		}
+		if (!ok && connType.value !== 'mqtt') dataSourceMode.value = 'offline'
 		scheduleCloudPolling()
 		return ok
 	}
@@ -822,7 +834,9 @@ export const useBatteryDetail = () => {
 		bleCacheKey = entry.key
 		client.value = entry.client
 		connType.value = 'bluetooth'
+		dataSourceMode.value = 'realtime'
 		connecting.value = false
+		syncBmsDataLoading()
 		startPolling(entry.client)
 		if (!isInstrumentSession()) {
 			void reportConnectionStatus(true, 'bluetooth')
@@ -850,9 +864,14 @@ export const useBatteryDetail = () => {
 		stopPolling()
 		if (pollingPaused.value) return
 		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
+		syncBmsDataLoading()
 		const run = async () => {
+			syncBmsDataLoading()
 			try {
 				status.value = await c.readAllStatus()
+				if (connType.value === 'mqtt' || connType.value === 'bluetooth') {
+					dataSourceMode.value = 'realtime'
+				}
 				instrumentStatusFailCount = 0
 				instrumentPassthroughUnavailable.value = false
 				if (status.value) {
@@ -872,6 +891,7 @@ export const useBatteryDetail = () => {
 					if (instrumentStatusFailCount >= INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD) {
 						instrumentPassthroughUnavailable.value = true
 						status.value = null
+						bmsDataLoading.value = false
 						log('instrument passthrough unavailable, stop status polling', {
 							failCount: instrumentStatusFailCount,
 							err: formatErr(e),
@@ -883,6 +903,8 @@ export const useBatteryDetail = () => {
 					pollErrLogged += 1
 					log('poll failed', { err: formatErr(e) })
 				}
+			} finally {
+				syncBmsDataLoading()
 			}
 		}
 		const scheduleNext = (delayMs: number) => {
@@ -908,12 +930,14 @@ export const useBatteryDetail = () => {
 	const pausePolling = () => {
 		pollingPaused.value = true
 		stopPolling()
+		bmsDataLoading.value = false
 	}
 
 	const resumePolling = () => {
 		pollingPaused.value = false
 		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 		if (client.value) startPolling(client.value)
+		else syncBmsDataLoading()
 	}
 
 	const disconnectAll = async () => {
@@ -927,9 +951,11 @@ export const useBatteryDetail = () => {
 		closeRelaySocket()
 		client.value = null
 		status.value = null
+		bmsDataLoading.value = false
 		instrumentStatusFailCount = 0
 		instrumentPassthroughUnavailable.value = false
 		connType.value = 'offline'
+		dataSourceMode.value = 'offline'
 		clearReportRetryTimer()
 		if (bleCacheKey) {
 			releaseBleClient(bleCacheKey)
@@ -975,47 +1001,6 @@ export const useBatteryDetail = () => {
 		}
 	}
 
-	const connectMqttWs = async (): Promise<boolean> => {
-		try {
-			closeRelaySocket()
-			const rsp = await appBatteryMqttCredential(deviceId.value)
-			if (!rsp || (rsp as any).code !== 200) throw new Error('mqtt credential fetch failed')
-			const cred = (rsp as any).data || {}
-			const wsUrl = String(cred.ws_url || '').trim()
-			const username = String(cred.username || '').trim()
-			const password = cred.password == null ? '' : String(cred.password)
-			const writeTopic = String(cred.write_topic || '').trim()
-			const readTopic = String(cred.read_topic || '').trim()
-			if (!wsUrl || !username || !writeTopic || !readTopic) throw new Error('mqtt credential invalid')
-			const clientId = `app_${String(deviceId.value).slice(0, 8)}_${Date.now()}`
-			log('mqtt(ws) connect start', { wsUrl, deviceId: deviceId.value })
-			mqttTransport = createUniMqttWsBmsTransport({
-				wsUrl,
-				clientId,
-				username,
-				password,
-				writeTopic,
-				readTopic,
-				logger: console as any,
-			})
-			await mqttTransport.connect()
-			const c = new BmsClient({ transport: mqttTransport })
-			await c.readUuid()
-			client.value = c
-			connType.value = 'mqtt'
-			startPolling(c)
-			log('mqtt(ws) connect ok', { wsUrl })
-			return true
-		} catch (e) {
-			log('mqtt(ws) connect failed', { err: e instanceof Error ? e.message : String(e || '') })
-			try {
-				await mqttTransport?.disconnect()
-			} catch (e2) {}
-			mqttTransport = null
-			return false
-		}
-	}
-
 	const connectSocketBridge = async (): Promise<boolean> => {
 		try {
 			closeRelaySocket()
@@ -1035,6 +1020,8 @@ export const useBatteryDetail = () => {
 			await c.readUuid()
 			client.value = c
 			connType.value = 'mqtt'
+			dataSourceMode.value = 'realtime'
+			syncBmsDataLoading()
 			startPolling(c)
 			log('socket bridge connect ok', { wsUrl })
 			return true
@@ -1068,13 +1055,12 @@ export const useBatteryDetail = () => {
 			const commType = Number(battery.value?.bms_comm_type || 0)
 			const bleDecision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
 			const treatBleOnly = commType === 1
-			const useSocketBridge = isWeChatMiniProgram()
 			log('connectAuto', {
 				deviceId: deviceId.value,
 				bms_comm_type: battery.value?.bms_comm_type ?? null,
 				ble_mac: battery.value?.ble_mac ?? null,
 				comm_chip_id: battery.value?.comm_chip_id ?? null,
-				use_socket_bridge: useSocketBridge,
+				use_socket_bridge: true,
 			})
 			if (treatBleOnly) {
 				log('connectAuto choose BLE-only')
@@ -1082,19 +1068,17 @@ export const useBatteryDetail = () => {
 				connType.value = 'offline'
 				return
 			}
-			if (bleDecision.ok && (await connectBleFirst(options))) return
 			if (isCloudCapableBattery()) {
-				log('connectAuto choose cloud report mode')
+				log('connectAuto choose 4G socket bridge')
+				if (await connectSocketBridge()) return
+				log('connectAuto socket bridge failed, fallback to cloud report mode')
 				await activateCloudReportMode()
 				return
 			}
+			if (bleDecision.ok && (await connectBleFirst(options))) return
 			log('connectAuto BLE not available, try remote transport')
-			if (useSocketBridge) {
-				if (await connectSocketBridge()) return
-			} else {
-				if (await connectMqttWs()) return
-			}
 			connType.value = 'offline'
+			dataSourceMode.value = 'offline'
 		} finally {
 			connecting.value = false
 		}
@@ -1128,6 +1112,7 @@ export const useBatteryDetail = () => {
 		sessionMode.value = 'cloud'
 		deviceId.value = nextId
 		status.value = null
+		bmsDataLoading.value = false
 		instrumentStatusFailCount = 0
 		instrumentPreferredDeviceId = ''
 		instrumentPassthroughUnavailable.value = false
@@ -1156,11 +1141,11 @@ export const useBatteryDetail = () => {
 		}
 		const ok = await refreshCloudBatteryDetail(nextId)
 		if (!ok) return
-		if (options?.preferWarmBle !== false && attachWarmBleFromBattery('cloud-detail')) return
-		if (isCloudReportOnlyBattery()) {
-			await activateCloudReportMode()
+		if (isCloudCapableBattery()) {
+			void connectAuto({ preserveCurrentBle: false })
 			return
 		}
+		if (options?.preferWarmBle !== false && attachWarmBleFromBattery('cloud-detail')) return
 		void connectAuto({ preserveCurrentBle: options?.preferWarmBle !== false })
 	}
 
@@ -1171,6 +1156,7 @@ export const useBatteryDetail = () => {
 		sessionMode.value = 'instrument'
 		deviceId.value = ''
 		status.value = null
+		bmsDataLoading.value = false
 		instrumentStatusFailCount = 0
 		instrumentPreferredDeviceId = String(preferredDeviceId || '').trim()
 		instrumentPassthroughUnavailable.value = false
@@ -1197,7 +1183,9 @@ export const useBatteryDetail = () => {
 		status,
 		client,
 		connType,
+		dataSourceMode,
 		connecting,
+		bmsDataLoading,
 		sessionMode,
 		pausePolling,
 		resumePolling,

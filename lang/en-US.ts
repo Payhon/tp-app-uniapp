@@ -1026,6 +1026,8 @@ export default {
     conn: {
       bluetooth: "Bluetooth",
       mqtt: "MQTT",
+      mqttRealtime: "MQTT Realtime",
+      cloudFallback: "Cloud Report Fallback",
       offline: "Offline",
       connecting: "Connecting...",
       disconnect: "Disconnect",
@@ -1106,6 +1108,8 @@ export default {
       insulationAlarm: "Insulation Alarm",
     },
     dashboard: {
+      loadingTitle: "Reading BMS real-time data",
+      loadingDesc: "Connected. Waiting for the first data frame from the device.",
       totalVoltage: "Pack Voltage",
       cycleCount: "Cycles",
       chargeDischargeRemainingTime: "Charge/Discharge Remaining Time",
@@ -1518,6 +1522,9 @@ export default {
       otaRunning: "Upgrading, do not close",
       otaHardwareMismatch: "Firmware package does not match hardware model",
       otaFirmwareSizeMismatch: "Firmware package size does not match device",
+      otaTransferIncomplete: "Firmware packets were not fully acknowledged",
+      otaFinalizeNoAck: "Device did not confirm the OTA finalize command",
+      otaDomainNotConfigured: "Firmware download domain is not configured",
       meterPackageLoadFailed: "Failed to load meter firmware packages",
       meterOtaDebugCopied: "Debug log copied",
       meterOtaDebugCopyFailed: "Failed to copy debug log",

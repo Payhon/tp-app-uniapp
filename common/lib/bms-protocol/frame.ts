@@ -191,21 +191,17 @@ export function parseFrame(frameBytes: Uint8Array | ArrayLike<number>): BmsParse
 			functionCode === BMS_FUNC.SOCKET_READ)
 	) {
 		const byteCount = bytes[5];
-		const dataLen = functionCode === BMS_FUNC.SOCKET_READ ? byteCount * 2 : byteCount;
+		const dataLen = byteCount;
 		const expectedLength = 2 + 3 + 1 + dataLen + 2 + 1; // head2 + (src,dst,func) + byteCount + data + crc2 + tail
 		if (bytes.length !== expectedLength) {
 			throw new BmsProtocolError('Read response length mismatch', { byteCount, length: bytes.length });
 		}
-		let data = bytes.slice(6, 6 + dataLen);
+		const data = bytes.slice(6, 6 + dataLen);
 		let socketStartAddress: number | undefined;
 		let socketQuantity: number | undefined;
 		if (functionCode === BMS_FUNC.SOCKET_READ && data.length >= 4) {
 			socketStartAddress = (data[0] << 8) | data[1];
 			socketQuantity = (data[2] << 8) | data[3];
-			const payload = data.slice(4);
-			if (socketQuantity >= 0 && payload.length === socketQuantity * 2) {
-				data = payload;
-			}
 		}
 		return {
 			type: 'read',

@@ -1023,6 +1023,8 @@ export default {
     conn: {
       bluetooth: "蓝牙连接",
       mqtt: "MQTT连接",
+      mqttRealtime: "MQTT透传实时",
+      cloudFallback: "主动上报兜底",
       offline: "离线",
       connecting: "连接中...",
       disconnect: "断开",
@@ -1100,6 +1102,8 @@ export default {
       insulationAlarm: "绝缘告警",
     },
     dashboard: {
+      loadingTitle: "正在读取 BMS 实时数据",
+      loadingDesc: "连接已建立，正在等待设备返回首帧数据。",
       totalVoltage: "总电压",
       cycleCount: "循环次数",
       chargeDischargeRemainingTime: "充放电剩余时间",
@@ -1496,6 +1500,9 @@ export default {
       otaRunning: "升级中，请勿关闭",
       otaHardwareMismatch: "固件包与硬件型号不匹配",
       otaFirmwareSizeMismatch: "固件包大小与设备不一致",
+      otaTransferIncomplete: "固件数据包未完整确认",
+      otaFinalizeNoAck: "升级完成指令未收到设备确认",
+      otaDomainNotConfigured: "小程序未配置固件下载域名",
       meterPackageLoadFailed: "仪表升级包加载失败",
       meterOtaDebugCopied: "调试日志已复制",
       meterOtaDebugCopyFailed: "调试日志复制失败",

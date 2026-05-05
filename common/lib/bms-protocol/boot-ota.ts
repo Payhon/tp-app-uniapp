@@ -22,6 +22,11 @@ export type BootOtaResult = {
 	versionInfo: BootVersionInfo | null
 }
 
+type BootOtaTransport = BmsRequestTransport & {
+	writeFrame?: (frameBytes: Uint8Array, options?: { writeWithResponse?: boolean }) => Promise<void> | void
+	requestWithResponse?: BmsRequestTransport['request']
+}
+
 const PACKET_SIZE_OPTIONS = [64, 128, 256, 512, 1024]
 
 function sleep(ms: number): Promise<void> {
@@ -94,6 +99,41 @@ function formatErr(err: unknown): string {
 	}
 }
 
+function errorText(err: unknown): string {
+	if (!err) return ''
+	if (err instanceof Error) return err.message || String(err)
+	if (typeof err === 'string') return err
+	try {
+		const value = err as any
+		return String(value?.errMsg || value?.message || JSON.stringify(value) || value)
+	} catch (e) {
+		return String(err)
+	}
+}
+
+function errorCode(err: unknown): number | null {
+	const value = err as any
+	const raw = value?.errCode ?? value?.code ?? value?.errno
+	const n = Number(raw)
+	return Number.isFinite(n) ? n : null
+}
+
+function isBleTerminalWriteError(err: unknown): boolean {
+	const code = errorCode(err)
+	const msg = errorText(err).toLowerCase()
+	return (
+		code === 10004 ||
+		code === 10006 ||
+		code === 1509003 ||
+		msg.includes('writevaluetocharacteristics') ||
+		msg.includes('writeblecharacteristicvalue:fail') ||
+		msg.includes('no connection') ||
+		msg.includes('no device') ||
+		msg.includes('not connected') ||
+		msg.includes('device not found')
+	)
+}
+
 async function bootRequest(
 	transport: BmsRequestTransport,
 	frame: Uint8Array,
@@ -152,10 +192,17 @@ export async function bootOtaUpgrade({
 	prepareBaudRate,
 	packetDelayMs,
 	pageBoundaryDelayMs,
+	adaptiveSlowdownOnPacketTimeout,
+	adaptivePacketDelayMs,
+	adaptivePageBoundaryDelayMs,
+	finalizeDelayMs,
 	finalizeTimeoutMs,
 	finalizeAssumeSuccessOnTimeout,
+	terminalPacketWriteErrorAsComplete,
+	requireFinalPacketAck,
+	finalizeBurstIntervalsMs,
 }: {
-	transport: BmsRequestTransport
+	transport: BootOtaTransport
 	firmware: Uint8Array
 	targetAddress: number
 	queryTargetAddress?: number
@@ -169,8 +216,15 @@ export async function bootOtaUpgrade({
 	prepareBaudRate?: number
 	packetDelayMs?: number
 	pageBoundaryDelayMs?: number
+	adaptiveSlowdownOnPacketTimeout?: boolean
+	adaptivePacketDelayMs?: number
+	adaptivePageBoundaryDelayMs?: number
+	finalizeDelayMs?: number
 	finalizeTimeoutMs?: number
 	finalizeAssumeSuccessOnTimeout?: boolean
+	terminalPacketWriteErrorAsComplete?: boolean
+	requireFinalPacketAck?: boolean
+	finalizeBurstIntervalsMs?: number[]
 }): Promise<BootOtaResult> {
 	if (!firmware || firmware.length === 0) throw new Error('Firmware data is empty')
 	const totalSize = firmware.length
@@ -238,6 +292,9 @@ export async function bootOtaUpgrade({
 	let lastRequested = -1
 	let finalizeAttempt = 0
 	let lastCrc = 0
+	let finalizeAlreadyOk = false
+	let currentPacketDelayMs = Math.max(0, packetDelayMs ?? 0)
+	let currentPageBoundaryDelayMs = Math.max(0, pageBoundaryDelayMs ?? 0)
 
 	while (true) {
 		while (packetIndex < packetTotal) {
@@ -262,13 +319,14 @@ export async function bootOtaUpgrade({
 				packetTotal,
 				percent: Math.min(99, Math.floor((packetIndex / packetTotal) * 100)),
 			})
-			if (pageBoundaryDelayMs && pageBoundaryDelayMs > 0 && packetIndex > 0 && start > 0 && start % 4096 === 0) {
-				logger?.info && logger.info('[boot] page boundary delay', { packetIndex, offset: start, delayMs: pageBoundaryDelayMs })
-				await sleep(pageBoundaryDelayMs)
+			if (currentPageBoundaryDelayMs > 0 && packetIndex > 0 && start > 0 && start % 4096 === 0) {
+				logger?.info && logger.info('[boot] page boundary delay', { packetIndex, offset: start, delayMs: currentPageBoundaryDelayMs })
+				await sleep(currentPageBoundaryDelayMs)
 			}
 
 			let resp: ReturnType<typeof parseBootFrame> | null = null
 			let packetRetry = 0
+			let terminalPacketAssumedComplete = false
 			while (true) {
 				try {
 					resp = await bootRequest(
@@ -278,7 +336,37 @@ export async function bootOtaUpgrade({
 					)
 					break
 				} catch (e) {
+					if (
+						terminalPacketWriteErrorAsComplete &&
+						packetIndex >= packetTotal - 1 &&
+						isBleTerminalWriteError(e)
+					) {
+						lastRequested = packetTotal
+						packetIndex = packetTotal
+						terminalPacketAssumedComplete = true
+						logger?.warn &&
+							logger.warn('[boot] terminal packet write error, continue finalize', {
+								packetIndex: packetTotal - 1,
+								packetTotal,
+								err: formatErr(e),
+							})
+						break
+					}
 					packetRetry += 1
+					if (adaptiveSlowdownOnPacketTimeout) {
+						const nextPacketDelayMs = Math.max(currentPacketDelayMs, adaptivePacketDelayMs ?? 100)
+						const nextPageBoundaryDelayMs = Math.max(currentPageBoundaryDelayMs, adaptivePageBoundaryDelayMs ?? 1500)
+						if (nextPacketDelayMs !== currentPacketDelayMs || nextPageBoundaryDelayMs !== currentPageBoundaryDelayMs) {
+							currentPacketDelayMs = nextPacketDelayMs
+							currentPageBoundaryDelayMs = nextPageBoundaryDelayMs
+							logger?.warn &&
+								logger.warn('[boot] adaptive slowdown enabled', {
+									packetIndex,
+									packetDelayMs: currentPacketDelayMs,
+									pageBoundaryDelayMs: currentPageBoundaryDelayMs,
+								})
+						}
+					}
 					logger?.warn &&
 						logger.warn('[boot] packet timeout, retry', {
 							packetIndex,
@@ -302,7 +390,19 @@ export async function bootOtaUpgrade({
 					await sleep(220)
 				}
 			}
+			if (terminalPacketAssumedComplete) break
 			if (!resp) throw new Error('Boot packet response is empty')
+
+			if (terminalPacketWriteErrorAsComplete && (resp.command & 0xff) === 0x54) {
+				const finishStatus = resp.data[0] & 0xff
+				if (finishStatus !== 0) throw new Error(`Boot finalize failed: status=${finishStatus}`)
+				lastRequested = packetTotal
+				packetIndex = packetTotal
+				lastCrc = crc32(firmware)
+				finalizeAlreadyOk = true
+				logger?.info && logger.info('[boot] finalize ok during data transfer', { packetTotal })
+				break
+			}
 
 			if (resp.data.length < 3) throw new Error('Boot packet response too short')
 			const status = resp.data[0] & 0xff
@@ -318,7 +418,7 @@ export async function bootOtaUpgrade({
 				}
 				packetIndex += 1
 				retry = 0
-				if (packetDelayMs && packetDelayMs > 0) await sleep(packetDelayMs)
+				if (currentPacketDelayMs > 0) await sleep(currentPacketDelayMs)
 				continue
 			}
 
@@ -345,6 +445,11 @@ export async function bootOtaUpgrade({
 			throw new Error(`Boot packet failed: status=${status}`)
 		}
 
+		if (finalizeAlreadyOk) break
+		if (requireFinalPacketAck && lastRequested < packetTotal) {
+			throw new Error(`boot_transfer_incomplete:${lastRequested}/${packetTotal}`)
+		}
+
 		lastCrc = crc32(firmware)
 		const finishPayload = u32ToBytesBE(lastCrc)
 		const finishFrame = buildBootFrame({
@@ -354,16 +459,46 @@ export async function bootOtaUpgrade({
 			payload: finishPayload,
 		})
 
-		await sleep(1000)
+		const beforeFinalizeDelayMs = Math.max(0, finalizeDelayMs ?? 1000)
+		if (beforeFinalizeDelayMs > 0) {
+			logger?.info && logger.info('[boot] finalize delay before 0x54', { delayMs: beforeFinalizeDelayMs, lastRequested, packetTotal })
+			await sleep(beforeFinalizeDelayMs)
+		}
 		let finalizeOk = false
 		for (finalizeAttempt = 1; finalizeAttempt <= 3; finalizeAttempt += 1) {
 			if (finalizeAttempt > 1) await sleep(300)
 			let finishResp: ReturnType<typeof parseBootFrame> | null = null
+			const duplicateFinalizeTimers: ReturnType<typeof setTimeout>[] = []
 			try {
-				if (typeof (transport as any)?.requestWithResponse === 'function') {
+				const scheduleFinalizeBurst = () => {
+					if (finalizeAttempt !== 1 || typeof transport.writeFrame !== 'function') return
+					const intervals = (finalizeBurstIntervalsMs || []).filter((ms) => Number.isFinite(ms) && ms > 0)
+					for (const delayMs of intervals) {
+						const timer = setTimeout(() => {
+							void (async () => {
+								try {
+									logger?.debug &&
+										logger.debug('[boot] tx duplicate', {
+											cmd: cmdHex(0x54),
+											delayMs,
+											len: finishFrame.length,
+											hex: bytesToHex(finishFrame),
+										})
+									await transport.writeFrame?.(finishFrame, { writeWithResponse: false })
+								} catch (e) {
+									logger?.warn && logger.warn('[boot] finalize duplicate write failed', { delayMs, err: e })
+								}
+							})()
+						}, delayMs)
+						duplicateFinalizeTimers.push(timer)
+					}
+				}
+				const requestWithResponse = transport.requestWithResponse
+				if (typeof requestWithResponse === 'function') {
 					logger?.debug &&
 						logger.debug('[boot] tx', { cmd: cmdHex(0x54), len: finishFrame.length, hex: bytesToHex(finishFrame) })
-					const respBytes = await (transport as any).requestWithResponse(finishFrame, {
+					scheduleFinalizeBurst()
+					const respBytes = await requestWithResponse(finishFrame, {
 						timeoutMs: finalizeTimeoutMs,
 						suppressTimeoutLog: finalizeAssumeSuccessOnTimeout && lastRequested >= packetTotal,
 					})
@@ -374,6 +509,7 @@ export async function bootOtaUpgrade({
 						logger?.debug &&
 							logger.debug('[boot] tx', { cmd: cmdHex(0x54), len: finishFrame.length, hex: bytesToHex(finishFrame) })
 					} catch (e) {}
+					scheduleFinalizeBurst()
 					const respBytes = await transport.request(finishFrame, {
 						timeoutMs: finalizeTimeoutMs,
 						suppressTimeoutLog: finalizeAssumeSuccessOnTimeout && lastRequested >= packetTotal,
@@ -384,7 +520,6 @@ export async function bootOtaUpgrade({
 					finishResp = parseBootFrame(respBytes)
 				}
 			} catch (e: any) {
-				const code = e?.code
 				const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
 				if (finalizeAssumeSuccessOnTimeout && msg.includes('ble request timeout') && lastRequested >= packetTotal) {
 					logger?.info && logger.info('[boot] finalize assume success after timeout', { finalizeAttempt })
@@ -392,7 +527,7 @@ export async function bootOtaUpgrade({
 					break
 				}
 				const isFinalizeDisconnect =
-					code === 10004 ||
+					isBleTerminalWriteError(e) ||
 					msg.includes('no connection') ||
 					msg.includes('no device') ||
 					msg.includes('not connected') ||
@@ -404,6 +539,8 @@ export async function bootOtaUpgrade({
 				}
 				logger?.warn && logger.warn('[boot] finalize attempt failed', { finalizeAttempt, err: e })
 				continue
+			} finally {
+				for (const timer of duplicateFinalizeTimers) clearTimeout(timer)
 			}
 
 			if (!finishResp) continue

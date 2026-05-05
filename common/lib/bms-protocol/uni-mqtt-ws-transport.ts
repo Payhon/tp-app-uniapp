@@ -95,6 +95,15 @@ function mkReqExpect(reqFrameBytes: Uint8Array | ArrayLike<number>): { expect: R
 	return { expect, expectBoot };
 }
 
+const SOCKET_CLOUD_READ_START = 0x0900;
+const SOCKET_CLOUD_READ_END_EXCLUSIVE = 0x0924;
+
+function isSocketCloudReadRange(startAddress: number, quantity: number): boolean {
+	if (!Number.isFinite(startAddress) || !Number.isFinite(quantity) || quantity <= 0) return false;
+	const endAddress = startAddress + quantity;
+	return startAddress >= SOCKET_CLOUD_READ_START && endAddress <= SOCKET_CLOUD_READ_END_EXCLUSIVE;
+}
+
 function buildMqttSocketReadFrame(reqFrameBytes: Uint8Array): Uint8Array {
 	if (reqFrameBytes.length < 9) return reqFrameBytes;
 	if (reqFrameBytes[0] !== 0x7f || reqFrameBytes[1] !== 0x55) return reqFrameBytes;
@@ -103,6 +112,7 @@ function buildMqttSocketReadFrame(reqFrameBytes: Uint8Array): Uint8Array {
 	const sourceAddress = reqFrameBytes[2] & 0xff;
 	const startAddress = (reqFrameBytes[5] << 8) | reqFrameBytes[6];
 	const quantity = (reqFrameBytes[7] << 8) | reqFrameBytes[8];
+	if (!isSocketCloudReadRange(startAddress, quantity)) return reqFrameBytes;
 	return buildReadFrame({
 		sourceAddress,
 		targetAddress: 0xfa,
