@@ -24,6 +24,11 @@ export const LARGE_IMAGE_PATH_MAP = {
 	'my/my-top-2@2x.png': '/static/image/my/my-top-2@2x.png'
 } as const
 
+// 微信小程序下首页顶部图使用专用素材，避免不同端的裁切/适配差异。
+const MP_WEIXIN_IMAGE_OVERRIDE_MAP = {
+	'home/home-top@2x.png': 'home/home-top-miniapp@2x.png'
+} as const
+
 export type LargeImageKey = keyof typeof LARGE_IMAGE_PATH_MAP
 
 const trimSlashesRight = (s: string) => s.replace(/\/+$/, '')
@@ -64,6 +69,10 @@ export const imageUrl = (keyOrPath: LargeImageKey | string): string => {
 	const largeKey = (k in LARGE_IMAGE_PATH_MAP ? (k as LargeImageKey) : toLargeKeyFromLocalPath(localPath))
 
 	// #ifdef MP-WEIXIN
+	if (k in MP_WEIXIN_IMAGE_OVERRIDE_MAP) {
+		const cdnPrefix = getImageCdnPrefix()
+		return joinUrl(cdnPrefix, `/static/image/${MP_WEIXIN_IMAGE_OVERRIDE_MAP[k as keyof typeof MP_WEIXIN_IMAGE_OVERRIDE_MAP]}`)
+	}
 	if (largeKey) {
 		const cdnPrefix = getImageCdnPrefix()
 		return joinUrl(cdnPrefix, LARGE_IMAGE_PATH_MAP[largeKey])
