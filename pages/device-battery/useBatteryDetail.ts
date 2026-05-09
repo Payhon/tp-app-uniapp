@@ -24,6 +24,7 @@ import {
 	invalidateBleConnectAttempts,
 	releaseBleClient,
 	retainBleClient,
+	type BleClientEntry,
 } from '@/common/ble/ble-client-cache'
 import { normalizeMac } from '@/common/device-provision/ble'
 import type { DeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
@@ -41,12 +42,15 @@ type LoadInstrumentSessionOptions = {
 type ConnectAutoOptions = {
 	preserveCurrentBle?: boolean
 	probe?: boolean
+	preserveFirstFrameState?: boolean
 }
 
 type LoadByIdOptions = {
 	handoff?: DeviceDetailHandoff | null
 	preferWarmBle?: boolean
 }
+
+type BmsDataLoadPhase = 'idle' | 'reading' | 'slow' | 'retrying' | 'failed'
 
 type MqttTransportLike = UniMqttSocketBmsTransport
 
@@ -60,6 +64,11 @@ const POLL_INTERVAL_MS = 2_000
 const CLOUD_POLL_INTERVAL_MS = 5_000
 const INSTRUMENT_WARMUP_POLL_INTERVAL_MS = 1_200
 const INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD = 3
+const FIRST_FRAME_SLOW_HINT_MS = 9_000
+const FIRST_FRAME_AUTO_RECONNECT_FAILURES = 1
+const FIRST_FRAME_MAX_AUTO_RECONNECTS = 2
+const FIRST_FRAME_RECONNECT_DELAY_MS = 500
+const WARM_BLE_PROBE_TIMEOUT_MS = 3_800
 
 const log = (event: string, data?: Record<string, unknown>) => {
 	try {
@@ -76,6 +85,22 @@ const formatErr = (err: unknown) => {
 		return JSON.stringify(err)
 	} catch (e) {
 		return String(err)
+	}
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+	let timer: ReturnType<typeof setTimeout> | null = null
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<T>((_, reject) => {
+				timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs)
+			}),
+		])
+	} finally {
+		if (timer != null) clearTimeout(timer)
 	}
 }
 
@@ -388,14 +413,22 @@ export const useBatteryDetail = () => {
 	const dataSourceMode = ref<DataSourceMode>('offline')
 	const connecting = ref(false)
 	const bmsDataLoading = ref(false)
+	const bmsDataLoadPhase = ref<BmsDataLoadPhase>('idle')
+	const bmsDataLoadAttempts = ref(0)
+	const bmsDataLoadLastError = ref('')
 	const pollingPaused = ref(false)
 	const sessionMode = ref<DeviceDetailSessionMode>('cloud')
 
 	let pollTimer: number | null = null
+	let firstFrameSlowTimer: number | null = null
 	let cloudPollTimer: number | null = null
 	let mqttTransport: MqttTransportLike | null = null
 	let bleCacheKey: string | null = null
 	let pollErrLogged = 0
+	let firstFrameFailCount = 0
+	let firstFrameAutoReconnectCount = 0
+	let firstFrameRecovering = false
+	let requestFirstFrameReconnect: ((sourceClient: BmsClient, reason: string, err?: unknown) => void) | null = null
 	let instrumentStatusFailCount = 0
 	let instrumentPreferredDeviceId = ''
 	const instrumentPassthroughUnavailable = ref(false)
@@ -418,6 +451,68 @@ export const useBatteryDetail = () => {
 			clearInterval(pollTimer)
 			pollTimer = null
 		}
+	}
+
+	const clearFirstFrameSlowTimer = () => {
+		if (firstFrameSlowTimer != null) {
+			clearTimeout(firstFrameSlowTimer)
+			firstFrameSlowTimer = null
+		}
+	}
+
+	const resetFirstFrameState = () => {
+		clearFirstFrameSlowTimer()
+		firstFrameFailCount = 0
+		firstFrameAutoReconnectCount = 0
+		firstFrameRecovering = false
+		bmsDataLoadPhase.value = 'idle'
+		bmsDataLoadAttempts.value = 0
+		bmsDataLoadLastError.value = ''
+	}
+
+	const beginFirstFrameWait = () => {
+		if (status.value) return
+		if (connType.value !== 'bluetooth' && connType.value !== 'mqtt') return
+		if (bmsDataLoadPhase.value !== 'retrying' && bmsDataLoadPhase.value !== 'failed') {
+			bmsDataLoadPhase.value = 'reading'
+		}
+		if (firstFrameSlowTimer != null) return
+		firstFrameSlowTimer = setTimeout(() => {
+			firstFrameSlowTimer = null
+			if (!status.value && (connType.value === 'bluetooth' || connType.value === 'mqtt')) {
+				if (bmsDataLoadPhase.value === 'reading') bmsDataLoadPhase.value = 'slow'
+			}
+		}, FIRST_FRAME_SLOW_HINT_MS) as unknown as number
+	}
+
+	const markFirstFrameSuccess = () => {
+		if (!status.value) return
+		resetFirstFrameState()
+	}
+
+	const handleFirstFrameReadFailure = (sourceClient: BmsClient, err: unknown) => {
+		if (status.value) return
+		if (client.value !== sourceClient) return
+		if (connType.value !== 'bluetooth' && connType.value !== 'mqtt') return
+		firstFrameFailCount += 1
+		bmsDataLoadAttempts.value = firstFrameFailCount
+		bmsDataLoadLastError.value = formatErr(err)
+		if (isInstrumentSession()) {
+			bmsDataLoadPhase.value =
+				instrumentStatusFailCount >= INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD ? 'failed' : 'slow'
+			return
+		}
+		if (
+			connType.value === 'bluetooth' &&
+			firstFrameFailCount >= FIRST_FRAME_AUTO_RECONNECT_FAILURES &&
+			firstFrameAutoReconnectCount < FIRST_FRAME_MAX_AUTO_RECONNECTS &&
+			!firstFrameRecovering
+		) {
+			bmsDataLoadPhase.value = 'retrying'
+			requestFirstFrameReconnect?.(sourceClient, 'first-frame-read-failed', err)
+			return
+		}
+		bmsDataLoadPhase.value = firstFrameFailCount >= FIRST_FRAME_AUTO_RECONNECT_FAILURES ? 'failed' : 'slow'
 	}
 
 	const shouldShowBmsDataLoading = () => {
@@ -846,7 +941,25 @@ export const useBatteryDetail = () => {
 		return true
 	}
 
-	const attachWarmBleFromBattery = (reason: string) => {
+	const validateWarmBleEntry = async (entry: BleClientEntry, reason: string) => {
+		try {
+			await withTimeout(entry.client.readUuid(), WARM_BLE_PROBE_TIMEOUT_MS, 'warm BLE probe')
+			return true
+		} catch (e) {
+			log('warm ble probe failed, reconnect required', {
+				reason,
+				mac: entry.mac,
+				deviceId: entry.deviceId,
+				err: formatErr(e),
+			})
+			try {
+				await disconnectBleClient(entry.key)
+			} catch (e2) {}
+			return false
+		}
+	}
+
+	const attachWarmBleFromBattery = async (reason: string) => {
 		const decision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
 		if (!decision.ok || !decision.mac) return false
 		const entry = getBleClientEntry(decision.mac, { touch: true })
@@ -857,6 +970,7 @@ export const useBatteryDetail = () => {
 			ble_mac: decision.mac,
 			cached_device_id: entry.deviceId,
 		})
+		if (!(await validateWarmBleEntry(entry, reason))) return false
 		return attachBleEntry(entry, { retain: true })
 	}
 
@@ -865,10 +979,13 @@ export const useBatteryDetail = () => {
 		if (pollingPaused.value) return
 		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 		syncBmsDataLoading()
+		beginFirstFrameWait()
 		const run = async () => {
 			syncBmsDataLoading()
+			beginFirstFrameWait()
 			try {
 				status.value = await c.readAllStatus()
+				markFirstFrameSuccess()
 				if (connType.value === 'mqtt' || connType.value === 'bluetooth') {
 					dataSourceMode.value = 'realtime'
 				}
@@ -903,6 +1020,7 @@ export const useBatteryDetail = () => {
 					pollErrLogged += 1
 					log('poll failed', { err: formatErr(e) })
 				}
+				handleFirstFrameReadFailure(c, e)
 			} finally {
 				syncBmsDataLoading()
 			}
@@ -940,7 +1058,7 @@ export const useBatteryDetail = () => {
 		else syncBmsDataLoading()
 	}
 
-	const disconnectAll = async () => {
+	const disconnectAll = async (options?: { preserveFirstFrameState?: boolean }) => {
 		invalidateBleConnectAttempts('device-detail disconnectAll')
 		const wasBluetooth = connType.value === 'bluetooth'
 		if (wasBluetooth && !isInstrumentSession()) {
@@ -952,6 +1070,9 @@ export const useBatteryDetail = () => {
 		client.value = null
 		status.value = null
 		bmsDataLoading.value = false
+		if (!options?.preserveFirstFrameState) {
+			resetFirstFrameState()
+		}
 		instrumentStatusFailCount = 0
 		instrumentPassthroughUnavailable.value = false
 		connType.value = 'offline'
@@ -1039,9 +1160,9 @@ export const useBatteryDetail = () => {
 		if (!hasConnectTarget() || connecting.value) return
 		connecting.value = true
 		try {
-			if (options?.preserveCurrentBle && attachWarmBleFromBattery('connect-auto')) return
+			if (options?.preserveCurrentBle && (await attachWarmBleFromBattery('connect-auto'))) return
 			if (!options?.preserveCurrentBle) {
-				await disconnectAll()
+				await disconnectAll({ preserveFirstFrameState: options?.preserveFirstFrameState })
 			}
 			if (isInstrumentSession()) {
 				log('connectAuto instrument session', {
@@ -1084,6 +1205,40 @@ export const useBatteryDetail = () => {
 		}
 	}
 
+	requestFirstFrameReconnect = (sourceClient: BmsClient, reason: string, err?: unknown) => {
+		if (firstFrameRecovering || status.value || client.value !== sourceClient || connType.value !== 'bluetooth') return
+		firstFrameRecovering = true
+		firstFrameAutoReconnectCount += 1
+		bmsDataLoadPhase.value = 'retrying'
+		const bleKey = bleCacheKey || String(battery.value?.ble_mac || '').trim()
+		log('first frame auto reconnect start', {
+			reason,
+			ble_mac: bleKey || null,
+			auto_reconnect_count: firstFrameAutoReconnectCount,
+			err: formatErr(err),
+		})
+		void (async () => {
+			await disconnectAll({ preserveFirstFrameState: true })
+			if (bleKey) {
+				try {
+					await disconnectBleClient(bleKey)
+				} catch (e) {}
+			}
+			await sleep(FIRST_FRAME_RECONNECT_DELAY_MS)
+			if (!status.value && hasConnectTarget()) {
+				await connectAuto({ preserveCurrentBle: false, probe: true, preserveFirstFrameState: true })
+			}
+		})()
+			.catch((e) => {
+				log('first frame auto reconnect failed', { err: formatErr(e) })
+				if (!status.value) bmsDataLoadPhase.value = 'failed'
+			})
+			.finally(() => {
+				firstFrameRecovering = false
+				syncBmsDataLoading()
+			})
+	}
+
 	const refreshCloudBatteryDetail = async (nextId: string) => {
 		log('load battery detail start', { deviceId: nextId })
 		const rsp = await appBatteryDetail(nextId)
@@ -1113,6 +1268,7 @@ export const useBatteryDetail = () => {
 		deviceId.value = nextId
 		status.value = null
 		bmsDataLoading.value = false
+		resetFirstFrameState()
 		instrumentStatusFailCount = 0
 		instrumentPreferredDeviceId = ''
 		instrumentPassthroughUnavailable.value = false
@@ -1129,7 +1285,7 @@ export const useBatteryDetail = () => {
 				comm_chip_id: null,
 			} as AppBatteryDetail
 			const warmEntry = getBleClientEntry(handoff.bleMac, { touch: true })
-			if (warmEntry) {
+			if (warmEntry && (await validateWarmBleEntry(warmEntry, 'handoff'))) {
 				log('load battery detail use warm ble', { deviceId: nextId, ble_mac: handoff.bleMac })
 				attachBleEntry(warmEntry, { retain: true })
 			} else if (options?.preferWarmBle !== false) {
@@ -1145,7 +1301,7 @@ export const useBatteryDetail = () => {
 			void connectAuto({ preserveCurrentBle: false })
 			return
 		}
-		if (options?.preferWarmBle !== false && attachWarmBleFromBattery('cloud-detail')) return
+		if (options?.preferWarmBle !== false && (await attachWarmBleFromBattery('cloud-detail'))) return
 		void connectAuto({ preserveCurrentBle: options?.preferWarmBle !== false })
 	}
 
@@ -1153,6 +1309,7 @@ export const useBatteryDetail = () => {
 		const normalizedMac = normalizeMac(bleMac)
 		if (!normalizedMac) return
 		resetReportState({ clearQueue: true })
+		resetFirstFrameState()
 		sessionMode.value = 'instrument'
 		deviceId.value = ''
 		status.value = null
@@ -1177,6 +1334,48 @@ export const useBatteryDetail = () => {
 		void connectAuto()
 	}
 
+	const retryBmsDataRead = () => {
+		if (connecting.value || firstFrameRecovering) return
+		firstFrameFailCount = 0
+		firstFrameAutoReconnectCount = 0
+		bmsDataLoadAttempts.value = 0
+		bmsDataLoadLastError.value = ''
+		bmsDataLoadPhase.value = 'reading'
+		clearFirstFrameSlowTimer()
+		if (client.value && (connType.value === 'bluetooth' || connType.value === 'mqtt')) {
+			startPolling(client.value)
+			return
+		}
+		void connectAuto({ preserveCurrentBle: true, probe: true, preserveFirstFrameState: true })
+	}
+
+	const reconnectBmsData = async () => {
+		if (connecting.value || firstFrameRecovering) return
+		firstFrameRecovering = true
+		firstFrameFailCount = 0
+		firstFrameAutoReconnectCount = 0
+		bmsDataLoadAttempts.value = 0
+		bmsDataLoadLastError.value = ''
+		bmsDataLoadPhase.value = 'retrying'
+		const bleKey = bleCacheKey || String(battery.value?.ble_mac || '').trim()
+		try {
+			await disconnectAll({ preserveFirstFrameState: true })
+			if (bleKey) {
+				try {
+					await disconnectBleClient(bleKey)
+				} catch (e) {}
+			}
+			await sleep(FIRST_FRAME_RECONNECT_DELAY_MS)
+			await connectAuto({ preserveCurrentBle: false, probe: true, preserveFirstFrameState: true })
+		} catch (e) {
+			log('manual bms data reconnect failed', { err: formatErr(e) })
+			if (!status.value) bmsDataLoadPhase.value = 'failed'
+		} finally {
+			firstFrameRecovering = false
+			syncBmsDataLoading()
+		}
+	}
+
 	return {
 		deviceId,
 		battery,
@@ -1186,6 +1385,9 @@ export const useBatteryDetail = () => {
 		dataSourceMode,
 		connecting,
 		bmsDataLoading,
+		bmsDataLoadPhase,
+		bmsDataLoadAttempts,
+		bmsDataLoadLastError,
 		sessionMode,
 		pausePolling,
 		resumePolling,
@@ -1193,5 +1395,7 @@ export const useBatteryDetail = () => {
 		loadInstrumentSession,
 		disconnectAll,
 		disconnectBluetooth,
+		retryBmsDataRead,
+		reconnectBmsData,
 	}
 }

@@ -38,6 +38,7 @@ import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
+import { extractApiErrorMessage } from '@/common/api-error'
 import { normalizeHex } from '@/common/device-provision/ble'
 import { getDeviceProvisionInfo, postDeviceProvisionBind } from '@/service/deviceProvision'
 
@@ -110,7 +111,6 @@ async function run() {
 		const bindRes = await postDeviceProvisionBind({ item_uuid: uuid.value })
 		if ((bindRes as any)?.code !== 200) {
 			console.error('[uuid-bind] bind failed', bindRes)
-			const sqlErr = String((bindRes as any)?.data?.sql_error || '').trim()
 			const dataMsg = String((bindRes as any)?.data?.message || '').trim()
 			if (dataMsg === 'device already bound to current user') {
 				if (!boundDeviceId) {
@@ -129,8 +129,7 @@ async function run() {
 				goDeviceDetail(boundDeviceId)
 				return
 			}
-			const msg = String(dataMsg || (bindRes as any)?.message || t('pages.deviceProvision.bindFailed'))
-			throw new Error(sqlErr ? `${msg} (${sqlErr})` : msg)
+			throw new Error(extractApiErrorMessage(bindRes, t('pages.deviceProvision.bindFailed') as string))
 		}
 
 			boundDeviceId = String((bindRes as any)?.data?.device_id || (info as any)?.data?.device_id || '').trim()

@@ -85,7 +85,15 @@
 			<view v-if="activeTab === 0 && showBmsDataLoading" class="data-loading">
 				<view class="data-loading__spinner"></view>
 				<text class="data-loading__title">{{ $t('deviceDetail.dashboard.loadingTitle') }}</text>
-				<text class="data-loading__desc">{{ $t('deviceDetail.dashboard.loadingDesc') }}</text>
+				<text class="data-loading__desc">{{ bmsDataLoadingDescText }}</text>
+				<view v-if="showBmsDataActionButtons" class="data-loading__actions">
+					<view class="data-loading__btn data-loading__btn--primary" hover-class="data-loading__btn--hover" @tap="reconnectBmsData">
+						{{ $t('deviceDetail.dashboard.reconnectRead') }}
+					</view>
+					<view class="data-loading__btn" hover-class="data-loading__btn--hover" @tap="retryBmsDataRead">
+						{{ $t('deviceDetail.dashboard.retryRead') }}
+					</view>
+				</view>
 			</view>
 			<dashboard-tab
 				v-else-if="activeTab === 0"
@@ -203,11 +211,14 @@ const {
 	dataSourceMode,
 	connecting,
 	bmsDataLoading,
+	bmsDataLoadPhase,
 	sessionMode,
 	loadById,
 	loadInstrumentSession,
 	disconnectAll,
 	disconnectBluetooth,
+	retryBmsDataRead,
+	reconnectBmsData,
 	pausePolling,
 	resumePolling,
 } = useBatteryDetail()
@@ -346,6 +357,18 @@ const showBmsDataLoading = computed(
 		bmsDataLoading.value &&
 		!status.value &&
 		(connType.value === 'bluetooth' || connType.value === 'mqtt')
+)
+const bmsDataLoadingDescText = computed(() => {
+	if (bmsDataLoadPhase.value === 'retrying') return t('deviceDetail.dashboard.loadingRetryingDesc') as string
+	if (bmsDataLoadPhase.value === 'failed') return t('deviceDetail.dashboard.loadingFailedDesc') as string
+	if (bmsDataLoadPhase.value === 'slow') return t('deviceDetail.dashboard.loadingSlowDesc') as string
+	return t('deviceDetail.dashboard.loadingDesc') as string
+})
+const showBmsDataActionButtons = computed(
+	() =>
+		showBmsDataLoading.value &&
+		!connecting.value &&
+		(bmsDataLoadPhase.value === 'slow' || bmsDataLoadPhase.value === 'failed')
 )
 
 const loadHistoryPermission = async () => {
@@ -748,6 +771,40 @@ onUnload(() => {
 	line-height: 1.5;
 	color: #6b7280;
 	text-align: center;
+}
+
+.data-loading__actions {
+	margin-top: 28rpx;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 18rpx;
+	flex-wrap: wrap;
+}
+
+.data-loading__btn {
+	min-width: 176rpx;
+	height: 64rpx;
+	padding: 0 24rpx;
+	border-radius: 32rpx;
+	border: 2rpx solid rgba(36, 111, 221, 0.18);
+	background: #ffffff;
+	color: #246fdd;
+	font-size: 24rpx;
+	font-weight: 600;
+	line-height: 64rpx;
+	text-align: center;
+	box-sizing: border-box;
+}
+
+.data-loading__btn--primary {
+	background: #246fdd;
+	color: #ffffff;
+	border-color: #246fdd;
+}
+
+.data-loading__btn--hover {
+	opacity: 0.82;
 }
 
 @keyframes data-loading-spin {

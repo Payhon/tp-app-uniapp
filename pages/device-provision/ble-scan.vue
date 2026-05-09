@@ -197,6 +197,20 @@ function isDeviceAlreadyAdded(device: DeviceRow): boolean {
 	return !!mac && boundDevicesStore.boundBleMacSet.has(mac)
 }
 
+function getBoundDeviceByRow(device: DeviceRow) {
+	const mac = normalizeMac(String(device?.advMac || ''))
+	return mac ? boundDevicesStore.findByBleMac(mac) : null
+}
+
+function openBoundDeviceDetail(deviceId: string) {
+	const id = String(deviceId || '').trim()
+	if (!id) return false
+	uni.navigateTo({
+		url: `/pages/device-battery/detail?device_id=${encodeURIComponent(id)}`,
+	})
+	return true
+}
+
 function clearList() {
 	rows.value = new Map()
 }
@@ -739,6 +753,10 @@ async function toggleScan() {
 
 function selectDevice(d: DeviceRow) {
 	stopScan().finally(() => {
+		const boundDevice = getBoundDeviceByRow(d)
+		if (boundDevice?.device_id && openBoundDeviceDetail(boundDevice.device_id)) {
+			return
+		}
 		if (d.deviceType === DEVICE_TYPE_METER && d.advMac) {
 			uni.navigateTo({
 				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(d.advMac)}&ble_device_id=${encodeURIComponent(d.deviceId)}&allow_scan_handoff=1&device_name=${encodeURIComponent(d.displayName)}`,
@@ -777,6 +795,13 @@ onShow(() => {
 
 		// 扫码模式：若目标设备已绑定，则不再进入扫描页
 		if (mode.value === 'qr' && targetMac.value && boundDevicesStore.hasBleMac(targetMac.value)) {
+			const boundDevice = boundDevicesStore.findByBleMac(targetMac.value)
+			if (boundDevice?.device_id) {
+				uni.redirectTo({
+					url: `/pages/device-battery/detail?device_id=${encodeURIComponent(boundDevice.device_id)}`,
+				})
+				return
+			}
 			try {
 				uni.showToast({ title: t('pages.deviceProvision.deviceAlreadyAdded') as string, icon: 'none' })
 			} catch (e) {}

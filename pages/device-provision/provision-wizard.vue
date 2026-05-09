@@ -55,6 +55,7 @@ import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
+import { extractApiErrorMessage } from '@/common/api-error'
 import { BmsClient, BMS_PARAM, createUniBleBmsTransport } from '@/common/lib/bms-protocol'
 import { adoptBleClientConnection } from '@/common/ble/ble-client-cache'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
@@ -299,9 +300,7 @@ async function runProvision() {
 		if ((bindRes as any)?.code !== 200) {
 			// NOTE: 后端 CodeDBError 会把 sql_error 放在 data 里；这里输出到控制台便于定位迁移/表缺失等问题。
 			console.error('[provision] bind failed', bindRes)
-			const sqlErr = String((bindRes as any)?.data?.sql_error || '').trim()
-			const msg = String((bindRes as any)?.message || t('pages.deviceProvision.bindFailed'))
-			throw new Error(sqlErr ? `${msg} (${sqlErr})` : msg)
+			throw new Error(extractApiErrorMessage(bindRes, t('pages.deviceProvision.bindFailed') as string))
 		}
 		setStep('bind', 'done')
 

@@ -1110,6 +1110,14 @@ export default {
     dashboard: {
       loadingTitle: "Reading BMS real-time data",
       loadingDesc: "Connected. Waiting for the first data frame from the device.",
+      loadingSlowDesc:
+        "The device is taking longer to respond. You can keep waiting or retry/reconnect Bluetooth.",
+      loadingRetryingDesc:
+        "Read timed out. Reconnecting Bluetooth automatically and reading again.",
+      loadingFailedDesc:
+        "No first BMS data frame was received. Check that the device is powered on and nearby, then retry.",
+      retryRead: "Retry read",
+      reconnectRead: "Reconnect and read",
       totalVoltage: "Pack Voltage",
       cycleCount: "Cycles",
       chargeDischargeRemainingTime: "Charge/Discharge Remaining Time",

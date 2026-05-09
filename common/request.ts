@@ -1,4 +1,5 @@
 import $C from '@/common/config'
+import { extractApiErrorMessage } from '@/common/api-error'
 import i18n from '@/lang'
 import $store from '@/store'
 
@@ -62,7 +63,7 @@ const request = <T = unknown>(options: RequestOptions): Promise<T> | any => {
 				// 请求服务端失败
 				if (result?.data?.code !== 200) {
 					uni.showToast({
-						title: result?.data?.message,
+						title: extractApiErrorMessage(result?.data, t('common.requestFailed')),
 						icon: 'none'
 					})
 					return reject(result.data)

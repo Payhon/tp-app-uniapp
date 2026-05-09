@@ -1104,6 +1104,11 @@ export default {
     dashboard: {
       loadingTitle: "正在读取 BMS 实时数据",
       loadingDesc: "连接已建立，正在等待设备返回首帧数据。",
+      loadingSlowDesc: "设备响应时间较长，可继续等待，或尝试重新读取/重新连接蓝牙。",
+      loadingRetryingDesc: "读取超时，正在自动重新连接蓝牙并再次读取。",
+      loadingFailedDesc: "暂未读取到 BMS 首帧数据。请确认设备已上电且在附近，然后重试。",
+      retryRead: "重新读取",
+      reconnectRead: "重新连接读取",
       totalVoltage: "总电压",
       cycleCount: "循环次数",
       chargeDischargeRemainingTime: "充放电剩余时间",
