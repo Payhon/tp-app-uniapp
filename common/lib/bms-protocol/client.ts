@@ -390,15 +390,16 @@ export class BmsClient {
 	async writeRegisters(
 		startAddress: number,
 		registerValues: Uint16Array,
-		{ functionCode = BMS_FUNC.WRITE_MULTIPLE_REGISTERS }: { functionCode?: number } = {}
+		{ functionCode = BMS_FUNC.WRITE_MULTIPLE_REGISTERS, targetAddress }: { functionCode?: number; targetAddress?: number } = {}
 	): Promise<void> {
 		const ranges = chunkRanges(startAddress, registerValues.length, this.maxWriteRegisters);
 		let offset = 0;
+		const reqTargetAddress = targetAddress == null ? this.targetAddress : targetAddress;
 		for (const r of ranges) {
 			const chunk = registerValues.slice(offset, offset + r.quantity);
 			const req = buildWriteMultipleRegistersFrame({
 				sourceAddress: this.sourceAddress,
-				targetAddress: this.targetAddress,
+				targetAddress: reqTargetAddress,
 				functionCode,
 				startAddress: r.startAddress,
 				registerValues: chunk,

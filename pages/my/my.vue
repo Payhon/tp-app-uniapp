@@ -105,7 +105,7 @@
               src="/static/image/my/icon-lang@2x.png"
               mode="aspectFit"
             />
-            <text class="menu-title">{{ $t("ucenter.language") }}</text>
+            <text class="menu-title">语言/Language</text>
           </view>
           <view class="menu-right">
             <text class="menu-right-text">{{ currentLangLabel }}</text>
@@ -210,6 +210,14 @@
         </view>
       </view>
     </view>
+
+    <u-action-sheet
+      :show="langSheetShow"
+      :actions="langSheetActions"
+      :cancelText="$t('common.cancel')"
+      @close="langSheetShow = false"
+      @select="onLangSelect"
+    ></u-action-sheet>
   </view>
 </template>
 
@@ -245,6 +253,7 @@ const deviceCount = ref(0);
 const loadingDeviceCount = ref(false);
 
 const bluetoothAutoConnect = ref<boolean>(true);
+const langSheetShow = ref(false);
 
 const parseBooleanStorage = (raw: unknown, defaultValue: boolean) => {
   if (raw === "" || raw === undefined || raw === null) return defaultValue;
@@ -366,6 +375,12 @@ const currentLangLabel = computed(() => {
   const hit = AVAILABLE_LANGUAGES.find((x) => x.code === cur);
   return hit?.label || AVAILABLE_LANGUAGES[0].label;
 });
+const langSheetActions = computed(() =>
+  AVAILABLE_LANGUAGES.map((item) => ({
+    name: item.label,
+    code: item.code,
+  })),
+);
 
 const setMpTabSelected = () => {
   // #ifdef MP-WEIXIN
@@ -547,16 +562,16 @@ const onBluetoothAutoConnectChange = (val: boolean) => {
 };
 
 const openLangSheet = () => {
-  uni.showActionSheet({
-    itemList: AVAILABLE_LANGUAGES.map((x) => x.label),
-    success: (res) => {
-      const selected = AVAILABLE_LANGUAGES[res.tapIndex];
-      if (!selected) return;
-      changeLanguage(selected.code);
-      locale.value = selected.code;
-      refreshMpCustomTabbarTexts();
-    },
-  });
+  langSheetShow.value = true;
+};
+
+const onLangSelect = (item: { code?: SupportedLocale } | null) => {
+  const selected = AVAILABLE_LANGUAGES.find((x) => x.code === item?.code);
+  if (!selected) return;
+  langSheetShow.value = false;
+  changeLanguage(selected.code);
+  locale.value = selected.code;
+  refreshMpCustomTabbarTexts();
 };
 
 const clearCache = () => {

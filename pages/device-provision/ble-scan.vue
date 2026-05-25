@@ -82,7 +82,7 @@ import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/device-provision/ble'
 import { DEVICE_TYPE_METER, resolveDeviceTypeByMac, type SupportedDeviceType } from '@/common/device-provision/device-prefix-shared'
 import { formatUniError } from '@/common/device-provision/error'
-import { BMS_BLE_SERVICE_UUID } from '@/common/lib/bms-protocol'
+import { BMS_BLE_SERVICE_UUID } from '@/common/lib/bms-protocol/ble-uuids'
 import { useBoundDevicesStore } from '@/store/bound-devices'
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -182,11 +182,11 @@ const hasResolvedAdvMacRows = computed(() =>
 )
 
 const signalLevel = (rssi: number | null) => {
-	if (typeof rssi !== 'number') return 0
-	if (rssi >= -60) return 4
-	if (rssi >= -70) return 3
-	if (rssi >= -80) return 2
-	if (rssi >= -90) return 1
+	if (typeof rssi !== 'number' || !Number.isFinite(rssi)) return 0
+	if (rssi >= -80) return 4
+	if (rssi >= -85) return 3
+	if (rssi >= -90) return 2
+	if (rssi >= -95) return 1
 	return 0
 }
 

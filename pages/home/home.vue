@@ -504,12 +504,16 @@ const disconnectCardBluetooth = async (device: HomeDeviceCardModel) => {
 	disconnectingBleDeviceIds.value.add(targetId)
 	try {
 		const ok = await disconnectBleClient(entry.key)
-		if (ok) {
-			homeBleKeys.delete(entry.key)
-			applyCardFallbackConnectType(targetId)
+		homeBleKeys.delete(entry.key)
+		applyCardFallbackConnectType(targetId)
+		if (!ok) {
+			console.warn('[home] BLE disconnect command failed, local connection state cleared', {
+				deviceId: targetId,
+				bleKey: entry.key,
+			})
 		}
 		uni.showToast({
-			title: ok ? (t('home.disconnect.disconnected') as string) : (t('home.disconnect.disconnectionFailed') as string),
+			title: t('home.disconnect.disconnected') as string,
 			icon: 'none',
 		})
 	} finally {
@@ -655,6 +659,7 @@ const setMpTabSelected = () => {
 		const pages = (globalThis as any).getCurrentPages?.() as any[] | undefined
 		const current = pages && pages.length ? pages[pages.length - 1] : null
 		const tabBar = current?.getTabBar?.()
+		tabBar?.updateTexts?.()
 		tabBar?.setSelected?.(0)
 	} catch (e) {}
 	// #endif

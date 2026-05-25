@@ -22,14 +22,6 @@
 						</view>
 						<text class="val-label">SOC</text>
 					</view>
-
-					<view class="val-item">
-						<view class="num-wrap">
-							<text class="num-main">{{ sohText }}</text>
-							<text class="num-unit">%</text>
-						</view>
-						<text class="val-label">SOH</text>
-					</view>
 				</view>
 
 				<view class="bottom-slot">
@@ -74,7 +66,6 @@ const cssW = ref(0)
 const cssH = ref(0)
 
 const socText = computed(() => String(Math.round(props.soc || 0)))
-const sohText = computed(() => String(Math.round(props.soh || 0)))
 const totalVoltageLabelText = computed(() => props.totalVoltageLabel || t('components.dashboardGauge.totalVoltageLabel'))
 
 type CubicSegment = {
@@ -236,13 +227,12 @@ const draw = () => {
 	drawPath(ctx, LEFT_PTS, (props.soc || 0) / 100)
 	ctx.stroke()
 	
-	// SOH 进度
-	drawPath(ctx, RIGHT_PTS, (props.soh || 0) / 100)
+	// 右侧进度同样显示 SOC
+	drawPath(ctx, RIGHT_PTS, (props.soc || 0) / 100)
 	ctx.stroke()
 
 	// #ifdef MP-WEIXIN
 	const soc = socText.value
-	const soh = sohText.value
 	const totalVoltageText = String(props.totalVoltageText || '')
 	const totalVoltageLabel = String(totalVoltageLabelText.value || '')
 	const stateText = String(props.footerStateText || '')
@@ -263,22 +253,12 @@ const draw = () => {
 	// SOC
 	ctx.setFillStyle('#003399')
 	ctx.setFontSize(36)
-	ctx.fillText(soc, 140, 120)
+	ctx.fillText(soc, 200, 120)
 	ctx.setFontSize(18)
-	ctx.fillText('%', 175, 120)
+	ctx.fillText('%', 235, 120)
 	ctx.setFillStyle('#4b5563')
 	ctx.setFontSize(16)
-	ctx.fillText('SOC', 140, 150)
-
-	// SOH
-	ctx.setFillStyle('#003399')
-	ctx.setFontSize(36)
-	ctx.fillText(soh, 260, 120)
-	ctx.setFontSize(18)
-	ctx.fillText('%', 295, 120)
-	ctx.setFillStyle('#4b5563')
-	ctx.setFontSize(16)
-	ctx.fillText('SOH', 260, 150)
+	ctx.fillText('SOC', 200, 150)
 
 	// Footer texts
 	if (stateText) {
@@ -315,7 +295,7 @@ onMounted(() => {
 	setTimeout(measure, 200)
 })
 
-watch(() => [props.soc, props.soh, props.totalVoltageText, totalVoltageLabelText.value, props.footerStateText, props.footerMacText], draw)
+watch(() => [props.soc, props.totalVoltageText, totalVoltageLabelText.value, props.footerStateText, props.footerMacText], draw)
 </script>
 
 <style lang="scss" scoped>
@@ -371,8 +351,8 @@ watch(() => [props.soc, props.soh, props.totalVoltageText, totalVoltageLabelText
 
 .values-row {
 	display: flex;
-	justify-content: space-between;
-	padding: 0 20%; // 增大左右间距，避免文字贴进度条太近
+	justify-content: center;
+	padding: 0;
 	margin-top: 12rpx;
 }
 

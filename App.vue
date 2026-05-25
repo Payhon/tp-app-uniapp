@@ -1,9 +1,13 @@
 <script lang="ts">
 import api from '@/API/'
-import { showAddDeviceActionSheet } from '@/common/composables/useAddDeviceActionSheet'
 import { syncCurrentUniLocale } from '@/lang'
+// #ifdef APP-PLUS
+import { showAddDeviceActionSheet } from '@/common/composables/useAddDeviceActionSheet'
+// #endif
 // APP 端自动检查更新（对接自建 backend，不依赖 uniCloud）
+// #ifdef APP
 import checkAppUpdate from '@/uni_modules/fjbms-upgrade/utils/check-update'
+// #endif
 
 type AlarmPayload = {
 	alarm_id?: string | number
@@ -113,8 +117,6 @@ export default {
 	@import './common/styles/uni.css';
 	/* 引入字体库样式 */
 	@import './common/styles/icon.css';
-	/* 引入动画库 */
-	@import './common/styles/animate.css';
 	/* 引入公共库样式 */
 	@import './common/styles/util.css';
 	/* */ 

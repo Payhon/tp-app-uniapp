@@ -88,7 +88,10 @@ Component({
     selected: 0,
     textHome: '',
     textAddDevice: '',
-    textMe: ''
+    textMe: '',
+    textCancel: '',
+    actionSheetVisible: false,
+    actionSheetItems: []
   },
   lifetimes: {
     attached() {
@@ -109,7 +112,9 @@ Component({
       this.setData({
         textHome: dict.home,
         textAddDevice: dict.addDevice,
-        textMe: dict.me
+        textMe: dict.me,
+        textCancel: dict.cancel,
+        actionSheetItems: [dict.bleSearch, dict.cameraScan]
       })
     },
     setSelected(index) {
@@ -134,49 +139,73 @@ Component({
       this.setSelected(index)
       wx.switchTab({ url })
     },
+    noop() {},
+    closeActionSheet() {
+      this.setData({ actionSheetVisible: false })
+    },
+    isLoginPageActive() {
+      try {
+        const pages = getCurrentPages()
+        const current = pages && pages.length ? pages[pages.length - 1] : null
+        const route = String((current && (current.route || current.__route__)) || '')
+        return route === 'pages/login/login'
+      } catch (e) {}
+      return false
+    },
+    ensureLoggedIn(dict) {
+      const token = String(wx.getStorageSync('access_token') || wx.getStorageSync('accessToken') || '').trim()
+      if (token) return true
+      wx.showToast({ title: dict.pleaseLogin, icon: 'none' })
+      if (!this.isLoginPageActive()) {
+        wx.navigateTo({ url: '/pages/login/login' })
+      }
+      return false
+    },
     onAdd() {
       const locale = normalizeLocale(wx.getStorageSync('language'))
       const dict = I18N[locale] || I18N['en-US']
-
-      wx.showActionSheet({
-        itemList: [dict.bleSearch, dict.cameraScan],
-        success: (res) => {
-          const idx = Number(res.tapIndex)
-          if (idx === 0) {
-            wx.navigateTo({ url: '/pages/device-provision/ble-scan' })
-            return
-          }
-          if (idx === 1) {
-            wx.scanCode({
-              success: async (scanRes) => {
-                const raw = String((scanRes && scanRes.result) || '')
-                const normalized = raw.replace(/^0x/i, '').replace(/[^0-9a-fA-F]/g, '').toUpperCase()
-                const isMac = /^[0-9A-F]{12}$/.test(normalized)
-                const isUuid = /^[0-9A-F]{32}$/.test(normalized)
-                if (!isMac && !isUuid) {
-                  wx.showToast({ title: dict.invalidCode, icon: 'none' })
-                  return
-                }
-                const parsed = isMac
-                  ? { type: 'mac', value: normalized, deviceType: resolveDeviceTypeByMac(normalized) }
-                  : { type: 'uuid', value: normalized }
-                const decision = resolveScanRoute(parsed)
-                if (decision.action === 'unsupported' || !decision.url) {
-                  wx.showToast({ title: dict.unsupportedDeviceType, icon: 'none' })
-                  return
-                }
-                wx.navigateTo({ url: decision.url })
-              },
-              fail: () => {
-                // 用户取消扫码，不提示
-              }
-            })
-          }
-        },
-        fail: () => {
-          // 用户取消，不提示
-        }
+      if (!this.ensureLoggedIn(dict)) return
+      this.setData({
+        textCancel: dict.cancel,
+        actionSheetItems: [dict.bleSearch, dict.cameraScan],
+        actionSheetVisible: true
       })
+    },
+    onActionSheetItem(e) {
+      const locale = normalizeLocale(wx.getStorageSync('language'))
+      const dict = I18N[locale] || I18N['en-US']
+      const idx = Number(e.currentTarget.dataset.index)
+      this.setData({ actionSheetVisible: false })
+      if (idx === 0) {
+        wx.navigateTo({ url: '/pages/device-provision/ble-scan' })
+        return
+      }
+      if (idx === 1) {
+        wx.scanCode({
+          success: async (scanRes) => {
+            const raw = String((scanRes && scanRes.result) || '')
+            const normalized = raw.replace(/^0x/i, '').replace(/[^0-9a-fA-F]/g, '').toUpperCase()
+            const isMac = /^[0-9A-F]{12}$/.test(normalized)
+            const isUuid = /^[0-9A-F]{32}$/.test(normalized)
+            if (!isMac && !isUuid) {
+              wx.showToast({ title: dict.invalidCode, icon: 'none' })
+              return
+            }
+            const parsed = isMac
+              ? { type: 'mac', value: normalized, deviceType: resolveDeviceTypeByMac(normalized) }
+              : { type: 'uuid', value: normalized }
+            const decision = resolveScanRoute(parsed)
+            if (decision.action === 'unsupported' || !decision.url) {
+              wx.showToast({ title: dict.unsupportedDeviceType, icon: 'none' })
+              return
+            }
+            wx.navigateTo({ url: decision.url })
+          },
+          fail: () => {
+            // 用户取消扫码，不提示
+          }
+        })
+      }
     }
   }
 })

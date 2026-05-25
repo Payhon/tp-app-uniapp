@@ -16,4 +16,17 @@
     </view>
   </view>
   <view class="ctb__safe"></view>
+  <view wx:if="{{actionSheetVisible}}" class="ctb-sheet" bindtap="closeActionSheet">
+    <view class="ctb-sheet__panel" catchtap="noop">
+      <view
+        wx:for="{{actionSheetItems}}"
+        wx:key="index"
+        class="ctb-sheet__item"
+        data-index="{{index}}"
+        bindtap="onActionSheetItem"
+      >{{item}}</view>
+      <view class="ctb-sheet__gap"></view>
+      <view class="ctb-sheet__cancel" bindtap="closeActionSheet">{{textCancel}}</view>
+    </view>
+  </view>
 </view>

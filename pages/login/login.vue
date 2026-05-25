@@ -134,13 +134,23 @@ const password = ref<string>('')
 const captchaId = ref<string>('')
 const captchaCode = ref<string>('')
 const captchaImage = ref<string>('')
-const agree = ref<boolean>(true)
 const loading = ref<boolean>(false)
 const captchaLoading = ref<boolean>(false)
 const logoTapCount = ref<number>(0)
 const debugInfo = ref<AppDebugInfo>(createDefaultAppDebugInfo())
 
 let logoTapResetTimer: ReturnType<typeof setTimeout> | null = null
+
+const getInitialAgreementChecked = (): boolean => {
+	// #ifdef MP-WEIXIN
+	return false
+	// #endif
+	// #ifndef MP-WEIXIN
+	return true
+	// #endif
+}
+
+const agree = ref<boolean>(getInitialAgreementChecked())
 
 const isDeveloperMode = computed<boolean>(() => developerStore.enabled)
 

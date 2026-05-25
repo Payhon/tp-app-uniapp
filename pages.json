@@ -75,6 +75,7 @@
 		}
 	],
 	"subPackages": [
+		// #ifndef MP-WEIXIN
 		{
 			"root": "uni_modules/fjbms-upgrade/pages",
 			"pages": [
@@ -86,6 +87,7 @@
 				}
 			]
 		},
+		// #endif
 		{
 			"root": "pages/alarm",
 			"pages": [

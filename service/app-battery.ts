@@ -13,6 +13,7 @@ export type AppBatteryDetail = {
 	battery_model_id?: string | null
 	battery_model_name?: string | null
 	item_uuid?: string | null
+	batch_number?: string | null
 	ble_mac?: string | null
 	comm_chip_id?: string | null
 	soc?: number | null
@@ -75,6 +76,9 @@ export type AppBatteryOtaCheckReq = {
 	device_id?: string
 	model?: string | null
 	version?: string | null
+	battery_model_id?: string | null
+	batch_number?: string | null
+	item_uuid?: string | null
 	[key: string]: unknown
 }
 

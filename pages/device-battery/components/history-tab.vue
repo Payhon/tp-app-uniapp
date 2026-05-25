@@ -227,8 +227,8 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import type { BmsClient } from '@/common/lib/bms-protocol'
-import type { BmsHistoryProtectionCounters, BmsHistoryStatusRecord } from '@/common/lib/bms-protocol'
+import type { BmsClient } from '@/common/lib/bms-protocol/client'
+import type { BmsHistoryProtectionCounters, BmsHistoryStatusRecord } from '@/common/lib/bms-protocol/types'
 
 type SegmentKey = 'protection' | 'status'
 type TagTone = 'danger' | 'warn' | 'info' | 'success'

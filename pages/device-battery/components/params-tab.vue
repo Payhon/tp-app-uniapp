@@ -245,9 +245,23 @@
 				</view>
 
 				<scroll-view class="advanced__body" scroll-y>
-					<view v-if="hasOtherItems" class="advanced__section">
+					<view v-if="hasAdvancedConfigItems" class="advanced__section">
 						<text class="advanced__section-title">{{ $t('deviceDetail.params.advancedConfig') }}</text>
 						<view class="list list--popup">
+							<view v-if="canAccessReadonlySoh" class="item item--readonly">
+								<text class="item__label">{{ $t('deviceDetail.params.sohReadonly') }}</text>
+								<view class="item__right">
+									<text class="item__value">{{ sohReadonlyText }}</text>
+								</view>
+							</view>
+							<view v-if="canAccessVirtualCapacity" class="item" hover-class="item--hover" @tap="openVirtualCapacityEdit">
+								<text class="item__label">{{ $t('deviceDetail.params.virtualCapacityWrite') }}</text>
+								<view class="item__right">
+									<text class="item__value">{{ $t('deviceDetail.params.execute') }}</text>
+									<u-icon name="arrow-right" size="14" color="#C0C4CC"></u-icon>
+								</view>
+							</view>
+							<view v-if="hasOtherItems" class="divider divider--inner"></view>
 							<view v-for="item in otherItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
 								<text class="item__label">{{ item.label }}</text>
 								<view class="item__right">
@@ -333,16 +347,16 @@ import {
 import { fetchCurrentDeviceParamPermissions } from '@/service/permissions'
 import { isMeterMac } from '@/common/device-provision/device-prefix-shared'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
-import type { BmsClient } from '@/common/lib/bms-protocol'
+import type { BmsClient } from '@/common/lib/bms-protocol/client'
 import {
-	BMS_PARAM,
 	FUNCTION_CONFIG_ITEMS,
-	bootOtaUpgrade,
 	parseFunctionConfigFlags,
 	setFunctionConfigFlag,
 	type FunctionConfigFlagKey,
-} from '@/common/lib/bms-protocol'
+} from '@/common/lib/bms-protocol/function-config'
+import { bootOtaUpgrade } from '@/common/lib/bms-protocol/boot-ota'
 import {
+	BMS_PARAM,
 	PARAM_CATEGORIES,
 	PARAM_DEF_BY_KEY,
 	getFactoryPermissionKey,
@@ -810,11 +824,27 @@ const OTHER_KEYS = listParamsByCategory(PARAM_CATEGORIES.OTHER)
 const NUMBERING_KEYS = listParamsByCategory(PARAM_CATEGORIES.STRING)
 const SYSTEM_KEYS = listParamsByCategory(PARAM_CATEGORIES.SYSTEM).filter((key) => key !== BMS_PARAM.FUNCTION_CONFIG)
 const SYSTEM_LOAD_KEYS = [...SYSTEM_KEYS, BMS_PARAM.FUNCTION_CONFIG]
+const SOH_READONLY_PERMISSION_KEY = '10d'
+const VIRTUAL_CAPACITY_PERMISSION_KEY = '627'
+const VIRTUAL_CAPACITY_ADDRESS = 0x0627
+const VIRTUAL_CAPACITY_TARGET_ADDRESS = 0x00
+const VIRTUAL_CAPACITY_SCALE_AH = 1000
 
 const otherItems = computed(() => mkItems(filterParamEntries(OTHER_KEYS)))
 const numberingItems = computed(() => mkItems(filterParamEntries(NUMBERING_KEYS)))
 const systemItems = computed(() => mkItems(filterParamEntries(SYSTEM_KEYS)))
+const canAccessReadonlySoh = computed(() => canAccessPermissionKey(SOH_READONLY_PERMISSION_KEY))
+const canAccessVirtualCapacity = computed(() => canAccessPermissionKey(VIRTUAL_CAPACITY_PERMISSION_KEY))
+const sohReadonlyText = computed(() => {
+	const realtime = props.status?.energy?.sohPct
+	const fallback = props.battery?.soh
+	const raw = typeof realtime === 'number' && Number.isFinite(realtime) ? realtime : fallback
+	const n = typeof raw === 'number' ? raw : Number(raw)
+	if (!Number.isFinite(n)) return '-'
+	return `${formatDisplayNumber(Math.max(0, Math.min(100, n)), 0)}%`
+})
 const hasOtherItems = computed(() => otherItems.value.length > 0)
+const hasAdvancedConfigItems = computed(() => canAccessReadonlySoh.value || canAccessVirtualCapacity.value || hasOtherItems.value)
 const hasNumberingItems = computed(() => numberingItems.value.length > 0)
 const hasSystemItems = computed(() => systemItems.value.length > 0)
 const functionConfigFlags = computed(() => parseFunctionConfigFlags(paramValues[BMS_PARAM.FUNCTION_CONFIG]))
@@ -866,7 +896,7 @@ const factoryItems = computed(() =>
 )
 const hasFactoryItems = computed(() => factoryItems.value.length > 0)
 const hasAdvancedSections = computed(
-	() => hasOtherItems.value || hasNumberingItems.value || hasSystemSection.value || hasFactoryItems.value
+	() => hasAdvancedConfigItems.value || hasNumberingItems.value || hasSystemSection.value || hasFactoryItems.value
 )
 
 const editPopup = reactive({
@@ -1057,11 +1087,35 @@ const openEdit = (item: ParamItem) => {
 	applyPollingState()
 }
 
+const openVirtualCapacityEdit = () => {
+	if (!canAccessVirtualCapacity.value) return
+	if (!props.client || props.connType === 'offline') {
+		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return
+	}
+	editPopup.title = t('deviceDetail.params.virtualCapacityWrite') as string
+	editPopup.key = 'VIRTUAL_CAPACITY_AH'
+	editPopup.unit = 'Ah'
+	editPopup.valueType = 'virtualCapacity'
+	editPopup.inputType = 'digit'
+	editPopup.input = ''
+	editPopup.show = true
+	applyPollingState()
+}
+
 const writeParamValue = async (key: string, value: string | number) => {
 	const c = props.client
 	if (!c) return
 	await c.writeParam(key, value)
 	paramValues[key] = await c.readParam(key)
+}
+
+const writeVirtualCapacityAh = async (valueAh: number) => {
+	const c = props.client
+	if (!c) return
+	const raw = Math.round(valueAh * VIRTUAL_CAPACITY_SCALE_AH) >>> 0
+	const regs = new Uint16Array([(raw >>> 16) & 0xffff, raw & 0xffff])
+	await c.writeRegisters(VIRTUAL_CAPACITY_ADDRESS, regs, { targetAddress: VIRTUAL_CAPACITY_TARGET_ADDRESS })
 }
 
 const openBatteryTypeSelector = (key: string, title: string, currentValue: unknown) => {
@@ -1135,6 +1189,13 @@ const confirmEdit = async () => {
 	try {
 		if (editPopup.valueType === 'str') {
 			await writeParamValue(editPopup.key, raw)
+		} else if (editPopup.valueType === 'virtualCapacity') {
+			const num = Number(raw)
+			if (!raw || !Number.isFinite(num) || num < 0) {
+				uni.showToast({ title: t('deviceDetail.toast.invalidInput') as string, icon: 'none' })
+				return
+			}
+			await writeVirtualCapacityAh(num)
 		} else {
 			const num = Number(raw)
 			if (!raw || !Number.isFinite(num)) {
@@ -1144,7 +1205,10 @@ const confirmEdit = async () => {
 			await writeParamValue(editPopup.key, num)
 		}
 		editPopup.show = false
-		uni.showToast({ title: t('deviceDetail.toast.saved') as string, icon: 'none' })
+		uni.showToast({
+			title: t(editPopup.valueType === 'virtualCapacity' ? 'deviceDetail.toast.virtualCapacityWritten' : 'deviceDetail.toast.saved') as string,
+			icon: 'none',
+		})
 		applyPollingState()
 	} catch (e) {
 		editPopup.show = false
@@ -1567,6 +1631,9 @@ const startBmsOta = async () => {
 				device_id: deviceId || undefined,
 				model: modelName || undefined,
 				version: versionText || undefined,
+				battery_model_id: String(props.battery?.battery_model_id || '').trim() || undefined,
+				batch_number: String(props.battery?.batch_number || '').trim() || undefined,
+				item_uuid: String(props.battery?.item_uuid || '').trim() || undefined,
 			})
 			if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
 			data = (rsp.data || {}) as Record<string, unknown>

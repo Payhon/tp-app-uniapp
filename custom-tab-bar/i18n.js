@@ -6,6 +6,8 @@ const I18N = {
     cameraScan: '摄像头扫码',
     invalidCode: '无效二维码',
     unsupportedDeviceType: '暂不支持该设备二维码',
+    pleaseLogin: '请先登录',
+    cancel: '取消',
     me: '我的'
   },
   'en-US': {
@@ -15,6 +17,8 @@ const I18N = {
     cameraScan: 'Camera Scan',
     invalidCode: 'Invalid code',
     unsupportedDeviceType: 'Unsupported device code',
+    pleaseLogin: 'Please sign in first',
+    cancel: 'Cancel',
     me: 'Me'
   }
 }

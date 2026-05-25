@@ -76,8 +76,18 @@ const identifier = ref<string>('')
 const verifyCode = ref<string>('')
 const password = ref<string>('')
 const confirmPassword = ref<string>('')
-const agree = ref<boolean>(true)
 const loading = ref<boolean>(false)
+
+const getInitialAgreementChecked = (): boolean => {
+	// #ifdef MP-WEIXIN
+	return false
+	// #endif
+	// #ifndef MP-WEIXIN
+	return true
+	// #endif
+}
+
+const agree = ref<boolean>(getInitialAgreementChecked())
 
 const submitDisabled = computed<boolean>(() => !password.value || !confirmPassword.value || !agree.value || loading.value)
 

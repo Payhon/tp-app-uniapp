@@ -1,4 +1,5 @@
-import { BmsClient, createUniBleBmsTransport, type UniBleBmsTransport } from '@/common/lib/bms-protocol'
+import { BmsClient } from '@/common/lib/bms-protocol/client'
+import { createUniBleBmsTransport, type UniBleBmsTransport } from '@/common/lib/bms-protocol/uni-ble-transport'
 import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/device-provision/ble'
 import { getRememberedBleDeviceId, rememberBleDeviceId } from './ble-device-id-memory'
 

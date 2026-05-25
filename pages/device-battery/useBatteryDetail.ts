@@ -11,11 +11,11 @@ import {
 	type AppBatteryCurrentTelemetry,
 	type AppBatteryReportReq,
 } from '@/service/app-battery'
+import { BmsClient } from '@/common/lib/bms-protocol/client'
 import {
-	BmsClient,
 	createUniMqttSocketBmsTransport,
 	type UniMqttSocketBmsTransport,
-} from '@/common/lib/bms-protocol'
+} from '@/common/lib/bms-protocol/uni-mqtt-socket-transport'
 import {
 	canBleAutoConnect,
 	connectBleClient,

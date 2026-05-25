@@ -311,6 +311,9 @@ const maybeCheckOtaOnDashboard = async () => {
 			device_id: deviceId || undefined,
 			model: modelName,
 			version: versionText,
+			battery_model_id: String(battery.value?.battery_model_id || '').trim() || undefined,
+			batch_number: String(battery.value?.batch_number || '').trim() || undefined,
+			item_uuid: String(battery.value?.item_uuid || '').trim() || undefined,
 		})
 		if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
 		applyOtaCheckResult(rsp.data || null, versionText)
