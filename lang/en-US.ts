@@ -245,7 +245,7 @@ export default {
     addDevice: "Add Device",
     deviceProvision: {
       bleSearch: "Bluetooth Search",
-      cameraScan: "Camera Scan",
+      cameraScan: "Scan or Album",
       bleSearchTitle: "Bluetooth Search",
       wizardTitle: "Add Device",
       uuidBindTitle: "Add Device",

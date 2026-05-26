@@ -243,7 +243,7 @@ export default {
     addDevice: "添加设备",
     deviceProvision: {
       bleSearch: "蓝牙搜索",
-      cameraScan: "摄像头扫码",
+      cameraScan: "扫码/相册识别",
       bleSearchTitle: "蓝牙搜索",
       wizardTitle: "添加设备",
       uuidBindTitle: "添加设备",
