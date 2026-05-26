@@ -1025,6 +1025,7 @@ export default {
       mqtt: "MQTT连接",
       mqttRealtime: "MQTT透传实时",
       cloudFallback: "主动上报兜底",
+      connected: "已连接",
       offline: "离线",
       connecting: "连接中...",
       disconnect: "断开",

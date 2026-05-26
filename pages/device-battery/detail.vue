@@ -11,7 +11,8 @@
 				<!-- #ifndef MP-WEIXIN -->
 				<view class="nav__right">
 					<view class="conn-pill" :class="`conn-pill--${connClass}`">
-						<image class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
+						<text v-if="showFourGConnIcon" class="conn-pill__icon conn-pill__icon--4g">4G</text>
+						<image v-else class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
 						<text class="conn-pill__text">{{ connText }}</text>
 					</view>
 					<view v-if="showBleDisconnectBtn" class="conn-disconnect" hover-class="conn-disconnect--hover" @tap="onDisconnectBluetooth">
@@ -27,7 +28,8 @@
 			<!-- #ifdef MP-WEIXIN -->
 			<view class="nav__conn-row">
 				<view class="conn-pill" :class="`conn-pill--${connClass}`">
-					<image class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
+					<text v-if="showFourGConnIcon" class="conn-pill__icon conn-pill__icon--4g">4G</text>
+					<image v-else class="conn-pill__icon" :src="connIcon" mode="aspectFit" />
 					<text class="conn-pill__text">{{ connText }}</text>
 				</view>
 				<view v-if="showBleDisconnectBtn" class="conn-disconnect" hover-class="conn-disconnect--hover" @tap="onDisconnectBluetooth">
@@ -208,7 +210,6 @@ const {
 	status,
 	client,
 	connType,
-	dataSourceMode,
 	connecting,
 	bmsDataLoading,
 	bmsDataLoadPhase,
@@ -334,18 +335,17 @@ const maybeCheckOtaOnDashboard = async () => {
 const connText = computed(() => {
 	if (connecting.value) return t('deviceDetail.conn.connecting') as string
 	if (connType.value === 'bluetooth') return t('deviceDetail.conn.bluetooth') as string
-	if (connType.value === 'mqtt' && dataSourceMode.value === 'realtime') return t('deviceDetail.conn.mqttRealtime') as string
-	if (connType.value === 'mqtt' && dataSourceMode.value === 'cloud_fallback') return t('deviceDetail.conn.cloudFallback') as string
-	if (connType.value === 'mqtt') return t('deviceDetail.conn.mqtt') as string
+	if (connType.value === 'mqtt') return t('deviceDetail.conn.connected') as string
 	return t('deviceDetail.conn.offline') as string
 })
 
 const connIcon = computed(() => {
 	if (connecting.value) return '/static/image/device/icon-bluetoolth@2x.png'
 	if (connType.value === 'bluetooth') return '/static/image/device/icon-bluetoolth@2x.png'
-	if (connType.value === 'mqtt') return '/static/image/home/icon-wifi@2x.png'
 	return '/static/image/home/icon-unlink@2x.png'
 })
+
+const showFourGConnIcon = computed(() => !connecting.value && connType.value === 'mqtt')
 
 const connClass = computed(() => {
 	if (connecting.value) return 'connecting'
@@ -683,6 +683,18 @@ onUnload(() => {
 .conn-pill__icon {
 	width: 24rpx;
 	height: 24rpx;
+}
+
+.conn-pill__icon--4g {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30rpx;
+	height: 22rpx;
+	font-size: 16rpx;
+	font-weight: 700;
+	line-height: 1;
+	color: currentColor;
 }
 
 .conn-pill__text {

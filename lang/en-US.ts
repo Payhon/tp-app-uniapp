@@ -1028,6 +1028,7 @@ export default {
       mqtt: "MQTT",
       mqttRealtime: "MQTT Realtime",
       cloudFallback: "Cloud Report Fallback",
+      connected: "Connected",
       offline: "Offline",
       connecting: "Connecting...",
       disconnect: "Disconnect",
