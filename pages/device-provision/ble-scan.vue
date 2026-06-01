@@ -525,7 +525,7 @@ function upsertDevice(d: FoundDevice) {
 		navigated.value = true
 		stopScan().finally(() => {
 			uni.navigateTo({
-				url: `/pages/device-provision/provision-wizard?deviceId=${encodeURIComponent(d.deviceId)}&qrMac=${targetMac.value}`,
+				url: `/pages/device-provision/provision-wizard?deviceId=${encodeURIComponent(d.deviceId)}&qrMac=${targetMac.value}&advMac=${encodeURIComponent(advMac)}`,
 			})
 		})
 	}
@@ -766,7 +766,7 @@ function selectDevice(d: DeviceRow) {
 		uni.navigateTo({
 			url: `/pages/device-provision/provision-wizard?deviceId=${encodeURIComponent(d.deviceId)}${
 				targetMac.value ? `&qrMac=${targetMac.value}` : ''
-			}`,
+			}${d.advMac ? `&advMac=${encodeURIComponent(d.advMac)}` : ''}`,
 		})
 	})
 }

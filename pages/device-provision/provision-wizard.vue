@@ -72,20 +72,12 @@ const DETAIL_BLE_MAX_READ_REGS = 60
 
 const { t } = useI18n()
 
-function format(template: string, params: Record<string, string | number | null | undefined>): string {
-	let out = String(template || '')
-	for (const [k, v] of Object.entries(params)) {
-		const val = v == null ? '' : String(v)
-		out = out.replace(new RegExp(`\\{${k}\\}`, 'g'), val)
-	}
-	return out
-}
-
 const pageHeight = ref<string | number>(0)
 const marginTopHeight = ref<string | number>(0)
 
 const deviceId = ref('')
 const qrMac = ref<string | null>(null)
+const advMac = ref<string | null>(null)
 const rawDeviceIdParam = ref('')
 
 const running = ref(false)
@@ -220,7 +212,7 @@ async function runProvision() {
 	// NOTE: 部分设备对单帧写入长度更敏感，这里把 maxWriteRegisters 降到 20（字符串写入会自动分包多次写入）。
 	const client = new BmsClient({ transport, logger: console as any, maxWriteRegisters: 20 })
 		try {
-			console.log('[provision] start', { rawDeviceIdParam: rawDeviceIdParam.value, deviceId: deviceId.value, qrMac: qrMac.value })
+			console.log('[provision] start', { rawDeviceIdParam: rawDeviceIdParam.value, deviceId: deviceId.value, qrMac: qrMac.value, advMac: advMac.value })
 			// 部分平台要求连接前停止扫描，否则连接/发现服务可能失败
 			await stopBleDiscoveryBestEffort()
 			await sleep(120)
@@ -248,11 +240,6 @@ async function runProvision() {
 		const bleMac = identity.bluetoothMacHex ? normalizeMac(identity.bluetoothMacHex) : null
 		if (bleMac) summary.bleMac = mac12ToColon(bleMac)
 		console.log('[provision] readIdentity done', { ...identity, bluetoothMacHex: identity.bluetoothMacHex ? mac12ToColon(identity.bluetoothMacHex) : null })
-
-		// 扫码模式：校验连接到的设备 MAC 是否一致（避免连错设备）
-		if (qrMac.value && bleMac && qrMac.value !== bleMac) {
-			throw new Error(format(t('pages.deviceProvision.qrMacMismatch') as string, { qr: mac12ToColon(qrMac.value), ble: mac12ToColon(bleMac) }))
-		}
 
 		// 先查云端是否存在该设备（设备未注册则不继续写入/绑定）
 		const infoRsp = await getDeviceProvisionInfo(uuid)
@@ -297,8 +284,9 @@ async function runProvision() {
 		}
 
 		setStep('bind', 'doing')
-		const macForBind = bleMac || qrMac.value || undefined
-		const bindRes = await postDeviceProvisionBind({ item_uuid: uuid, ble_mac: macForBind })
+		const connectionMacForBind = advMac.value || qrMac.value || bleMac || undefined
+		const identityMacForBind = bleMac || undefined
+		const bindRes = await postDeviceProvisionBind({ item_uuid: uuid, ble_mac: connectionMacForBind, identity_ble_mac: identityMacForBind })
 		if ((bindRes as any)?.code !== 200) {
 			// NOTE: 后端 CodeDBError 会把 sql_error 放在 data 里；这里输出到控制台便于定位迁移/表缺失等问题。
 			console.error('[provision] bind failed', bindRes)
@@ -377,6 +365,7 @@ onLoad((option) => {
 	rawDeviceIdParam.value = String(opt.deviceId || '')
 	deviceId.value = safeDecodeURIComponent(rawDeviceIdParam.value)
 	qrMac.value = opt.qrMac ? normalizeMac(opt.qrMac) : null
+	advMac.value = opt.advMac ? normalizeMac(opt.advMac) : null
 })
 
 onShow(() => {
