@@ -12,6 +12,13 @@ function normalizeLang(lang: string): string {
 }
 
 export function getRuntimeAppId(): string {
+	// #ifdef MP-WEIXIN
+	try {
+		const accountInfo = uni.getAccountInfoSync()
+		const wxAppID = String(accountInfo?.miniProgram?.appId || '').trim()
+		if (wxAppID) return wxAppID
+	} catch (e) {}
+	// #endif
 	// #ifdef APP-PLUS
 	try {
 		return plus.runtime.appid

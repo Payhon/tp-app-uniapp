@@ -50,6 +50,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 import { useInjected } from '@/common/composables/useInjected'
 import { useAppRuntime } from '@/common/composables/useAppRuntime'
+import { fetchWxmpRuntimeConfig, isPackWxmpRuntime } from '@/common/wxmp-runtime'
 
 const { t } = useI18n()
 const { apiRequest } = useInjected()
@@ -59,8 +60,9 @@ type ContentPage = { title?: string; content_markdown?: string }
 
 const loading = ref<boolean>(false)
 const contentMarkdown = ref<string>('')
+const runtimeVendorName = ref<string>('')
 
-const vendorName = computed(() => t('pages.my.aboutPage.vendorName') as string)
+const vendorName = computed(() => runtimeVendorName.value || (t('pages.my.aboutPage.vendorName') as string))
 const appVersion = ref<string>('')
 
 declare const plus: { runtime?: { version?: string } }
@@ -98,12 +100,24 @@ const loadContent = async () => {
 	}
 }
 
+const loadRuntimeVendor = async () => {
+	// #ifdef MP-WEIXIN
+	const runtime = await fetchWxmpRuntimeConfig()
+	if (isPackWxmpRuntime(runtime)) {
+		runtimeVendorName.value = String(runtime?.org_name || '').trim()
+		return
+	}
+	// #endif
+	runtimeVendorName.value = ''
+}
+
 const openContent = (key: string) => {
 	uni.navigateTo({ url: `/pages/content/page?key=${key}` })
 }
 
-onLoad(() => {
+onLoad(async () => {
 	loadVersion()
+	await loadRuntimeVendor()
 	loadContent()
 })
 

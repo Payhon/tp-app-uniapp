@@ -691,10 +691,6 @@ export default {
   opacity: 0.9;
 }
 
-.avatar {
-  border: 4rpx solid rgba(255, 255, 255, 0.8);
-}
-
 .user-text {
   margin-left: 20rpx;
 }

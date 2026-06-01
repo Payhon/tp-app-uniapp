@@ -2,11 +2,11 @@
 	<view class="auth-page">
 		<image class="page-bg" :src="$img('bg@2x.png')" mode="aspectFill" />
 		<view class="brand">
-			<image class="brand-logo" src="/static/image/logo@2x.png" mode="heightFix" @tap="onBrandLogoTap" />
+			<image class="brand-logo" :src="loginLogoUrl" mode="heightFix" @tap="onBrandLogoTap" />
 		</view>
 
 		<view class="auth-card">
-			<view class="tabs">
+			<view v-if="!isWxmpLoginOnly" class="tabs">
 				<view class="tab" :class="{ active: activeTab === 'phone' }" @tap="activeTab = 'phone'">
 					<text class="tab-text">{{ $t('auth.login.tabAccount') }}</text>
 					<view class="tab-line" v-if="activeTab === 'phone'"></view>
@@ -18,7 +18,7 @@
 			</view>
 
 			<view class="form">
-				<view class="ipt">
+				<view v-if="!isWxmpLoginOnly" class="ipt">
 					<uni-icons :type="activeTab === 'phone' ? 'phone-filled' : 'email-filled'" size="20"
 						color="#9ca3af" />
 					<input class="ipt-input" type="text"
@@ -26,14 +26,14 @@
 						placeholder-class="ipt-placeholder" v-model="identifier" />
 				</view>
 
-				<view class="ipt">
+				<view v-if="!isWxmpLoginOnly" class="ipt">
 					<uni-icons type="locked-filled" size="20" color="#9ca3af" />
 					<input class="ipt-input" type="text" password="true"
 						:placeholder="$t('auth.login.placeholderPassword')" placeholder-class="ipt-placeholder"
 						v-model="password" />
 				</view>
 
-				<view class="captcha-row">
+				<view v-if="!isWxmpLoginOnly" class="captcha-row">
 					<view class="ipt captcha-input">
 						<uni-icons type="image-filled" size="20" color="#9ca3af" />
 						<input class="ipt-input" type="text"
@@ -60,10 +60,13 @@
 					</checkbox-group>
 				</view>
 
-				<button class="primary-btn" :loading="loading" :disabled="!canSubmit" @tap="doLogin">{{
+				<button v-if="!isWxmpLoginOnly" class="primary-btn" :loading="loading" :disabled="!canSubmit" @tap="doLogin">{{
 					$t('auth.login.loginBtn') }}</button>
+				<button v-else class="primary-btn" :loading="loading" :disabled="!agree || loading" @tap="doWxmpLogin">
+					微信登录
+				</button>
 
-				<view class="links">
+				<view v-if="!isWxmpLoginOnly" class="links">
 					<text class="link" @tap="goRegister">{{ $t('auth.login.createAccount') }}</text>
 					<text class="link muted" @tap="goForgot">{{ $t('auth.login.forgotPassword') }}</text>
 				</view>
@@ -107,7 +110,8 @@ import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue
 import { fetchLoginCaptcha, loginByPassword, wxmpLogin } from '@/service/app-auth'
 import api from '@/API/'
 import { createDefaultAppDebugInfo, getAppDebugInfo, type AppDebugInfo } from '@/common/app-debug'
-import { openPublicAppPage } from '@/common/public-content'
+import { getRuntimeAppId, openPublicAppPage } from '@/common/public-content'
+import { fetchWxmpRuntimeConfig, isPackWxmpRuntime } from '@/common/wxmp-runtime'
 import type { ApiResponse } from '@/types/api'
 import { useDeveloperStore } from '@/store/developer'
 import { useUserStore } from '@/store/user'
@@ -138,6 +142,9 @@ const loading = ref<boolean>(false)
 const captchaLoading = ref<boolean>(false)
 const logoTapCount = ref<number>(0)
 const debugInfo = ref<AppDebugInfo>(createDefaultAppDebugInfo())
+const defaultLoginLogoUrl = '/static/image/logo@2x.png'
+const loginLogoUrl = ref<string>(defaultLoginLogoUrl)
+const wxmpLoginOnly = ref<boolean>(false)
 
 let logoTapResetTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -154,9 +161,18 @@ const agree = ref<boolean>(getInitialAgreementChecked())
 
 const isDeveloperMode = computed<boolean>(() => developerStore.enabled)
 
+const isWxmpLoginOnly = computed<boolean>(() => {
+	// #ifdef MP-WEIXIN
+	return wxmpLoginOnly.value
+	// #endif
+	// #ifndef MP-WEIXIN
+	return false
+	// #endif
+})
+
 const hasOtherLoginMethods = computed<boolean>(() => {
 	// #ifdef MP-WEIXIN
-	return true
+	return !isWxmpLoginOnly.value
 	// #endif
 	// #ifndef MP-WEIXIN
 	return false
@@ -188,6 +204,24 @@ const scheduleLogoTapReset = () => {
 
 const refreshDeveloperDebugInfo = async () => {
 	debugInfo.value = await getAppDebugInfo()
+}
+
+const loadWxmpRuntimeConfig = async () => {
+	// #ifdef MP-WEIXIN
+	wxmpLoginOnly.value = false
+	loginLogoUrl.value = defaultLoginLogoUrl
+	try {
+		const runtime = await fetchWxmpRuntimeConfig()
+		if (runtime) {
+			wxmpLoginOnly.value = isPackWxmpRuntime(runtime)
+			const logo = String(runtime.login_logo_url || '').trim()
+			loginLogoUrl.value = logo || defaultLoginLogoUrl
+		}
+	} catch (e) {
+		wxmpLoginOnly.value = false
+		loginLogoUrl.value = defaultLoginLogoUrl
+	}
+	// #endif
 }
 
 const onBrandLogoTap = async () => {
@@ -381,8 +415,11 @@ const doLogin = async () => {
 	}
 }
 
-onShow(() => {
-	void refreshCaptcha()
+onShow(async () => {
+	await loadWxmpRuntimeConfig()
+	if (!isWxmpLoginOnly.value) {
+		await refreshCaptcha()
+	}
 	if (developerStore.enabled) {
 		void refreshDeveloperDebugInfo()
 	}
@@ -392,7 +429,6 @@ onUnload(() => {
 	resetLogoTapState()
 })
 
-// #ifdef MP-WEIXIN
 const doWxmpLogin = async () => {
 	if (loading.value) return
 	if (!agree.value) {
@@ -409,7 +445,7 @@ const doWxmpLogin = async () => {
 				fail: reject
 			})
 		})
-		const resp = (await wxmpLogin(loginRes.code)) as ApiResponse<{ token?: string }>
+		const resp = (await wxmpLogin(loginRes.code, getRuntimeAppId())) as ApiResponse<{ token?: string }>
 		if (resp && resp.code === 200 && resp.data && resp.data.token) {
 			await afterLoginSuccess(resp.data.token)
 			uni.showToast({ title: t('auth.login.success') as string, icon: 'none' })
@@ -422,7 +458,6 @@ const doWxmpLogin = async () => {
 		loading.value = false
 	}
 }
-// #endif
 </script>
 
 <style>

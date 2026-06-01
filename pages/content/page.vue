@@ -19,9 +19,7 @@
 import { getCurrentInstance, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
-import $C from '@/common/config'
-
-declare const plus: { runtime: { appid: string } }
+import { getRuntimeAppId } from '@/common/public-content'
 
 type ContentPage = { title?: string; content_html?: string }
 type ApiResponse<T> = { code: number; data: T }
@@ -36,10 +34,7 @@ const loading = ref<boolean>(false)
 const getLang = (): string => uni.getStorageSync('language') || 'zh-CN'
 
 const getAppId = (): string => {
-	// #ifdef APP-PLUS
-	return plus.runtime.appid
-	// #endif
-	return $C.appId || uni.getStorageSync('app_appid') || ''
+	return getRuntimeAppId()
 }
 
 const getApiRequest = () => {

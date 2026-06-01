@@ -68,6 +68,7 @@ import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue
 import { registerByCode } from '@/service/app-auth'
 import api from '@/API/'
 import { openPublicAppPage } from '@/common/public-content'
+import { fetchWxmpRuntimeConfig, isPackWxmpRuntime } from '@/common/wxmp-runtime'
 import type { ApiResponse } from '@/types/api'
 
 const { t } = useI18n()
@@ -91,7 +92,14 @@ const agree = ref<boolean>(getInitialAgreementChecked())
 
 const submitDisabled = computed<boolean>(() => !password.value || !confirmPassword.value || !agree.value || loading.value)
 
-onLoad((query?: Record<string, string | undefined>) => {
+onLoad(async (query?: Record<string, string | undefined>) => {
+	// #ifdef MP-WEIXIN
+	const runtime = await fetchWxmpRuntimeConfig()
+	if (isPackWxmpRuntime(runtime)) {
+		uni.redirectTo({ url: '/pages/login/login' })
+		return;
+	}
+	// #endif
 	identifier.value = query && query.identifier ? decodeURIComponent(query.identifier) : ''
 	verifyCode.value = query && query.code ? decodeURIComponent(query.code) : ''
 })

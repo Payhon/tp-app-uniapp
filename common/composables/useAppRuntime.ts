@@ -1,5 +1,6 @@
 import $C from '@/common/config'
 import { resolveBaseUrl } from '@/API/interface'
+import { getRuntimeAppId } from '@/common/public-content'
 declare const plus: { runtime: { appid: string; version?: string } }
 
 export function useAppRuntime() {
@@ -9,7 +10,7 @@ export function useAppRuntime() {
 		// #ifdef APP-PLUS
 		return plus.runtime.appid
 		// #endif
-		return $C.appId || uni.getStorageSync('app_appid') || ''
+		return getRuntimeAppId() || $C.appId || uni.getStorageSync('app_appid') || ''
 	}
 
 	const getHeaders = (): Record<string, string> => {

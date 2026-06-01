@@ -24,7 +24,7 @@
       </view>
     </view>
 
-    <view class="card card--mt">
+    <view v-if="!isPackWxmp" class="card card--mt">
       <view
         class="row"
         :hover-class="canSetUsername ? 'row--hover' : ''"
@@ -45,7 +45,7 @@
       </view>
     </view>
 
-    <view class="card card--mt">
+    <view v-if="!isPackWxmp" class="card card--mt">
       <view class="row" hover-class="row--hover" @tap="goChangePassword">
         <text class="label">{{ $t("pages.modifyPassword") }}</text>
         <view class="right">
@@ -55,75 +55,83 @@
     </view>
 
     <view class="card card--mt">
-      <view class="row-head">
+      <view v-if="!isPackWxmp" class="row-head">
         <text class="head-title">{{
           $t("pages.my.settingPage.accountBinding")
         }}</text>
       </view>
 
-      <!-- 手机号绑定 -->
-      <!-- #ifdef MP-WEIXIN -->
-      <view
-        v-if="phoneBound"
-        class="row"
-        hover-class="row--hover"
-        @tap="openBindPopup('phone')"
-      >
-        <text class="label">{{ $t("pages.my.settingPage.bindPhone") }}</text>
-        <view class="right">
-          <text class="value">{{ maskedPhone }}</text>
-          <u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
-        </view>
-      </view>
-      <button
-        v-else
-        class="row-btn"
-        hover-class="row--hover"
-        open-type="getPhoneNumber"
-        @getphonenumber="onWxGetPhoneNumber"
-      >
-        <view class="row row--btn">
+      <template v-if="!isPackWxmp">
+        <!-- 手机号绑定 -->
+        <!-- #ifdef MP-WEIXIN -->
+        <view
+          v-if="phoneBound"
+          class="row"
+          hover-class="row--hover"
+          @tap="openBindPopup('phone')"
+        >
           <text class="label">{{ $t("pages.my.settingPage.bindPhone") }}</text>
           <view class="right">
-            <text class="value value--placeholder">{{
-              $t("pages.my.settingPage.unbound")
-            }}</text>
+            <text class="value">{{ maskedPhone }}</text>
             <u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
           </view>
         </view>
-      </button>
-      <!-- #endif -->
-      <!-- #ifndef MP-WEIXIN -->
-      <view class="row" hover-class="row--hover" @tap="openBindPopup('phone')">
-        <text class="label">{{ $t("pages.my.settingPage.bindPhone") }}</text>
-        <view class="right">
-          <text class="value" :class="{ 'value--placeholder': !phoneBound }">
-            {{ phoneBound ? maskedPhone : $t("pages.my.settingPage.unbound") }}
-          </text>
-          <u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
+        <button
+          v-else
+          class="row-btn"
+          hover-class="row--hover"
+          open-type="getPhoneNumber"
+          @getphonenumber="onWxGetPhoneNumber"
+        >
+          <view class="row row--btn">
+            <text class="label">{{
+              $t("pages.my.settingPage.bindPhone")
+            }}</text>
+            <view class="right">
+              <text class="value value--placeholder">{{
+                $t("pages.my.settingPage.unbound")
+              }}</text>
+              <u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
+            </view>
+          </view>
+        </button>
+        <!-- #endif -->
+        <!-- #ifndef MP-WEIXIN -->
+        <view class="row" hover-class="row--hover" @tap="openBindPopup('phone')">
+          <text class="label">{{ $t("pages.my.settingPage.bindPhone") }}</text>
+          <view class="right">
+            <text class="value" :class="{ 'value--placeholder': !phoneBound }">
+              {{
+                phoneBound ? maskedPhone : $t("pages.my.settingPage.unbound")
+              }}
+            </text>
+            <u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
+          </view>
         </view>
-      </view>
-      <!-- #endif -->
+        <!-- #endif -->
 
-      <view class="divider"></view>
+        <view class="divider"></view>
 
-      <!-- Email绑定 -->
-      <view class="row" hover-class="row--hover" @tap="openBindPopup('email')">
-        <text class="label">{{ $t("pages.my.settingPage.bindEmail") }}</text>
-        <view class="right">
-          <text class="value" :class="{ 'value--placeholder': !emailBound }">
-            {{ emailBound ? maskedEmail : $t("pages.my.settingPage.unbound") }}
-          </text>
-          <u-icon
-            v-if="!emailBound"
-            name="arrow-right"
-            size="16"
-            color="#C0C4CC"
-          ></u-icon>
+        <!-- Email绑定 -->
+        <view class="row" hover-class="row--hover" @tap="openBindPopup('email')">
+          <text class="label">{{ $t("pages.my.settingPage.bindEmail") }}</text>
+          <view class="right">
+            <text class="value" :class="{ 'value--placeholder': !emailBound }">
+              {{
+                emailBound ? maskedEmail : $t("pages.my.settingPage.unbound")
+              }}
+            </text>
+            <u-icon
+              v-if="!emailBound"
+              name="arrow-right"
+              size="16"
+              color="#C0C4CC"
+            ></u-icon>
+          </view>
         </view>
-      </view>
 
-      <view class="divider"></view>
+        <view class="divider"></view>
+      </template>
 
       <!-- 微信绑定 -->
       <view class="row" hover-class="row--hover" @tap="bindWeChat">
@@ -406,6 +414,11 @@ import AppAvatar from "@/components/app-avatar/app-avatar.vue";
 import $C from "@/common/config";
 import { useInjected } from "@/common/composables/useInjected";
 import { useAppRuntime } from "@/common/composables/useAppRuntime";
+import { getRuntimeAppId } from "@/common/public-content";
+import {
+  fetchWxmpRuntimeConfig,
+  isPackWxmpRuntime,
+} from "@/common/wxmp-runtime";
 import { deleteCurrentAccount } from "@/service/app-auth";
 import { useUserStore } from "@/store/user";
 
@@ -480,11 +493,23 @@ const username = computed(() =>
   String(userStore.userInfo?.username || "").trim(),
 );
 const hasUsername = computed(() => !!username.value);
-const canSetUsername = computed(() => !hasUsername.value);
+const isPackWxmp = ref<boolean>(false);
+const canSetUsername = computed(() => !isPackWxmp.value && !hasUsername.value);
 const avatarSrc = computed(() => {
   const raw = (userStore.userInfo as any)?.avatar_url as string | undefined;
   return resolveAvatarUrl(raw, getBaseUrl());
 });
+
+const loadWxmpRuntimeMode = async () => {
+  // #ifdef MP-WEIXIN
+  const runtime = await fetchWxmpRuntimeConfig();
+  isPackWxmp.value = isPackWxmpRuntime(runtime);
+  return;
+  // #endif
+  // #ifndef MP-WEIXIN
+  isPackWxmp.value = false;
+  // #endif
+};
 
 const maskPhone = (input: string) => {
   const s = String(input || "").replace(/\s+/g, "");
@@ -870,6 +895,7 @@ const onWxAuthConfirm = async (payload: {
 };
 
 const onWxGetPhoneNumber = async (e: { detail?: { code?: string } }) => {
+  if (isPackWxmp.value) return;
   const code = String(e?.detail?.code || "").trim();
   if (!code) {
     uni.showToast({
@@ -883,7 +909,7 @@ const onWxGetPhoneNumber = async (e: { detail?: { code?: string } }) => {
   try {
     const res = await apiRequest<unknown>(
       "/api/v1/app/auth/wxmp/bind_phone",
-      { phone_code: code },
+      { phone_code: code, appid: getRuntimeAppId() },
       "post",
     );
     if (res && (res as any).code == 200) {
@@ -934,7 +960,7 @@ const bindWeChat = async () => {
     if (!code) throw new Error("wx code missing");
     const res = await apiRequest<unknown>(
       "/api/v1/app/auth/wxmp/bind",
-      { code },
+      { code, appid: getRuntimeAppId() },
       "post",
     );
     if (res && (res as any).code == 200) {
@@ -1017,6 +1043,7 @@ const popupDangerButtonStyle = {
 
 const openBindPopup = (type: BindType) => {
   if (!ensureLogin()) return;
+  if (isPackWxmp.value && (type === "phone" || type === "email")) return;
   if (type === "email" && emailBound.value) {
     uni.showToast({
       title: t("pages.my.settingPage.alreadyBound") as string,
@@ -1296,6 +1323,7 @@ const submitDeleteAccount = async () => {
 
 const goChangePassword = () => {
   if (!ensureLogin()) return;
+  if (isPackWxmp.value) return;
   uni.navigateTo({ url: "/pages/change-pwd/change-pwd" });
 };
 
@@ -1305,18 +1333,22 @@ const goSetUsername = () => {
   uni.navigateTo({ url: "/pages/my/setting/username" });
 };
 
-onLoad(() => {
+onLoad(async () => {
   if (!isLoggedIn.value) {
     uni.showToast({ title: t("pages.pleaseLogin") as string, icon: "none" });
     uni.navigateTo({ url: "/pages/login/login" });
     return;
   }
+  await loadWxmpRuntimeMode();
   loadBindings();
 });
 
-onShow(() => {
+onShow(async () => {
   uni.setNavigationBarTitle({ title: t("pages.my.settingTitle") as string });
-  if (isLoggedIn.value) loadBindings();
+  if (isLoggedIn.value) {
+    await loadWxmpRuntimeMode();
+    loadBindings();
+  }
 });
 </script>
 

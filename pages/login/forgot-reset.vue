@@ -49,6 +49,7 @@ import { useI18n } from 'vue-i18n'
 
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import { resetPasswordByCode } from '@/service/app-auth'
+import { fetchWxmpRuntimeConfig, isPackWxmpRuntime } from '@/common/wxmp-runtime'
 import type { ApiResponse } from '@/types/api'
 
 const { t } = useI18n()
@@ -61,7 +62,14 @@ const loading = ref<boolean>(false)
 
 const submitDisabled = computed<boolean>(() => !password.value || !confirmPassword.value || loading.value)
 
-onLoad((query?: Record<string, string | undefined>) => {
+onLoad(async (query?: Record<string, string | undefined>) => {
+	// #ifdef MP-WEIXIN
+	const runtime = await fetchWxmpRuntimeConfig()
+	if (isPackWxmpRuntime(runtime)) {
+		uni.redirectTo({ url: '/pages/login/login' })
+		return;
+	}
+	// #endif
 	identifier.value = query && query.identifier ? decodeURIComponent(query.identifier) : ''
 	verifyCode.value = query && query.code ? decodeURIComponent(query.code) : ''
 })

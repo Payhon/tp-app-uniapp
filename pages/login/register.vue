@@ -50,11 +50,12 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onUnload } from '@dcloudio/uni-app'
+import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 
 import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import { sendVerifyCode } from '@/service/app-auth'
+import { fetchWxmpRuntimeConfig, isPackWxmpRuntime } from '@/common/wxmp-runtime'
 import type { ApiResponse } from '@/types/api'
 
 const { t } = useI18n()
@@ -101,6 +102,15 @@ const goBack = () => {
 const goLogin = () => {
 	uni.navigateTo({ url: '/pages/login/login' })
 }
+
+onLoad(async () => {
+	// #ifdef MP-WEIXIN
+	const runtime = await fetchWxmpRuntimeConfig()
+	if (isPackWxmpRuntime(runtime)) {
+		uni.redirectTo({ url: '/pages/login/login' })
+	}
+	// #endif
+})
 
 const clearTimer = () => {
 	if (timer.value !== null) clearInterval(timer.value)

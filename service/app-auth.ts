@@ -59,8 +59,9 @@ export const loginByPassword = (
 	)
 }
 
-export const wxmpLogin = (code: string) => {
-	return apiRequest<unknown>('/api/v1/app/auth/wxmp/login', { code }, 'POST')
+export const wxmpLogin = (code: string, appid?: string) => {
+	const wxAppID = String(appid || '').trim()
+	return apiRequest<unknown>('/api/v1/app/auth/wxmp/login', wxAppID ? { code, appid: wxAppID } : { code }, 'POST')
 }
 
 export const registerByCode = (identifier: string, verifyCode: string, password: string) => {

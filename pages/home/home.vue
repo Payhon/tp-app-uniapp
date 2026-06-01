@@ -3,7 +3,7 @@
 		<image class="home-bg" :src="$img('bg@2x.png')" mode="aspectFill" />
 
 		<view class="home-top">
-			<image class="home-top-bg" :src="$img('home/home-top@2x.png')" mode="widthFix" />
+			<image class="home-top-bg" :src="homeBannerUrl" mode="widthFix" />
 
 			<view class="alarm-btn" @tap="goAlarm">
 				<u-icon name="bell" size="14" color="#FFFFFF"></u-icon>
@@ -150,6 +150,8 @@ import { canBleAutoConnect, connectBleClient, disconnectBleClient, getBleClientE
 import { useBoundDevicesStore } from '@/store/bound-devices'
 import { useUserStore } from '@/store/user'
 import { appBoundDeviceList, appRemoveDevice, appUnbindDevice, updateDeviceName } from '@/service/device'
+import { imageUrl } from '@/common/assets/images'
+import { getRuntimeAppId } from '@/common/public-content'
 import type { HomeDeviceCardModel } from '@/types/home'
 
 type DeviceListItem = {
@@ -184,6 +186,7 @@ const page = ref(1)
 const pageSize = 20
 const filterPopupShow = ref(false)
 const currentViewMode = ref<HomeDeviceViewMode>('self_bound')
+const homeBannerUrl = ref(imageUrl('home/home-top@2x.png'))
 
 const selectedDevice = ref<HomeDeviceRow | null>(null)
 const actionSheetShow = ref(false)
@@ -239,6 +242,24 @@ const actionSheetActions = computed(() => {
 
 const refreshLoginState = () => {
 	isLoggedIn.value = Boolean(uni.getStorageSync('access_token'))
+}
+
+const loadWxmpRuntimeConfig = async () => {
+	// #ifdef MP-WEIXIN
+	if (!apiRequest) return
+	const appid = getRuntimeAppId()
+	if (!appid) return
+	try {
+		const res = await apiRequest<Record<string, unknown>>(
+			'/api/v1/app/wxmp/runtime',
+			{ appid },
+			'GET'
+		)
+		if ((res as any)?.code !== 200) return
+		const banner = String((res as any)?.data?.home_banner_url || '').trim()
+		if (banner) homeBannerUrl.value = banner
+	} catch (e) {}
+	// #endif
 }
 
 const parseBooleanStorage = (raw: unknown, defaultValue: boolean) => {
@@ -669,6 +690,7 @@ onShow(() => {
 	uni.setStorageSync('__last_tab_url__', '/pages/home/home')
 	refreshLoginState()
 	setMpTabSelected()
+	void loadWxmpRuntimeConfig()
 	load(true)
 })
 
