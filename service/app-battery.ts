@@ -159,7 +159,7 @@ const normalizeLegacyCurrentTelemetry = (deviceId: string, rows: unknown): AppBa
 	const freshMs = lastReportTs > 0 ? Date.now() - lastReportTs : Number.POSITIVE_INFINITY
 	return {
 		device_id: deviceId,
-		is_online: freshMs >= 0 && freshMs <= 130_000 ? 1 : 0,
+		is_online: freshMs >= 0 && freshMs <= 300_000 ? 1 : 0,
 		last_report_ts: lastReportTs,
 		current,
 		snapshot: null,
