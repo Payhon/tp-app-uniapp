@@ -1481,6 +1481,7 @@ const getBleBootOtaRuntimeOptions = ({
 }): BootOtaRunOptions => {
 	const runtimePlatform = getRuntimePlatform()
 	const isBluetooth = props.connType === 'bluetooth'
+	const isMqtt = props.connType === 'mqtt'
 	const isAndroid = runtimePlatform === 'android'
 	const isIos = runtimePlatform === 'ios'
 	const shouldRelaxBleFinalize = isBluetooth && (isAndroid || isIos)
@@ -1499,6 +1500,22 @@ const getBleBootOtaRuntimeOptions = ({
 			adaptiveSlowdownOnPacketTimeout: isAndroid,
 			adaptivePacketDelayMs: 100,
 			adaptivePageBoundaryDelayMs: 1500,
+			logger,
+		}
+	}
+	if (isMqtt) {
+		return {
+			finalizeDelayMs: 1500,
+			finalizeTimeoutMs: 20000,
+			finalizeAssumeSuccessOnTimeout: false,
+			terminalPacketWriteErrorAsComplete: false,
+			requireFinalPacketAck: true,
+			minFrameIntervalMs: 120,
+			packetDelayMs: 80,
+			pageBoundaryDelayMs: 500,
+			adaptiveSlowdownOnPacketTimeout: true,
+			adaptivePacketDelayMs: 180,
+			adaptivePageBoundaryDelayMs: 1200,
 			logger,
 		}
 	}

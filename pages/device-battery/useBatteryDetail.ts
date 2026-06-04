@@ -43,6 +43,7 @@ type ConnectAutoOptions = {
 	preserveCurrentBle?: boolean
 	probe?: boolean
 	preserveFirstFrameState?: boolean
+	preserveStatus?: boolean
 }
 
 type LoadByIdOptions = {
@@ -715,7 +716,7 @@ export const useBatteryDetail = () => {
 		}
 	}
 
-	const refreshCloudTelemetry = async () => {
+	const refreshCloudTelemetry = async (options?: { bootstrapOnly?: boolean }) => {
 		if (!deviceId.value || isInstrumentSession()) return false
 		if (!status.value) bmsDataLoading.value = true
 		try {
@@ -730,9 +731,20 @@ export const useBatteryDetail = () => {
 					is_online: payload.is_online,
 				}
 			}
-			status.value = nextStatus
-			connType.value = Number(payload.is_online || 0) === 1 || hasCurrent ? 'mqtt' : 'offline'
-			dataSourceMode.value = connType.value === 'mqtt' ? 'cloud_fallback' : 'offline'
+			const realtimeClientActive =
+				!!options?.bootstrapOnly &&
+				dataSourceMode.value === 'realtime' &&
+				(connType.value === 'mqtt' || connType.value === 'bluetooth') &&
+				!!client.value
+			if (realtimeClientActive) {
+				if (!status.value) {
+					status.value = nextStatus
+				}
+			} else {
+				status.value = nextStatus
+				connType.value = Number(payload.is_online || 0) === 1 || hasCurrent ? 'mqtt' : 'offline'
+				dataSourceMode.value = connType.value === 'mqtt' ? 'cloud_fallback' : 'offline'
+			}
 			syncBmsDataLoading()
 			log('cloud telemetry refreshed', {
 				deviceId: deviceId.value,
@@ -740,6 +752,7 @@ export const useBatteryDetail = () => {
 				keys: payload.current ? Object.keys(payload.current).length : 0,
 				has_snapshot: !!payload.snapshot,
 				conn_type: connType.value,
+				preserved_realtime_conn: realtimeClientActive,
 			})
 			return true
 		} catch (e) {
@@ -1058,7 +1071,7 @@ export const useBatteryDetail = () => {
 		else syncBmsDataLoading()
 	}
 
-	const disconnectAll = async (options?: { preserveFirstFrameState?: boolean }) => {
+	const disconnectAll = async (options?: { preserveFirstFrameState?: boolean; preserveStatus?: boolean }) => {
 		invalidateBleConnectAttempts('device-detail disconnectAll')
 		const wasBluetooth = connType.value === 'bluetooth'
 		if (wasBluetooth && !isInstrumentSession()) {
@@ -1068,15 +1081,19 @@ export const useBatteryDetail = () => {
 		stopCloudPolling()
 		closeRelaySocket()
 		client.value = null
-		status.value = null
+		if (!options?.preserveStatus) {
+			status.value = null
+		}
 		bmsDataLoading.value = false
 		if (!options?.preserveFirstFrameState) {
 			resetFirstFrameState()
 		}
 		instrumentStatusFailCount = 0
 		instrumentPassthroughUnavailable.value = false
-		connType.value = 'offline'
-		dataSourceMode.value = 'offline'
+		if (!options?.preserveStatus || !status.value) {
+			connType.value = 'offline'
+			dataSourceMode.value = 'offline'
+		}
 		clearReportRetryTimer()
 		if (bleCacheKey) {
 			releaseBleClient(bleCacheKey)
@@ -1138,7 +1155,6 @@ export const useBatteryDetail = () => {
 			})
 			await mqttTransport.connect()
 			const c = new BmsClient({ transport: mqttTransport })
-			await c.readUuid()
 			client.value = c
 			connType.value = 'mqtt'
 			dataSourceMode.value = 'realtime'
@@ -1162,7 +1178,10 @@ export const useBatteryDetail = () => {
 		try {
 			if (options?.preserveCurrentBle && (await attachWarmBleFromBattery('connect-auto'))) return
 			if (!options?.preserveCurrentBle) {
-				await disconnectAll({ preserveFirstFrameState: options?.preserveFirstFrameState })
+				await disconnectAll({
+					preserveFirstFrameState: options?.preserveFirstFrameState,
+					preserveStatus: options?.preserveStatus,
+				})
 			}
 			if (isInstrumentSession()) {
 				log('connectAuto instrument session', {
@@ -1298,7 +1317,8 @@ export const useBatteryDetail = () => {
 		const ok = await refreshCloudBatteryDetail(nextId)
 		if (!ok) return
 		if (isCloudCapableBattery()) {
-			void connectAuto({ preserveCurrentBle: false })
+			void refreshCloudTelemetry({ bootstrapOnly: true })
+			void connectAuto({ preserveCurrentBle: false, preserveStatus: true })
 			return
 		}
 		if (options?.preferWarmBle !== false && (await attachWarmBleFromBattery('cloud-detail'))) return

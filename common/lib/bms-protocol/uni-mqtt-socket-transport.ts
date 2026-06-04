@@ -21,7 +21,7 @@ function isExpectedBootSourceAddress(expectedSourceAddress: number, parsedSource
 	const actual = parsedSourceAddress & 0xff
 	if (expect === 0x00) return true
 	if (actual === expect) return true
-	return expect === 0xfc && actual === 0x01
+	return expect === 0xfc && (actual === 0x01 || actual === 0xfd)
 }
 
 function sleep(ms: number): Promise<void> {
@@ -393,7 +393,11 @@ export class UniMqttSocketBmsTransport {
 			if (expectBoot) {
 				const parsed = parseBootFrame(frameBytes)
 				if (parsed.targetAddress !== expect.targetAddress) return false
-				if (parsed.command !== expect.functionCode) return false
+				const expectedCommand = expect.functionCode & 0xff
+				const actualCommand = parsed.command & 0xff
+				if (actualCommand !== expectedCommand) {
+					if (expectedCommand !== 0x54 || actualCommand !== 0x53) return false
+				}
 				return isExpectedBootSourceAddress(expect.sourceAddress, parsed.sourceAddress)
 			}
 			const parsed = parseFrame(frameBytes)
