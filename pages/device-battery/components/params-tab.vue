@@ -848,11 +848,25 @@ const hasAdvancedConfigItems = computed(() => canAccessReadonlySoh.value || canA
 const hasNumberingItems = computed(() => numberingItems.value.length > 0)
 const hasSystemItems = computed(() => systemItems.value.length > 0)
 const functionConfigFlags = computed(() => parseFunctionConfigFlags(paramValues[BMS_PARAM.FUNCTION_CONFIG]))
+const functionConfigLabelOf = (key: FunctionConfigFlagKey) =>
+	(t(`deviceDetail.params.functionConfig.${key}`) as string) || key
+const functionConfigStatusOf = (key: FunctionConfigFlagKey, enabled: boolean) => {
+	const statusKey =
+		key === 'chargeAllowed' || key === 'dischargeAllowed'
+			? enabled
+				? 'allowed'
+				: 'forbidden'
+			: enabled
+				? 'enabled'
+				: 'disabled'
+	return t(`deviceDetail.params.functionConfig.${statusKey}`) as string
+}
 const functionControlItems = computed<FunctionControlItem[]>(() =>
 	FUNCTION_CONFIG_ITEMS.filter((item) => canAccessFunctionControl(item.key)).map((item) => ({
 		...item,
+		label: functionConfigLabelOf(item.key),
 		enabled: functionConfigFlags.value[item.key],
-		statusText: functionConfigFlags.value[item.key] ? item.enabledLabel : item.disabledLabel,
+		statusText: functionConfigStatusOf(item.key, functionConfigFlags.value[item.key]),
 	}))
 )
 const hasFunctionControlItems = computed(() => functionControlItems.value.length > 0)
