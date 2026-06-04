@@ -431,15 +431,16 @@ function hasServiceDataKey(d: FoundDevice, targetKey: string): boolean {
 function isTargetDevice(d: FoundDevice): { ok: boolean; reason?: string } {
 	const name = String(d?.name || d?.localName || '').trim()
 	if (!name) return { ok: false, reason: 'empty-name' }
-	if (!name.toUpperCase().startsWith('FJ')) return { ok: false, reason: 'name-not-fj' }
 
 	// 你的过滤条件：
-	// 1) name 不为空且以 FJ 开头
+	// 1) name 不为空
 	// 2) serviceData 包含 0000180A-0000-1000-8000-00805F9B34FB 这个 key
-	// 3) 某些平台首次回调不稳定，不强依赖 serviceData；若广播里能解析出 MAC 也认为是目标设备
+	// 3) 某些平台首次回调不稳定，不强依赖 serviceData；若广播里能解析出支持的设备 MAC 也认为是目标设备
 	const has180a = hasServiceDataKey(d, '0000180A-0000-1000-8000-00805F9B34FB')
 	const advMac = resolveAdvMacFromFoundDevice(d)
-	if (!has180a && !advMac) return { ok: false, reason: 'no-identity' }
+	const deviceType = advMac ? resolveDeviceTypeByMac(advMac) : null
+	if (advMac && !deviceType) return { ok: false, reason: 'unsupported-mac-prefix' }
+	if (!has180a && !deviceType) return { ok: false, reason: 'no-identity' }
 	return { ok: true }
 }
 
