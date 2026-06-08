@@ -14,6 +14,7 @@ import {
 import { BmsClient } from '@/common/lib/bms-protocol/client'
 import {
 	createUniMqttSocketBmsTransport,
+	isMqttSocketOccupiedError,
 	type UniMqttSocketBmsTransport,
 } from '@/common/lib/bms-protocol/uni-mqtt-socket-transport'
 import {
@@ -412,6 +413,7 @@ export const useBatteryDetail = () => {
 	const client = shallowRef<BmsClient | null>(null)
 	const connType = ref<ConnType>('offline')
 	const dataSourceMode = ref<DataSourceMode>('offline')
+	const realtimeOccupied = ref(false)
 	const connecting = ref(false)
 	const bmsDataLoading = ref(false)
 	const bmsDataLoadPhase = ref<BmsDataLoadPhase>('idle')
@@ -943,6 +945,7 @@ export const useBatteryDetail = () => {
 		client.value = entry.client
 		connType.value = 'bluetooth'
 		dataSourceMode.value = 'realtime'
+		realtimeOccupied.value = false
 		connecting.value = false
 		syncBmsDataLoading()
 		startPolling(entry.client)
@@ -1094,6 +1097,7 @@ export const useBatteryDetail = () => {
 			connType.value = 'offline'
 			dataSourceMode.value = 'offline'
 		}
+		realtimeOccupied.value = false
 		clearReportRetryTimer()
 		if (bleCacheKey) {
 			releaseBleClient(bleCacheKey)
@@ -1140,6 +1144,7 @@ export const useBatteryDetail = () => {
 	}
 
 	const connectSocketBridge = async (): Promise<boolean> => {
+		realtimeOccupied.value = false
 		try {
 			closeRelaySocket()
 			const wsUrl = buildSocketBridgeWsUrl()
@@ -1151,6 +1156,7 @@ export const useBatteryDetail = () => {
 				wsUrl,
 				deviceId: deviceId.value,
 				token,
+				platform: getReportPlatform(),
 				logger: console as any,
 			})
 			await mqttTransport.connect()
@@ -1158,11 +1164,23 @@ export const useBatteryDetail = () => {
 			client.value = c
 			connType.value = 'mqtt'
 			dataSourceMode.value = 'realtime'
+			realtimeOccupied.value = false
 			syncBmsDataLoading()
 			startPolling(c)
 			log('socket bridge connect ok', { wsUrl })
 			return true
 		} catch (e) {
+			if (isMqttSocketOccupiedError(e)) {
+				log('socket bridge occupied, fallback to cloud report mode', { err: formatErr(e) })
+				try {
+					await mqttTransport?.disconnect()
+				} catch (e2) {}
+				mqttTransport = null
+				client.value = null
+				realtimeOccupied.value = true
+				await activateCloudReportMode()
+				return true
+			}
 			log('socket bridge connect failed', { err: e instanceof Error ? e.message : String(e || '') })
 			try {
 				await mqttTransport?.disconnect()
@@ -1286,6 +1304,7 @@ export const useBatteryDetail = () => {
 		sessionMode.value = 'cloud'
 		deviceId.value = nextId
 		status.value = null
+		realtimeOccupied.value = false
 		bmsDataLoading.value = false
 		resetFirstFrameState()
 		instrumentStatusFailCount = 0
@@ -1333,6 +1352,7 @@ export const useBatteryDetail = () => {
 		sessionMode.value = 'instrument'
 		deviceId.value = ''
 		status.value = null
+		realtimeOccupied.value = false
 		bmsDataLoading.value = false
 		instrumentStatusFailCount = 0
 		instrumentPreferredDeviceId = String(preferredDeviceId || '').trim()
@@ -1403,6 +1423,7 @@ export const useBatteryDetail = () => {
 		client,
 		connType,
 		dataSourceMode,
+		realtimeOccupied,
 		connecting,
 		bmsDataLoading,
 		bmsDataLoadPhase,

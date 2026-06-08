@@ -47,6 +47,27 @@ function hexToBytes(hex: string): Uint8Array {
 
 const SOCKET_CLOUD_READ_START = 0x0900
 const SOCKET_CLOUD_READ_END_EXCLUSIVE = 0x0924
+const SOCKET_OWNER_FEATURE = 'mqtt_socket_owner_v1'
+const SOCKET_READY_TIMEOUT_MS = 1200
+const SOCKET_HEARTBEAT_MS = 15000
+
+export const MQTT_SOCKET_OCCUPIED_CODE = 'MQTT_SOCKET_OCCUPIED'
+
+export class MqttSocketOccupiedError extends BmsProtocolError {
+	code = MQTT_SOCKET_OCCUPIED_CODE
+	retryAfterMs: number
+
+	constructor(message: string, retryAfterMs = 30000) {
+		super(message || 'MQTT socket occupied', { code: MQTT_SOCKET_OCCUPIED_CODE, retryAfterMs })
+		this.name = 'MqttSocketOccupiedError'
+		this.retryAfterMs = retryAfterMs
+	}
+}
+
+export function isMqttSocketOccupiedError(err: unknown): boolean {
+	const anyErr = err as any
+	return !!anyErr && (anyErr.code === MQTT_SOCKET_OCCUPIED_CODE || anyErr?.extra?.code === MQTT_SOCKET_OCCUPIED_CODE)
+}
 
 function isSocketCloudReadRange(startAddress: number, quantity: number): boolean {
 	if (!Number.isFinite(startAddress) || !Number.isFinite(quantity) || quantity <= 0) return false
@@ -172,6 +193,7 @@ export type UniMqttSocketBmsTransportOptions = {
 	wsUrl: string
 	deviceId: string
 	token: string
+	platform?: string
 	minFrameIntervalMs?: number
 	requestTimeoutMs?: number
 	logger?: LoggerLike
@@ -182,6 +204,7 @@ export class UniMqttSocketBmsTransport {
 	wsUrl: string
 	deviceId: string
 	token: string
+	platform: string
 	minFrameIntervalMs: number
 	requestTimeoutMs: number
 	logger: LoggerLike
@@ -204,11 +227,13 @@ export class UniMqttSocketBmsTransport {
 		  }
 
 	private _lastTxAt: number
+	private _heartbeatTimer: ReturnType<typeof setInterval> | null
 
 	constructor(options: UniMqttSocketBmsTransportOptions) {
 		this.wsUrl = options.wsUrl
 		this.deviceId = options.deviceId
 		this.token = options.token
+		this.platform = String(options.platform || '').trim()
 		this.minFrameIntervalMs = options.minFrameIntervalMs ?? 80
 		this.requestTimeoutMs = options.requestTimeoutMs ?? 10000
 		this.logger = options.logger ?? console
@@ -220,6 +245,7 @@ export class UniMqttSocketBmsTransport {
 		this._bridgeError = ''
 		this._pending = null
 		this._lastTxAt = 0
+		this._heartbeatTimer = null
 	}
 
 	get connected() {
@@ -233,31 +259,62 @@ export class UniMqttSocketBmsTransport {
 		if (!this.token) throw new BmsProtocolError('token is required')
 
 		const { promise, resolve, reject } = defer<void>()
+		let settled = false
+		let readyTimer: ReturnType<typeof setTimeout> | null = null
+		const clearReadyTimer = () => {
+			if (readyTimer) clearTimeout(readyTimer)
+			readyTimer = null
+		}
+		const finishReady = () => {
+			if (settled) return
+			settled = true
+			clearReadyTimer()
+			this._connected = true
+			this._startHeartbeat()
+			resolve()
+		}
+		const failReady = (err: unknown) => {
+			if (settled) return
+			settled = true
+			clearReadyTimer()
+			this._connected = false
+			this._stopHeartbeat()
+			reject(err)
+		}
 
 		const socketTask = uni.connectSocket({
 			url: this.wsUrl,
 			success: () => {},
-			fail: (e: any) => reject(new BmsProtocolError('WebSocket connect failed', e)),
+			fail: (e: any) => failReady(new BmsProtocolError('WebSocket connect failed', e)),
 		})
 		this._socketTask = socketTask
 
 		socketTask.onOpen(() => {
 			try {
+				const initPayload: Record<string, unknown> = {
+					device_id: this.deviceId,
+					token: this.token,
+					features: [SOCKET_OWNER_FEATURE],
+				}
+				if (this.platform) initPayload.platform = this.platform
 				socketTask.send({
-					data: JSON.stringify({ device_id: this.deviceId, token: this.token }),
+					data: JSON.stringify(initPayload),
 					success: () => {
-						this._connected = true
-						resolve()
+						readyTimer = setTimeout(() => finishReady(), SOCKET_READY_TIMEOUT_MS)
 					},
-					fail: (e: any) => reject(new BmsProtocolError('WebSocket auth send failed', e)),
+					fail: (e: any) => failReady(new BmsProtocolError('WebSocket auth send failed', e)),
 				})
 			} catch (e) {
-				reject(e)
+				failReady(e)
 			}
 		})
 
 		socketTask.onClose(() => {
 			this._connected = false
+			this._stopHeartbeat()
+			if (!settled) {
+				failReady(new BmsProtocolError(this._bridgeError || 'WebSocket closed'))
+			}
 			if (this._pending) {
 				const p = this._pending
 				clearTimeout(p.timer)
@@ -268,26 +325,61 @@ export class UniMqttSocketBmsTransport {
 
 		socketTask.onError((e: any) => {
 			this._connected = false
-			reject(new BmsProtocolError('WebSocket error', e))
+			this._stopHeartbeat()
+			const err = new BmsProtocolError('WebSocket error', e)
+			if (!settled) failReady(err)
+			if (this._pending) {
+				const p = this._pending
+				clearTimeout(p.timer)
+				this._pending = null
+				p.reject(err)
+			}
 		})
 
 		socketTask.onMessage((res: { data: unknown }) => {
 			try {
 				const txt = typeof res.data === 'string' ? res.data : String(res.data || '')
+				if (txt === 'pong') return
 				let payloadHex = ''
+				let obj: any = null
 				try {
-					const obj = JSON.parse(txt)
-					payloadHex = String(obj?.hex || '')
+					obj = JSON.parse(txt)
 				} catch {
 					// ignore
 				}
+				const controlType = String(obj?.type || '').trim()
+				if (controlType === 'socket_ready') {
+					finishReady()
+					return
+				}
+				if (controlType === 'socket_occupied') {
+					const err = new MqttSocketOccupiedError(String(obj?.message || 'MQTT socket occupied'), Number(obj?.retry_after_ms || 30000))
+					this._bridgeError = err.message
+					this._rejectPending(err)
+					failReady(err)
+					try {
+						socketTask.close({})
+					} catch (e) {}
+					return
+				}
+				if (controlType === 'socket_error') {
+					const err = new BmsProtocolError(String(obj?.message || 'MQTT socket error'), obj)
+					this._bridgeError = err.message
+					this._rejectPending(err)
+					failReady(err)
+					try {
+						socketTask.close({})
+					} catch (e) {}
+					return
+				}
+				payloadHex = String(obj?.hex || '')
 				if (!payloadHex) {
 					this._bridgeError = txt
-					if (this._pending) {
-						const p = this._pending
-						clearTimeout(p.timer)
-						this._pending = null
-						p.reject(new BmsProtocolError(txt))
+					const err = new BmsProtocolError(txt || 'WebSocket bridge rejected')
+					if (!settled) {
+						failReady(err)
+					} else if (this._pending) {
+						this._rejectPending(err)
 					}
 					try {
 						socketTask.close({})
@@ -312,6 +404,7 @@ export class UniMqttSocketBmsTransport {
 
 	async disconnect(): Promise<void> {
 		this._connected = false
+		this._stopHeartbeat()
 		if (this._pending) {
 			const p = this._pending
 			clearTimeout(p.timer)
@@ -322,6 +415,29 @@ export class UniMqttSocketBmsTransport {
 			this._socketTask?.close({})
 		} catch {}
 		this._socketTask = null
+	}
+
+	private _startHeartbeat() {
+		this._stopHeartbeat()
+		this._heartbeatTimer = setInterval(() => {
+			if (!this._connected || !this._socketTask) return
+			try {
+				this._socketTask.send({ data: 'ping' })
+			} catch (e) {}
+		}, SOCKET_HEARTBEAT_MS)
+	}
+
+	private _stopHeartbeat() {
+		if (this._heartbeatTimer) clearInterval(this._heartbeatTimer)
+		this._heartbeatTimer = null
+	}
+
+	private _rejectPending(err: unknown) {
+		if (!this._pending) return
+		const p = this._pending
+		clearTimeout(p.timer)
+		this._pending = null
+		p.reject(err)
 	}
 
 	request(frameBytes: Uint8Array | ArrayLike<number>, { timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}): Promise<Uint8Array> {

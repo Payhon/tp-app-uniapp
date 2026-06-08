@@ -452,6 +452,7 @@ const props = defineProps<{
 	client: BmsClient | null
 	connType: 'bluetooth' | 'mqtt' | 'offline'
 	active?: boolean
+	realtimeOccupied?: boolean
 	allowOta?: boolean
 	otaInfo?: DeviceOtaCheckState | null
 	otaChecking?: boolean
@@ -504,6 +505,22 @@ onMounted(() => {
 
 type BasicSectionKey = keyof typeof opened
 
+const showRealtimeOccupiedToast = () => {
+	uni.showToast({ title: t('deviceDetail.toast.realtimeOccupiedActionBlocked') as string, icon: 'none' })
+}
+
+const guardRealtimeConnection = () => {
+	if (props.realtimeOccupied) {
+		showRealtimeOccupiedToast()
+		return false
+	}
+	if (!props.client || props.connType === 'offline') {
+		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
+		return false
+	}
+	return true
+}
+
 const toggle = async (k: BasicSectionKey) => {
 	if (loading[k]) return
 	if (opened[k]) {
@@ -511,10 +528,7 @@ const toggle = async (k: BasicSectionKey) => {
 		applyPollingState()
 		return
 	}
-	if (!props.client || props.connType === 'offline') {
-		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
-		return
-	}
+	if (!guardRealtimeConnection()) return
 	if (loaded[k]) {
 		opened[k] = true
 		applyPollingState()
@@ -1078,10 +1092,7 @@ watch(
 )
 
 const openEdit = (item: ParamItem) => {
-	if (!props.client || props.connType === 'offline') {
-		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
-		return
-	}
+	if (!guardRealtimeConnection()) return
 	if (!canAccessParamKey(item.actualKey || item.key)) {
 		return
 	}
@@ -1103,10 +1114,7 @@ const openEdit = (item: ParamItem) => {
 
 const openVirtualCapacityEdit = () => {
 	if (!canAccessVirtualCapacity.value) return
-	if (!props.client || props.connType === 'offline') {
-		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
-		return
-	}
+	if (!guardRealtimeConnection()) return
 	editPopup.title = t('deviceDetail.params.virtualCapacityWrite') as string
 	editPopup.key = 'VIRTUAL_CAPACITY_AH'
 	editPopup.unit = 'Ah'
@@ -1159,6 +1167,10 @@ const confirmBatteryTypePicker = async (payload: { value?: Array<{ value: number
 		closeBatteryTypePicker()
 		return
 	}
+	if (!guardRealtimeConnection()) {
+		closeBatteryTypePicker()
+		return
+	}
 	try {
 		await writeParamValue(batteryTypePicker.key, selected.value)
 		uni.showToast({
@@ -1173,11 +1185,9 @@ const confirmBatteryTypePicker = async (payload: { value?: Array<{ value: number
 }
 
 const setFunctionControl = async (key: FunctionConfigFlagKey, enabled: boolean) => {
+	if (!guardRealtimeConnection()) return
 	const c = props.client
-	if (!c || props.connType === 'offline') {
-		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
-		return
-	}
+	if (!c) return
 	if (functionConfigFlags.value[key] === enabled) return
 	if (!canAccessFunctionControl(key)) {
 		uni.showToast({
@@ -1197,6 +1207,11 @@ const setFunctionControl = async (key: FunctionConfigFlagKey, enabled: boolean) 
 }
 
 const confirmEdit = async () => {
+	if (!guardRealtimeConnection()) {
+		editPopup.show = false
+		applyPollingState()
+		return
+	}
 	const c = props.client
 	if (!c) return
 	const raw = String(editPopup.input || '').trim()
@@ -1247,10 +1262,9 @@ const confirmModal = (content: string) =>
 	})
 
 const runFactory = async (item: { key: string; raw: number; confirm?: boolean }) => {
-	if (!props.client || props.connType === 'offline') {
-		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
-		return
-	}
+	if (!guardRealtimeConnection()) return
+	const c = props.client
+	if (!c) return
 	if (!canAccessFactoryAction(item.key)) {
 		uni.showToast({
 			title: t('deviceDetail.params.noPermissionFactoryCommand') as string,
@@ -1265,7 +1279,7 @@ const runFactory = async (item: { key: string; raw: number; confirm?: boolean })
 	try {
 		const hi = (item.raw >>> 16) & 0xffff
 		const lo = item.raw & 0xffff
-		await props.client.writeRegisters(0x57a, new Uint16Array([hi, lo]))
+		await c.writeRegisters(0x57a, new Uint16Array([hi, lo]))
 		uni.showToast({ title: t('deviceDetail.toast.commandSent') as string, icon: 'none' })
 	} catch (e) {
 		uni.showToast({ title: t('deviceDetail.toast.commandFailed') as string, icon: 'none' })
@@ -1642,10 +1656,7 @@ const startBmsOta = async () => {
 		uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
 		return
 	}
-	if (!props.client || props.connType === 'offline') {
-		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
-		return
-	}
+	if (!guardRealtimeConnection()) return
 
 	otaState.show = true
 	otaState.running = true
@@ -1890,10 +1901,15 @@ const openOta = () => {
 		otaState.show = true
 		return
 	}
+	if (props.realtimeOccupied) {
+		showRealtimeOccupiedToast()
+		return
+	}
 	startBmsOta()
 }
 
 const openAdvanced = () => {
+	if (!guardRealtimeConnection()) return
 	try {
 		advancedPopup.show = true
 		setTimeout(() => {
@@ -1908,14 +1924,16 @@ const openAdvanced = () => {
 }
 
 const loadKeys = async (keys: string[]) => {
+	if (props.realtimeOccupied) return false
 	const c = props.client
-	if (!c) return
+	if (!c) return false
 	const allowedKeys = keys.filter((k) => canAccessParamKey(k))
-	if (!allowedKeys.length) return
+	if (!allowedKeys.length) return true
 	const values = await c.readParamsByKeys(allowedKeys)
 	for (const k of allowedKeys) {
 		paramValues[k] = Object.prototype.hasOwnProperty.call(values, k) ? values[k] : null
 	}
+	return true
 }
 
 watch(
@@ -1930,11 +1948,12 @@ watch(
 
 const loadKeysCached = async (section: keyof typeof loaded, keys: string[]) => {
 	if (loaded[section]) return
-	await loadKeys(keys)
-	loaded[section] = true
+	const ok = await loadKeys(keys)
+	if (ok) loaded[section] = true
 }
 
 const loadSection = (k: keyof typeof opened) => {
+	if (props.realtimeOccupied) return
 	if (!props.client || props.connType === 'offline') return
 	if (k === 'single') return loadKeysCached('single', SINGLE_KEYS)
 	if (k === 'voltage') return loadKeysCached('voltage', VOLTAGE_KEYS)

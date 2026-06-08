@@ -44,6 +44,9 @@
 		</view>
 
 		<view class="content" :style="{ paddingTop: navHeight + 'px', paddingBottom: contentBottomPadPx + 'px' }">
+			<view v-if="showRealtimeOccupiedNotice" class="realtime-notice">
+				<text class="realtime-notice__text">{{ $t('deviceDetail.conn.realtimeOccupied') }}</text>
+			</view>
 			<!-- #ifdef MP-WEIXIN -->
 			<cover-view v-if="showMeterFloatingPanel" class="session-float session-float--mp" :style="{ top: sessionFloatTopPx + 'px' }">
 				<cover-view class="session-card session-card--mp">
@@ -111,6 +114,7 @@
 				:client="client"
 				:connType="connType"
 				:active="activeTab === 2"
+				:realtimeOccupied="realtimeOccupied"
 				:allowOta="allowOta"
 				:otaInfo="otaCheckState"
 				:otaChecking="otaCheckState.checking"
@@ -210,6 +214,7 @@ const {
 	status,
 	client,
 	connType,
+	realtimeOccupied,
 	connecting,
 	bmsDataLoading,
 	bmsDataLoadPhase,
@@ -346,6 +351,7 @@ const connIcon = computed(() => {
 })
 
 const showFourGConnIcon = computed(() => !connecting.value && connType.value === 'mqtt')
+const showRealtimeOccupiedNotice = computed(() => realtimeOccupied.value && connType.value === 'mqtt' && sessionMode.value === 'cloud')
 
 const connClass = computed(() => {
 	if (connecting.value) return 'connecting'
@@ -747,6 +753,20 @@ onUnload(() => {
 	position: relative;
 	z-index: 1;
 	box-sizing: border-box;
+}
+
+.realtime-notice {
+	margin: 16rpx 24rpx 0;
+	padding: 16rpx 20rpx;
+	border-radius: 16rpx;
+	background: rgba(255, 153, 0, 0.12);
+	border: 1rpx solid rgba(255, 153, 0, 0.2);
+}
+
+.realtime-notice__text {
+	font-size: 24rpx;
+	line-height: 1.4;
+	color: #9a5b00;
 }
 
 .data-loading {
