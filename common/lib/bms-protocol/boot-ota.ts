@@ -99,6 +99,10 @@ function formatErr(err: unknown): string {
 	}
 }
 
+function isTimeoutError(err: unknown): boolean {
+	return formatErr(err).toLowerCase().includes('timeout')
+}
+
 function errorText(err: unknown): string {
 	if (!err) return ''
 	if (err instanceof Error) return err.message || String(err)
@@ -190,6 +194,7 @@ export async function bootOtaUpgrade({
 	maxPacketSize,
 	skipEnterBoot,
 	prepareBaudRate,
+	enterBootTimeoutAsSuccess,
 	packetDelayMs,
 	pageBoundaryDelayMs,
 	adaptiveSlowdownOnPacketTimeout,
@@ -214,6 +219,7 @@ export async function bootOtaUpgrade({
 	maxPacketSize?: number
 	skipEnterBoot?: boolean
 	prepareBaudRate?: number
+	enterBootTimeoutAsSuccess?: boolean
 	packetDelayMs?: number
 	pageBoundaryDelayMs?: number
 	adaptiveSlowdownOnPacketTimeout?: boolean
@@ -246,7 +252,12 @@ export async function bootOtaUpgrade({
 
 	if (!skipEnterBoot) {
 		onProgress?.({ stage: 'enter', message: 'enter' })
-		await bootRequest(transport, buildBootFrame({ sourceAddress, targetAddress, command: 0x51 }), { logger })
+		try {
+			await bootRequest(transport, buildBootFrame({ sourceAddress, targetAddress, command: 0x51 }), { logger })
+		} catch (e) {
+			if (!enterBootTimeoutAsSuccess || !isTimeoutError(e)) throw e
+			logger?.warn && logger.warn('[boot] enter boot timeout, continue', { err: formatErr(e) })
+		}
 		// Doc suggests waiting 200ms after entering bootloader.
 		await sleep(200)
 	}

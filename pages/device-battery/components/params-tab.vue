@@ -1455,6 +1455,10 @@ type BootOtaRunOptions = {
 	queryTargetAddress?: number
 	skipEnterBoot?: boolean
 	prepareBaudRate?: number
+	queryTimeoutMs?: number
+	enterBootTimeoutMs?: number
+	enterBootTimeoutAsSuccess?: boolean
+	prepareTimeoutMs?: number
 	bootPacketTimeoutMs?: number
 	finalizeTimeoutMs?: number
 	finalizeAssumeSuccessOnTimeout?: boolean
@@ -1505,6 +1509,11 @@ const getBleBootOtaRuntimeOptions = ({
 	}
 	if (isMqtt) {
 		return {
+			queryTimeoutMs: 12000,
+			enterBootTimeoutMs: 20000,
+			enterBootTimeoutAsSuccess: true,
+			prepareTimeoutMs: 20000,
+			bootPacketTimeoutMs: 20000,
 			finalizeDelayMs: 1500,
 			finalizeTimeoutMs: 20000,
 			finalizeAssumeSuccessOnTimeout: false,
@@ -1549,7 +1558,17 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			if (typeof t?.request !== 'function') throw new Error('transport not ready')
 			const cmd = frameBytes[3] & 0xff
 			const timeoutMs =
-				cmd === 0x50 ? 3000 : cmd === 0x53 ? options?.bootPacketTimeoutMs ?? 12000 : cmd === 0x54 ? options?.finalizeTimeoutMs ?? 12000 : 12000
+				cmd === 0x50
+					? options?.queryTimeoutMs ?? 3000
+					: cmd === 0x51
+						? options?.enterBootTimeoutMs ?? 12000
+						: cmd === 0x52
+							? options?.prepareTimeoutMs ?? 12000
+							: cmd === 0x53
+								? options?.bootPacketTimeoutMs ?? 12000
+								: cmd === 0x54
+									? options?.finalizeTimeoutMs ?? 12000
+									: 12000
 			const requestOptions = {
 				timeoutMs: overrideOptions?.timeoutMs ?? timeoutMs,
 				suppressTimeoutLog:
@@ -1575,6 +1594,7 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			sourceAddress,
 			skipEnterBoot: options?.skipEnterBoot,
 			prepareBaudRate: options?.prepareBaudRate,
+			enterBootTimeoutAsSuccess: options?.enterBootTimeoutAsSuccess,
 			packetDelayMs: options?.packetDelayMs,
 			pageBoundaryDelayMs: options?.pageBoundaryDelayMs,
 			adaptiveSlowdownOnPacketTimeout: options?.adaptiveSlowdownOnPacketTimeout,
