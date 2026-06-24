@@ -50,6 +50,9 @@ const SOCKET_CLOUD_READ_END_EXCLUSIVE = 0x0924
 const SOCKET_OWNER_FEATURE = 'mqtt_socket_owner_v1'
 const SOCKET_READY_TIMEOUT_MS = 1200
 const SOCKET_HEARTBEAT_MS = 15000
+const MAX_BOOT_FRAME_BYTES = 2048
+const DEFAULT_SLEEP_WAKEUP_IDLE_MS = 30000
+const DEFAULT_SLEEP_WAKEUP_RESEND_DELAY_MS = 1200
 
 export const MQTT_SOCKET_OCCUPIED_CODE = 'MQTT_SOCKET_OCCUPIED'
 
@@ -91,6 +94,92 @@ function buildMqttSocketReadFrame(reqFrameBytes: Uint8Array): Uint8Array {
 		startAddress,
 		quantity,
 	})
+}
+
+function isSocketWakeupQueryFrame(reqFrameBytes: Uint8Array, expectBoot: boolean): boolean {
+	if (expectBoot) return false
+	if (reqFrameBytes.length < 9) return false
+	if (reqFrameBytes[0] !== 0x7f || reqFrameBytes[1] !== 0x55) return false
+	const func = reqFrameBytes[4] & 0xff
+	return func === BMS_FUNC.READ_HOLDING_REGISTERS || func === BMS_FUNC.SOCKET_READ
+}
+
+export function shouldScheduleSocketWakeupResend(
+	reqFrameBytes: Uint8Array | ArrayLike<number>,
+	{
+		expectBoot,
+		lastResponseAt,
+		now,
+		idleMs,
+		delayMs,
+		timeoutMs,
+	}: {
+		expectBoot: boolean
+		lastResponseAt: number
+		now: number
+		idleMs: number
+		delayMs: number
+		timeoutMs: number
+	},
+): boolean {
+	const req = reqFrameBytes instanceof Uint8Array ? reqFrameBytes : Uint8Array.from(reqFrameBytes)
+	if (!isSocketWakeupQueryFrame(req, expectBoot)) return false
+	if (!Number.isFinite(delayMs) || delayMs <= 0) return false
+	if (!Number.isFinite(timeoutMs) || timeoutMs <= delayMs + 200) return false
+	if (!Number.isFinite(idleMs) || idleMs <= 0) return true
+	if (!Number.isFinite(lastResponseAt) || lastResponseAt <= 0) return true
+	return now - lastResponseAt >= idleMs
+}
+
+function formatErr(err: unknown): string {
+	if (!err) return ''
+	if (err instanceof Error) return err.message || String(err)
+	if (typeof err === 'string') return err
+	try {
+		return JSON.stringify(err)
+	} catch {
+		return String(err)
+	}
+}
+
+function bootHex(value: number): string {
+	return `0x${(value & 0xff).toString(16).padStart(2, '0').toUpperCase()}`
+}
+
+function bootSeqHex(value: number): string {
+	return `0x${(value & 0xffff).toString(16).padStart(4, '0').toUpperCase()}`
+}
+
+function getBootFrameTrace(bytes: Uint8Array | ArrayLike<number>): Record<string, unknown> | null {
+	const u8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)
+	if (!u8 || u8.length < 6 || u8[0] !== 0x55) return null
+	const dataLen = ((u8[4] & 0xff) << 8) | (u8[5] & 0xff)
+	const command = u8[3] & 0xff
+	const trace: Record<string, unknown> = {
+		cmd: bootHex(command),
+		sourceAddress: bootHex(u8[1] & 0xff),
+		targetAddress: bootHex(u8[2] & 0xff),
+		dataLen,
+		frameLen: u8.length,
+	}
+	if (command === 0x53 && dataLen >= 2 && u8.length >= 8) {
+		if (dataLen === 3 && u8.length >= 9) {
+			const requested = ((u8[7] & 0xff) << 8) | (u8[8] & 0xff)
+			trace.status = u8[6] & 0xff
+			trace.requested = requested
+			trace.requestedHex = bootSeqHex(requested)
+			trace.ackForPacket = requested > 0 ? requested - 1 : undefined
+			trace.ackForPacketHex = requested > 0 ? bootSeqHex(requested - 1) : undefined
+		} else {
+			const packetIndex = ((u8[6] & 0xff) << 8) | (u8[7] & 0xff)
+			trace.packetIndex = packetIndex
+			trace.packetIndexHex = bootSeqHex(packetIndex)
+			trace.expectedAck = packetIndex + 1
+			trace.expectedAckHex = bootSeqHex(packetIndex + 1)
+			trace.packetDataBytes = Math.max(0, dataLen - 2)
+		}
+	}
+	return trace
 }
 
 class FrameCollector {
@@ -143,38 +232,46 @@ class FrameCollector {
 	}
 
 	tryShiftOneBootFrame(): Uint8Array | null {
-		const bytes = this._buf
-		if (bytes.length < 9) return null
+		for (;;) {
+			const bytes = this._buf
+			if (bytes.length < 9) return null
 
-		let start = -1
-		for (let i = 0; i < bytes.length; i += 1) {
-			if (bytes[i] === 0x55) {
-				start = i
-				break
+			let start = -1
+			for (let i = 0; i < bytes.length; i += 1) {
+				if (bytes[i] === 0x55) {
+					start = i
+					break
+				}
 			}
-		}
-		if (start < 0) {
-			this._buf = bytes.slice(Math.max(0, bytes.length - 1))
-			return null
-		}
-		if (start > 0) this._buf = bytes.slice(start)
+			if (start < 0) {
+				this._buf = bytes.slice(Math.max(0, bytes.length - 1))
+				return null
+			}
+			if (start > 0) this._buf = bytes.slice(start)
 
-		if (this._buf.length < 9) return null
-		const dataLen = ((this._buf[4] & 0xff) << 8) | (this._buf[5] & 0xff)
-		const expectedLen = 1 + 1 + 1 + 1 + 2 + dataLen + 2 + 1
-		if (expectedLen > this._buf.length) return null
-		const candidate = this._buf.slice(0, expectedLen)
-		if (candidate[candidate.length - 1] !== 0xfd) {
-			this._buf = this._buf.slice(1)
-			return null
-		}
-		try {
-			parseBootFrame(candidate)
-			this._buf = this._buf.slice(expectedLen)
-			return candidate
-		} catch (e) {
-			this._buf = this._buf.slice(1)
-			return null
+			if (this._buf.length < 9) return null
+			const dataLen = ((this._buf[4] & 0xff) << 8) | (this._buf[5] & 0xff)
+			const expectedLen = 1 + 1 + 1 + 1 + 2 + dataLen + 2 + 1
+			if (expectedLen < 9 || expectedLen > MAX_BOOT_FRAME_BYTES) {
+				this._logger?.debug &&
+					this._logger.debug('[socket] drop invalid boot candidate length:', { dataLen, expectedLen })
+				this._buf = this._buf.slice(1)
+				continue
+			}
+			if (expectedLen > this._buf.length) return null
+			const candidate = this._buf.slice(0, expectedLen)
+			if (candidate[candidate.length - 1] !== 0xfd) {
+				this._buf = this._buf.slice(1)
+				continue
+			}
+			try {
+				parseBootFrame(candidate)
+				this._buf = this._buf.slice(expectedLen)
+				return candidate
+			} catch (e) {
+				this._buf = this._buf.slice(1)
+				continue
+			}
 		}
 	}
 }
@@ -196,6 +293,8 @@ export type UniMqttSocketBmsTransportOptions = {
 	platform?: string
 	minFrameIntervalMs?: number
 	requestTimeoutMs?: number
+	sleepWakeupIdleMs?: number
+	sleepWakeupResendDelayMs?: number
 	logger?: LoggerLike
 }
 
@@ -207,6 +306,8 @@ export class UniMqttSocketBmsTransport {
 	platform: string
 	minFrameIntervalMs: number
 	requestTimeoutMs: number
+	sleepWakeupIdleMs: number
+	sleepWakeupResendDelayMs: number
 	logger: LoggerLike
 
 	// NOTE: 为兼容非HBuilderX/CI的TS环境，这里不强依赖 UniApp.SocketTask 类型
@@ -223,10 +324,13 @@ export class UniMqttSocketBmsTransport {
 				reject: (err: unknown) => void
 				expect: ReqExpect
 				timer: ReturnType<typeof setTimeout>
+				wakeupTimer?: ReturnType<typeof setTimeout> | null
+				wakeupResent?: boolean
 				expectBoot?: boolean
 		  }
 
 	private _lastTxAt: number
+	private _lastResponseAt: number
 	private _heartbeatTimer: ReturnType<typeof setInterval> | null
 
 	constructor(options: UniMqttSocketBmsTransportOptions) {
@@ -236,6 +340,8 @@ export class UniMqttSocketBmsTransport {
 		this.platform = String(options.platform || '').trim()
 		this.minFrameIntervalMs = options.minFrameIntervalMs ?? 80
 		this.requestTimeoutMs = options.requestTimeoutMs ?? 10000
+		this.sleepWakeupIdleMs = options.sleepWakeupIdleMs ?? DEFAULT_SLEEP_WAKEUP_IDLE_MS
+		this.sleepWakeupResendDelayMs = options.sleepWakeupResendDelayMs ?? DEFAULT_SLEEP_WAKEUP_RESEND_DELAY_MS
 		this.logger = options.logger ?? console
 
 		this._socketTask = null
@@ -245,6 +351,7 @@ export class UniMqttSocketBmsTransport {
 		this._bridgeError = ''
 		this._pending = null
 		this._lastTxAt = 0
+		this._lastResponseAt = 0
 		this._heartbeatTimer = null
 	}
 
@@ -317,7 +424,7 @@ export class UniMqttSocketBmsTransport {
 			}
 			if (this._pending) {
 				const p = this._pending
-				clearTimeout(p.timer)
+				this._clearPendingTimers(p)
 				this._pending = null
 				p.reject(new BmsProtocolError(this._bridgeError || 'WebSocket closed'))
 			}
@@ -330,7 +437,7 @@ export class UniMqttSocketBmsTransport {
 			if (!settled) failReady(err)
 			if (this._pending) {
 				const p = this._pending
-				clearTimeout(p.timer)
+				this._clearPendingTimers(p)
 				this._pending = null
 				p.reject(err)
 			}
@@ -407,7 +514,7 @@ export class UniMqttSocketBmsTransport {
 		this._stopHeartbeat()
 		if (this._pending) {
 			const p = this._pending
-			clearTimeout(p.timer)
+			this._clearPendingTimers(p)
 			this._pending = null
 			p.reject(new BmsProtocolError('Disconnected'))
 		}
@@ -435,9 +542,15 @@ export class UniMqttSocketBmsTransport {
 	private _rejectPending(err: unknown) {
 		if (!this._pending) return
 		const p = this._pending
-		clearTimeout(p.timer)
+		this._clearPendingTimers(p)
 		this._pending = null
 		p.reject(err)
+	}
+
+	private _clearPendingTimers(pending: { timer: ReturnType<typeof setTimeout>; wakeupTimer?: ReturnType<typeof setTimeout> | null }) {
+		clearTimeout(pending.timer)
+		if (pending.wakeupTimer) clearTimeout(pending.wakeupTimer)
+		pending.wakeupTimer = null
 	}
 
 	request(frameBytes: Uint8Array | ArrayLike<number>, { timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}): Promise<Uint8Array> {
@@ -449,15 +562,21 @@ export class UniMqttSocketBmsTransport {
 		if (!this._connected || !this._socketTask) throw new BmsProtocolError('WebSocket is not connected')
 		if (this._pending) throw new BmsProtocolError('Previous request still pending')
 
+		const serialStartedAt = Date.now()
 		const rawReq = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes)
 		const req = buildMqttSocketReadFrame(rawReq)
 		const expectBoot = req[0] === 0x55 && req[1] !== 0x7f
+		const bootTrace = expectBoot ? getBootFrameTrace(req) : null
 		if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes')
 		if (expectBoot && req.length < 9) throw new BmsProtocolError('Invalid boot request frame bytes')
 
 		const now = Date.now()
 		const delta = now - this._lastTxAt
-		if (delta < this.minFrameIntervalMs) await sleep(this.minFrameIntervalMs - delta)
+		let waitBeforeSendMs = 0
+		if (delta < this.minFrameIntervalMs) {
+			waitBeforeSendMs = this.minFrameIntervalMs - delta
+			await sleep(waitBeforeSendMs)
+		}
 
 		const expect: ReqExpect = expectBoot
 			? {
@@ -477,19 +596,79 @@ export class UniMqttSocketBmsTransport {
 
 		const deferred = defer<Uint8Array>()
 		const timer = setTimeout(() => {
-			if (this._pending && this._pending.reject === deferred.reject) this._pending = null
+			if (this._pending && this._pending.reject === deferred.reject) {
+				const p = this._pending
+				this._clearPendingTimers(p)
+				this._pending = null
+			}
 			deferred.reject(new BmsProtocolError(`Socket request timeout after ${timeoutMs}ms`, { expect }))
 		}, timeoutMs)
 		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot }
 
 		try {
 			const hex = bytesToHexUpper(req)
+			const txStartedAt = Date.now()
 			this._socketTask.send({ data: hex })
 			this._lastTxAt = Date.now()
-			return await deferred.promise
+			if (
+				shouldScheduleSocketWakeupResend(req, {
+					expectBoot,
+					lastResponseAt: this._lastResponseAt,
+					now: txStartedAt,
+					idleMs: this.sleepWakeupIdleMs,
+					delayMs: this.sleepWakeupResendDelayMs,
+					timeoutMs,
+				})
+			) {
+				const resendDelayMs = Math.max(0, this.sleepWakeupResendDelayMs)
+				const wakeupTimer = setTimeout(() => {
+					const pending = this._pending
+					if (!pending || pending.reject !== deferred.reject || pending.wakeupResent || !this._socketTask) return
+					pending.wakeupResent = true
+					this._socketTask.send({ data: hex })
+					this._lastTxAt = Date.now()
+					this.logger?.info &&
+						this.logger.info('[socket] wakeup resend query', {
+							delayMs: resendDelayMs,
+							idleMs: this.sleepWakeupIdleMs,
+							timeoutMs,
+							expect,
+						})
+				}, resendDelayMs)
+				if (this._pending && this._pending.reject === deferred.reject) {
+					this._pending.wakeupTimer = wakeupTimer
+				} else {
+					clearTimeout(wakeupTimer)
+				}
+			}
+			const respBytes = await deferred.promise
+			if (bootTrace) {
+				this.logger?.info &&
+					this.logger.info('[socket] boot request timing', {
+						...bootTrace,
+						timeoutMs,
+						minFrameIntervalMs: this.minFrameIntervalMs,
+						waitBeforeSendMs,
+						rttMs: Date.now() - txStartedAt,
+						totalMs: Date.now() - serialStartedAt,
+						response: getBootFrameTrace(respBytes),
+					})
+			}
+			return respBytes
 		} catch (e) {
+			if (bootTrace) {
+				this.logger?.warn &&
+					this.logger.warn('[socket] boot request failed', {
+						...bootTrace,
+						timeoutMs,
+						minFrameIntervalMs: this.minFrameIntervalMs,
+						waitBeforeSendMs,
+						elapsedMs: Date.now() - serialStartedAt,
+						err: formatErr(e),
+					})
+			}
 			const pending = this._pending
-			if (pending) clearTimeout(pending.timer)
+			if (pending) this._clearPendingTimers(pending)
 			this._pending = null
 			throw e
 		}
@@ -497,9 +676,10 @@ export class UniMqttSocketBmsTransport {
 
 	private _handleFrame(frameBytes: Uint8Array) {
 		if (!this._pending) return
-		const { expect, resolve, timer, expectBoot } = this._pending
+		const { expect, resolve, expectBoot } = this._pending
 		if (!this._isExpectedResponse(frameBytes, expect, expectBoot)) return
-		clearTimeout(timer)
+		this._lastResponseAt = Date.now()
+		this._clearPendingTimers(this._pending)
 		this._pending = null
 		resolve(frameBytes)
 	}

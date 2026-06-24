@@ -11,6 +11,9 @@ export type BootOtaProgress = {
 	stage: 'query' | 'enter' | 'prepare' | 'transfer' | 'finalize'
 	percent?: number
 	packetIndex?: number
+	packetIndexHex?: string
+	expectedAck?: number
+	expectedAckHex?: string
 	packetTotal?: number
 	message?: string
 }
@@ -86,6 +89,28 @@ function bytesToAscii(bytes: Uint8Array, maxLen = 64): string {
 
 function cmdHex(cmd: number): string {
 	return `0x${(cmd & 0xff).toString(16).padStart(2, '0')}`
+}
+
+function seqHex(seq: number): string {
+	return `0x${(seq & 0xffff).toString(16).padStart(4, '0').toUpperCase()}`
+}
+
+function packetSeqTrace(packetIndex: number): Record<string, unknown> {
+	return {
+		packetIndex,
+		packetIndexHex: seqHex(packetIndex),
+		expectedAck: packetIndex + 1,
+		expectedAckHex: seqHex(packetIndex + 1),
+	}
+}
+
+function ackSeqTrace(requested: number): Record<string, unknown> {
+	return {
+		requested,
+		requestedHex: seqHex(requested),
+		ackForPacket: requested > 0 ? requested - 1 : undefined,
+		ackForPacketHex: requested > 0 ? seqHex(requested - 1) : undefined,
+	}
 }
 
 function formatErr(err: unknown): string {
@@ -206,6 +231,7 @@ export async function bootOtaUpgrade({
 	terminalPacketWriteErrorAsComplete,
 	requireFinalPacketAck,
 	finalizeBurstIntervalsMs,
+	tracePacketTiming,
 }: {
 	transport: BootOtaTransport
 	firmware: Uint8Array
@@ -231,6 +257,7 @@ export async function bootOtaUpgrade({
 	terminalPacketWriteErrorAsComplete?: boolean
 	requireFinalPacketAck?: boolean
 	finalizeBurstIntervalsMs?: number[]
+	tracePacketTiming?: boolean
 }): Promise<BootOtaResult> {
 	if (!firmware || firmware.length === 0) throw new Error('Firmware data is empty')
 	const totalSize = firmware.length
@@ -290,6 +317,20 @@ export async function bootOtaUpgrade({
 	const payloadLen = dataPacketSize + 2
 	logger?.info && logger.info('[boot] data packet size', { dataPacketSize, packetSize, payloadLen })
 	const packetTotal = Math.ceil(totalSize / dataPacketSize)
+	if (tracePacketTiming) {
+		logger?.info &&
+			logger.info('[boot] transfer timing config', {
+				totalSize,
+				packetTotal,
+				dataPacketSize,
+				payloadLen,
+				packetDelayMs: packetDelayMs ?? 0,
+				pageBoundaryDelayMs: pageBoundaryDelayMs ?? 0,
+				adaptiveSlowdownOnPacketTimeout: !!adaptiveSlowdownOnPacketTimeout,
+				adaptivePacketDelayMs,
+				adaptivePageBoundaryDelayMs,
+			})
+	}
 	let packetIndex = 0
 	let retry = 0
 	const maxRetry = 5
@@ -326,27 +367,41 @@ export async function bootOtaUpgrade({
 
 			onProgress?.({
 				stage: 'transfer',
-				packetIndex,
+				...(packetSeqTrace(packetIndex) as {
+					packetIndex: number
+					packetIndexHex: string
+					expectedAck: number
+					expectedAckHex: string
+				}),
 				packetTotal,
 				percent: Math.min(99, Math.floor((packetIndex / packetTotal) * 100)),
 			})
 			if (currentPageBoundaryDelayMs > 0 && packetIndex > 0 && start > 0 && start % 4096 === 0) {
-				logger?.info && logger.info('[boot] page boundary delay', { packetIndex, offset: start, delayMs: currentPageBoundaryDelayMs })
+				logger?.info &&
+					logger.info('[boot] page boundary delay', {
+						...packetSeqTrace(packetIndex),
+						offset: start,
+						delayMs: currentPageBoundaryDelayMs,
+					})
 				await sleep(currentPageBoundaryDelayMs)
 			}
 
 			let resp: ReturnType<typeof parseBootFrame> | null = null
+			let packetRttMs = 0
 			let packetRetry = 0
 			let terminalPacketAssumedComplete = false
 			while (true) {
+				const packetAttemptStartedAt = Date.now()
 				try {
 					resp = await bootRequest(
 						transport,
 						buildBootFrame({ sourceAddress, targetAddress: activeWriteTarget, command: 0x53, payload }),
 						{ logger }
 					)
+					packetRttMs = Date.now() - packetAttemptStartedAt
 					break
 				} catch (e) {
+					const elapsedMs = Date.now() - packetAttemptStartedAt
 					if (
 						terminalPacketWriteErrorAsComplete &&
 						packetIndex >= packetTotal - 1 &&
@@ -357,8 +412,9 @@ export async function bootOtaUpgrade({
 						terminalPacketAssumedComplete = true
 						logger?.warn &&
 							logger.warn('[boot] terminal packet write error, continue finalize', {
-								packetIndex: packetTotal - 1,
+								...packetSeqTrace(packetTotal - 1),
 								packetTotal,
+								elapsedMs,
 								err: formatErr(e),
 							})
 						break
@@ -372,7 +428,7 @@ export async function bootOtaUpgrade({
 							currentPageBoundaryDelayMs = nextPageBoundaryDelayMs
 							logger?.warn &&
 								logger.warn('[boot] adaptive slowdown enabled', {
-									packetIndex,
+									...packetSeqTrace(packetIndex),
 									packetDelayMs: currentPacketDelayMs,
 									pageBoundaryDelayMs: currentPageBoundaryDelayMs,
 								})
@@ -380,16 +436,22 @@ export async function bootOtaUpgrade({
 					}
 					logger?.warn &&
 						logger.warn('[boot] packet timeout, retry', {
-							packetIndex,
+							...packetSeqTrace(packetIndex),
 							packetRetry,
+							attempt: packetRetry,
 							maxPacketRetry,
+							elapsedMs,
 							err: formatErr(e),
 						})
 					if (packetRetry >= maxPacketRetry) {
 						if (fallbackWriteTarget != null && activeWriteTarget !== fallbackWriteTarget) {
 							activeWriteTarget = fallbackWriteTarget
 							packetRetry = 0
-							logger?.warn && logger.warn('[boot] switch data target', { packetIndex, target: activeWriteTarget })
+							logger?.warn &&
+								logger.warn('[boot] switch data target', {
+									...packetSeqTrace(packetIndex),
+									target: activeWriteTarget,
+								})
 							await sleep(220)
 							continue
 						}
@@ -419,7 +481,23 @@ export async function bootOtaUpgrade({
 			const status = resp.data[0] & 0xff
 			const requested = bytesToU16BE(resp.data[1] & 0xff, resp.data[2] & 0xff)
 			lastRequested = requested
-			logger?.debug && logger.debug('[boot] packet ack', { packetIndex, status, requested })
+			const seqTrace = packetSeqTrace(packetIndex)
+			const ackTrace = ackSeqTrace(requested)
+			logger?.debug && logger.debug('[boot] packet ack', { ...seqTrace, status, ...ackTrace })
+			if (tracePacketTiming) {
+				logger?.info &&
+					logger.info('[boot] packet timing', {
+						...seqTrace,
+						packetTotal,
+						status,
+						...ackTrace,
+						attempt: packetRetry + 1,
+						rttMs: packetRttMs,
+						dataPacketSize,
+						packetDelayMs: currentPacketDelayMs,
+						pageBoundaryDelayMs: currentPageBoundaryDelayMs,
+					})
+			}
 
 			if (status === 0) {
 				if (requested >= 0 && requested < packetTotal && requested !== packetIndex + 1) {
@@ -472,7 +550,13 @@ export async function bootOtaUpgrade({
 
 		const beforeFinalizeDelayMs = Math.max(0, finalizeDelayMs ?? 1000)
 		if (beforeFinalizeDelayMs > 0) {
-			logger?.info && logger.info('[boot] finalize delay before 0x54', { delayMs: beforeFinalizeDelayMs, lastRequested, packetTotal })
+			logger?.info &&
+				logger.info('[boot] finalize delay before 0x54', {
+					delayMs: beforeFinalizeDelayMs,
+					lastRequested,
+					lastRequestedHex: seqHex(lastRequested),
+					packetTotal,
+				})
 			await sleep(beforeFinalizeDelayMs)
 		}
 		let finalizeOk = false
@@ -560,7 +644,7 @@ export async function bootOtaUpgrade({
 					const status = finishResp.data[0] & 0xff
 					const requested = bytesToU16BE(finishResp.data[1] & 0xff, finishResp.data[2] & 0xff)
 					lastRequested = requested
-					logger?.warn && logger.warn('[boot] finalize got data ack', { status, requested })
+					logger?.warn && logger.warn('[boot] finalize got data ack', { status, ...ackSeqTrace(requested) })
 				}
 				continue
 			}

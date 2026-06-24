@@ -1,6 +1,6 @@
 <template>
 	<view class="card" hover-class="card--hover" @tap="onTap" @longpress="onLongPress">
-		<view class="status" :class="`status--${device.connectType}`">
+		<view class="status" :class="`status--${statusClass}`">
 			<image class="status__icon" :src="statusIcon" mode="aspectFit" />
 			<text class="status__text">{{ statusText }}</text>
 		</view>
@@ -50,17 +50,35 @@ const onLongPress = () => emit('longpress', props.device)
 const onDisconnectTap = () => emit('disconnect', props.device)
 
 const showDisconnectButton = computed(() => props.device.connectType === 'bluetooth')
+const isFourGDevice = computed(() => {
+	const commType = Number(props.device.bmsCommType || 0)
+	return commType === 2 || commType === 3
+})
+const isFourGOnline = computed(() => Boolean(props.device.isOnline))
+const useFourGStatus = computed(() => props.device.connectType !== 'bluetooth' && isFourGDevice.value)
 
 const statusText = computed(() => {
 	if (props.device.connectType === 'bluetooth') return t('home.status.bluetooth') as string
+	if (useFourGStatus.value) {
+		return (isFourGOnline.value ? t('home.status.fourGOnline') : t('home.status.fourGOffline')) as string
+	}
 	if (props.device.connectType === 'mqtt') return t('home.status.mqttOnline') as string
 	return t('home.status.offline') as string
 })
 
 const statusIcon = computed(() => {
 	if (props.device.connectType === 'bluetooth') return '/static/image/home/icon-bluetooth@2x.png'
+	if (useFourGStatus.value) {
+		return isFourGOnline.value ? '/static/image/home/icon-wifi@2x.png' : '/static/image/home/icon-unlink@2x.png'
+	}
 	if (props.device.connectType === 'mqtt') return '/static/image/home/icon-wifi@2x.png'
 	return '/static/image/home/icon-unlink@2x.png'
+})
+
+const statusClass = computed(() => {
+	if (props.device.connectType === 'bluetooth') return 'bluetooth'
+	if (useFourGStatus.value) return isFourGOnline.value ? '4g-online' : '4g-offline'
+	return props.device.connectType
 })
 
 const barWidth = computed(() => `${Math.max(0, Math.min(100, Number(props.device.batteryPercent || 0)))}%`)
@@ -139,6 +157,16 @@ const barWidth = computed(() => `${Math.max(0, Math.min(100, Number(props.device
 .status--mqtt {
 	background: rgba(29, 207, 102, 0.12);
 	color: #1dcf66;
+}
+
+.status--4g-online {
+	background: rgba(29, 207, 102, 0.12);
+	color: #1dcf66;
+}
+
+.status--4g-offline {
+	background: rgba(255, 77, 63, 0.12);
+	color: #ff4d3f;
 }
 
 .status--offline {

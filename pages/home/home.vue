@@ -3,7 +3,7 @@
 		<image class="home-bg" :src="$img('bg@2x.png')" mode="aspectFill" />
 
 		<view class="home-top">
-			<image class="home-top-bg" :src="homeBannerUrl" mode="widthFix" />
+			<image v-if="homeBannerUrl" class="home-top-bg" :src="homeBannerUrl" mode="widthFix" />
 
 			<view class="alarm-btn" @tap="goAlarm">
 				<u-icon name="bell" size="14" color="#FFFFFF"></u-icon>
@@ -151,7 +151,7 @@ import { useBoundDevicesStore } from '@/store/bound-devices'
 import { useUserStore } from '@/store/user'
 import { appBoundDeviceList, appRemoveDevice, appUnbindDevice, updateDeviceName } from '@/service/device'
 import { imageUrl } from '@/common/assets/images'
-import { getRuntimeAppId } from '@/common/public-content'
+import { fetchWxmpRuntimeConfig, isPackWxmpRuntime } from '@/common/wxmp-runtime'
 import type { HomeDeviceCardModel } from '@/types/home'
 
 type DeviceListItem = {
@@ -161,6 +161,7 @@ type DeviceListItem = {
 	device_name?: string
 	ble_mac?: string | null
 	iccid?: string | null
+	imei?: string | null
 	bms_comm_type?: number | null
 	is_online?: number
 	soc?: number | null
@@ -186,7 +187,16 @@ const page = ref(1)
 const pageSize = 20
 const filterPopupShow = ref(false)
 const currentViewMode = ref<HomeDeviceViewMode>('self_bound')
-const homeBannerUrl = ref(imageUrl('home/home-top@2x.png'))
+const defaultHomeBannerUrl = imageUrl('home/home-top@2x.png')
+const getInitialHomeBannerUrl = () => {
+	// #ifdef MP-WEIXIN
+	return ''
+	// #endif
+	// #ifndef MP-WEIXIN
+	return defaultHomeBannerUrl
+	// #endif
+}
+const homeBannerUrl = ref(getInitialHomeBannerUrl())
 
 const selectedDevice = ref<HomeDeviceRow | null>(null)
 const actionSheetShow = ref(false)
@@ -246,18 +256,15 @@ const refreshLoginState = () => {
 
 const loadWxmpRuntimeConfig = async () => {
 	// #ifdef MP-WEIXIN
-	if (!apiRequest) return
-	const appid = getRuntimeAppId()
-	if (!appid) return
+	homeBannerUrl.value = ''
 	try {
-		const res = await apiRequest<Record<string, unknown>>(
-			'/api/v1/app/wxmp/runtime',
-			{ appid },
-			'GET'
-		)
-		if ((res as any)?.code !== 200) return
-		const banner = String((res as any)?.data?.home_banner_url || '').trim()
-		if (banner) homeBannerUrl.value = banner
+		const runtime = await fetchWxmpRuntimeConfig()
+		const banner = String(runtime?.home_banner_url || '').trim()
+		if (banner) {
+			homeBannerUrl.value = banner
+		} else if (runtime && !isPackWxmpRuntime(runtime)) {
+			homeBannerUrl.value = defaultHomeBannerUrl
+		}
 	} catch (e) {}
 	// #endif
 }
@@ -299,6 +306,7 @@ const ensureUserInfo = async () => {
 const formatDeviceIdentifier = (item: DeviceListItem): string => {
 	const fallback = String(item?.device_number || '').trim() || '-'
 	const iccid = String(item?.iccid || '').trim()
+	const imei = String(item?.imei || '').trim()
 	const mac = normalizeMac(String(item?.ble_mac || ''))
 	const macText = mac ? mac12ToColon(mac) : ''
 	const rawComm = item?.bms_comm_type
@@ -306,8 +314,10 @@ const formatDeviceIdentifier = (item: DeviceListItem): string => {
 	const bmsCommType = Number.isFinite(commNum) ? commNum : null
 
 	if (bmsCommType === 1 && macText) return macText
+	if ((bmsCommType === 2 || bmsCommType === 3) && imei) return imei
 	if ((bmsCommType === 2 || bmsCommType === 3) && iccid) return iccid
 	if (macText) return macText
+	if (imei) return imei
 	if (iccid) return iccid
 	return fallback
 }
@@ -330,6 +340,7 @@ const toHomeModel = (item: DeviceListItem): HomeDeviceRow => {
 		batteryPercent,
 		bleMac: item?.ble_mac ?? null,
 		iccid: item?.iccid ?? null,
+		imei: item?.imei ?? null,
 		bmsCommType,
 		relationType,
 	}
@@ -734,10 +745,13 @@ export default {
 .home-top {
 	position: relative;
 	z-index: 1;
+	height: 421rpx;
+	overflow: hidden;
 }
 
 .home-top-bg {
 	width: 100%;
+	height: 421rpx;
 	display: block;
 }
 

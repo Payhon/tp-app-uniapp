@@ -258,6 +258,13 @@ const allowOta = computed(() => connType.value === 'bluetooth' || sessionMode.va
 const currentBleMac = computed(() =>
 	String(battery.value?.ble_mac || status.value?.identity?.bluetoothMac || '').trim()
 )
+const isFourGDevice = computed(() => {
+	const commType = Number(battery.value?.bms_comm_type || 0)
+	const commChipId = String(battery.value?.comm_chip_id || '').trim()
+	return commType === 2 || commType === 3 || !!commChipId
+})
+const isFourGConnPill = computed(() => !connecting.value && connType.value !== 'bluetooth' && isFourGDevice.value)
+const isFourGOnline = computed(() => Number(battery.value?.is_online || 0) === 1)
 const isMeterDevice = computed(() => isMeterMac(currentBleMac.value))
 const showMeterScanHandoff = computed(() => sessionMode.value === 'instrument' && allowScanHandoff.value)
 const showMeterPanelReady = computed(() => showMeterScanHandoff.value && connType.value === 'bluetooth' && !connecting.value)
@@ -340,6 +347,9 @@ const maybeCheckOtaOnDashboard = async () => {
 const connText = computed(() => {
 	if (connecting.value) return t('deviceDetail.conn.connecting') as string
 	if (connType.value === 'bluetooth') return t('deviceDetail.conn.bluetooth') as string
+	if (isFourGConnPill.value) {
+		return (isFourGOnline.value ? t('deviceDetail.conn.fourGOnline') : t('deviceDetail.conn.fourGOffline')) as string
+	}
 	if (connType.value === 'mqtt') return t('deviceDetail.conn.connected') as string
 	return t('deviceDetail.conn.offline') as string
 })
@@ -350,11 +360,12 @@ const connIcon = computed(() => {
 	return '/static/image/home/icon-unlink@2x.png'
 })
 
-const showFourGConnIcon = computed(() => !connecting.value && connType.value === 'mqtt')
+const showFourGConnIcon = computed(() => isFourGConnPill.value)
 const showRealtimeOccupiedNotice = computed(() => realtimeOccupied.value && connType.value === 'mqtt' && sessionMode.value === 'cloud')
 
 const connClass = computed(() => {
 	if (connecting.value) return 'connecting'
+	if (isFourGConnPill.value) return isFourGOnline.value ? '4g-online' : '4g-offline'
 	return connType.value
 })
 
@@ -671,9 +682,15 @@ onUnload(() => {
 	color: #0b3bff;
 }
 
-.conn-pill--mqtt {
+.conn-pill--mqtt,
+.conn-pill--4g-online {
 	background: rgba(29, 207, 102, 0.12);
 	color: #1dcf66;
+}
+
+.conn-pill--4g-offline {
+	background: rgba(255, 77, 63, 0.12);
+	color: #ff4d3f;
 }
 
 .conn-pill--offline {
@@ -704,7 +721,8 @@ onUnload(() => {
 }
 
 .conn-pill__text {
-	font-size: 22rpx;
+	font-size: 24rpx;
+	font-weight: 600;
 }
 
 .conn-disconnect {

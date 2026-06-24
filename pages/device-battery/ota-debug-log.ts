@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 
 export type OtaDebugLogLevel = 'debug' | 'info' | 'warn' | 'error'
-export type OtaDebugLogScope = 'meter-ota' | 'ble' | 'boot' | 'download'
+export type OtaDebugLogScope = 'ota' | 'bms-ota' | 'meter-ota' | 'ble' | 'boot' | 'socket' | 'download'
 
 export type OtaDebugLogEntry = {
 	id: number
@@ -12,11 +12,12 @@ export type OtaDebugLogEntry = {
 	data?: unknown
 }
 
-const STORAGE_KEY = '__meter_ota_debug_logs__'
-const MAX_LOGS = 120
-const MAX_STRING_LEN = 240
-const MAX_ARRAY_LEN = 12
-const MAX_OBJECT_KEYS = 18
+const STORAGE_KEY = '__ota_debug_logs__'
+const LEGACY_STORAGE_KEY = '__meter_ota_debug_logs__'
+const MAX_LOGS = 6000
+const MAX_STRING_LEN = 4096
+const MAX_ARRAY_LEN = 64
+const MAX_OBJECT_KEYS = 64
 
 let nextId = 1
 
@@ -66,7 +67,8 @@ function sanitizeData(value: unknown, depth = 0): unknown {
 
 function readLogs(): OtaDebugLogEntry[] {
 	try {
-		const raw = uni.getStorageSync(STORAGE_KEY)
+		let raw = uni.getStorageSync(STORAGE_KEY)
+		if (!raw) raw = uni.getStorageSync(LEGACY_STORAGE_KEY)
 		const list = Array.isArray(raw) ? raw : JSON.parse(String(raw || '[]'))
 		if (!Array.isArray(list)) return []
 		const normalized = list
@@ -74,7 +76,7 @@ function readLogs(): OtaDebugLogEntry[] {
 				id: Number(item?.id || nextId++),
 				ts: String(item?.ts || ''),
 				level: String(item?.level || 'info') as OtaDebugLogLevel,
-				scope: String(item?.scope || 'meter-ota') as OtaDebugLogScope,
+				scope: String(item?.scope || 'ota') as OtaDebugLogScope,
 				message: String(item?.message || ''),
 				data: item?.data,
 			}))
@@ -126,10 +128,13 @@ export function appendOtaDebugLog(entry: {
 export function resetOtaDebugLog(sessionMeta?: unknown) {
 	otaDebugLogs.value = []
 	writeLogs([])
+	try {
+		uni.removeStorageSync(LEGACY_STORAGE_KEY)
+	} catch (e) {}
 	if (sessionMeta) {
 		appendOtaDebugLog({
 			level: 'info',
-			scope: 'meter-ota',
+			scope: 'ota',
 			message: 'debug session started',
 			data: sessionMeta,
 		})
@@ -143,7 +148,7 @@ export function getOtaDebugLogs(): OtaDebugLogEntry[] {
 export function formatOtaDebugLogs(header?: unknown): string {
 	const lines: string[] = []
 	if (header) {
-		lines.push('[meter-ota-debug] header')
+		lines.push('[ota-debug] header')
 		lines.push(stringifyData(sanitizeData(header)))
 		lines.push('')
 	}
@@ -157,7 +162,7 @@ export function formatOtaDebugLogs(header?: unknown): string {
 }
 
 export async function copyOtaDebugLogs(header?: unknown): Promise<void> {
-	const data = formatOtaDebugLogs(header) || '[meter-ota-debug] empty'
+	const data = formatOtaDebugLogs(header) || '[ota-debug] empty'
 	await new Promise<void>((resolve, reject) => {
 		try {
 			uni.setClipboardData({

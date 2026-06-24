@@ -190,6 +190,15 @@
 
 		<u-popup :show="otaState.show" mode="center" @close="closeOtaPopup">
 			<view class="ota">
+				<view
+					v-if="showOtaDebugButton"
+					class="ota-debug-trigger"
+					hover-class="ota-debug-trigger--hover"
+					@tap.stop="toggleOtaDebugOverlay"
+				>
+					<u-icon name="file-text" size="18" color="#0B3BFF"></u-icon>
+					<view v-if="otaDebugLogs.length" class="ota-debug-trigger__dot"></view>
+				</view>
 				<text class="ota__title">{{ $t('deviceDetail.params.otaUpgrade') }}</text>
 				<view class="ota__bar">
 					<u-line-progress :percentage="otaState.progress" activeColor="#0B3BFF"></u-line-progress>
@@ -197,6 +206,43 @@
 				<text class="ota__text">{{ otaMessageText }}</text>
 			</view>
 		</u-popup>
+
+		<view
+			v-if="showOtaDebugOverlay"
+			class="ota-debug-mask"
+			:style="{ paddingTop: otaDebugFloatTopPx + 'px', paddingBottom: otaDebugFloatBottomPx + 'px' }"
+			@tap.stop="closeOtaDebugOverlay"
+		>
+			<view class="ota-debug-float" @tap.stop>
+				<view class="ota-debug-float__head">
+					<view class="ota-debug-float__title-wrap">
+						<text class="ota-debug-float__title">{{ $t('deviceDetail.params.otaDebugTitle') }}</text>
+						<text class="ota-debug-float__count">{{ otaDebugCountText }}</text>
+					</view>
+					<view class="ota-debug-float__close" hover-class="ota-debug-float__close--hover" @tap.stop="closeOtaDebugOverlay">
+						<u-icon name="close" size="18" color="#D1D5DB"></u-icon>
+					</view>
+				</view>
+				<view class="ota-debug-float__actions">
+					<view class="ota-debug-float__btn" hover-class="ota-debug-float__btn--hover" @tap.stop="copyOtaDebugLog">
+						{{ $t('deviceDetail.params.otaDebugCopy') }}
+					</view>
+					<view
+						class="ota-debug-float__btn ota-debug-float__btn--ghost"
+						hover-class="ota-debug-float__btn--hover"
+						@tap.stop="clearOtaDebugLog"
+					>
+						{{ $t('deviceDetail.params.otaDebugClear') }}
+					</view>
+				</view>
+				<scroll-view class="ota-debug-float__body" scroll-y :style="{ height: otaDebugBodyHeightPx + 'px' }">
+					<view v-if="!otaDebugLines.length" class="ota-debug-float__empty">
+						{{ $t('deviceDetail.params.otaDebugEmpty') }}
+					</view>
+					<text v-for="line in otaDebugLines" :key="line.id" class="ota-debug-float__line">{{ line.text }}</text>
+				</scroll-view>
+			</view>
+		</view>
 
 		<u-popup :show="meterPackagePopup.show" mode="bottom" @close="closeMeterPackagePopup">
 			<view class="meter-package-popup" :style="{ paddingBottom: safeBottom + 'px' }">
@@ -355,6 +401,7 @@ import {
 	type FunctionConfigFlagKey,
 } from '@/common/lib/bms-protocol/function-config'
 import { bootOtaUpgrade } from '@/common/lib/bms-protocol/boot-ota'
+import { getMqttBmsBootOtaRuntimeOptions } from '@/common/lib/bms-protocol/boot-ota-runtime-options'
 import {
 	BMS_PARAM,
 	PARAM_CATEGORIES,
@@ -555,6 +602,7 @@ const allowOtaEnabled = computed(() => props.allowOta !== false && !isMeterDevic
 const showOtaBadge = computed(() => allowOtaEnabled.value && !!props.otaNeedUpgrade)
 const showMeterUpgradeCard = computed(() => props.connType === 'bluetooth' && isMeterDevice.value)
 const showMeterOtaDebugLog = computed(() => showMeterUpgradeCard.value && developerStore.enabled)
+const showOtaDebugButton = computed(() => developerStore.enabled && otaState.show)
 const otaTargetVersionText = computed(() => {
 	const version = String(props.otaInfo?.targetVersion || '').trim()
 	if (!showOtaBadge.value || !version) return ''
@@ -572,6 +620,23 @@ const meterPackagePopup = reactive({
 })
 const selectedMeterPackageId = ref('')
 const selectedMeterPackage = computed(() => meterPackageList.value.find((item) => item.id === selectedMeterPackageId.value) || null)
+const otaDebugOverlayVisible = ref(false)
+const showOtaDebugOverlay = computed(() => showOtaDebugButton.value && otaDebugOverlayVisible.value)
+const otaDebugCountText = computed(() =>
+	(t('deviceDetail.params.otaDebugCount', { count: otaDebugLogs.value.length }) as string).replace(
+		'{count}',
+		String(otaDebugLogs.value.length)
+	)
+)
+const otaDebugLines = computed(() =>
+	otaDebugLogs.value.map((item) => {
+		const dataText = item.data == null ? '' : ` ${JSON.stringify(item.data)}`
+		return {
+			id: item.id,
+			text: `[${item.ts}] [${item.level.toUpperCase()}] [${item.scope}] ${item.message}${dataText}`,
+		}
+	})
+)
 const meterOtaDebugExpanded = ref(false)
 const meterOtaDebugCountText = computed(() =>
 	(t('deviceDetail.params.meterOtaDebugCount', { count: otaDebugLogs.value.length }) as string).replace(
@@ -580,7 +645,7 @@ const meterOtaDebugCountText = computed(() =>
 	)
 )
 const meterOtaDebugLines = computed(() =>
-	otaDebugLogs.value.slice(-120).map((item) => {
+	otaDebugLogs.value.map((item) => {
 		const dataText = item.data == null ? '' : ` ${JSON.stringify(item.data)}`
 		return {
 			id: item.id,
@@ -966,6 +1031,12 @@ const rpx2px = Number(windowInfo?.windowWidth || windowInfo?.screenWidth || 375)
 const windowHeight = Number(windowInfo?.windowHeight || windowInfo?.screenHeight || 667)
 const advancedBottomGap = Math.round(176 * rpx2px + safeBottom)
 const meterPackageBodyHeightPx = Math.max(220, Math.floor(windowHeight * 0.5))
+const otaDebugFloatTopPx = Math.max(72, Math.round(windowHeight * 0.14))
+const otaDebugFloatBottomPx = Math.max(96 + safeBottom, Math.round(windowHeight * 0.12) + safeBottom)
+const otaDebugBodyHeightPx = Math.max(
+	260,
+	windowHeight - otaDebugFloatTopPx - otaDebugFloatBottomPx - Math.round(190 * rpx2px)
+)
 const meterUpgradeButtonStyle = {
 	marginTop: '24rpx',
 	width: '100%',
@@ -986,6 +1057,7 @@ const closeOtaPopup = () => {
 		return
 	}
 	otaState.show = false
+	otaDebugOverlayVisible.value = false
 }
 
 const closeEditPopup = () => {
@@ -1352,21 +1424,30 @@ const getBleDebugDeviceId = () => {
 	}
 }
 
-const getMeterOtaDebugHeader = () => ({
+const getOtaDebugHeader = (kind = 'bms-ota') => ({
+	kind,
 	platform: getRuntimePlatform(),
 	connType: props.connType,
-	meterMac: meterMac.value,
-	bleDeviceId: getBleDebugDeviceId(),
+	deviceId: String(props.battery?.device_id || '').trim(),
+	itemUuid: String(props.battery?.item_uuid || '').trim(),
+	bleMac: String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim(),
+	fwVersion: fwVersionText.value,
 	tenantId: String(uni.getStorageSync('tenant_id') || ''),
 	baseUrl: resolveBaseUrl(),
-	packageId: selectedMeterPackage.value?.id || '',
-	packageName: selectedMeterPackage.value?.name || '',
-	packageUrl: summarizeUrl(selectedMeterPackage.value?.packageUrl || ''),
 	progress: otaState.progress,
 	message: otaState.message,
 })
 
-const appendMeterOtaDebug = (
+const getMeterOtaDebugHeader = () => ({
+	...getOtaDebugHeader('meter-ota'),
+	meterMac: meterMac.value,
+	bleDeviceId: getBleDebugDeviceId(),
+	packageId: selectedMeterPackage.value?.id || '',
+	packageName: selectedMeterPackage.value?.name || '',
+	packageUrl: summarizeUrl(selectedMeterPackage.value?.packageUrl || ''),
+})
+
+const appendCurrentOtaDebug = (
 	level: OtaDebugLogLevel,
 	scope: OtaDebugLogScope,
 	message: string,
@@ -1374,6 +1455,15 @@ const appendMeterOtaDebug = (
 ) => {
 	if (!developerStore.enabled) return
 	appendOtaDebugLog({ level, scope, message, data })
+}
+
+const appendMeterOtaDebug = (
+	level: OtaDebugLogLevel,
+	scope: OtaDebugLogScope,
+	message: string,
+	data?: unknown
+) => {
+	appendCurrentOtaDebug(level, scope, message, data)
 }
 
 const normalizeOtaLoggerArgs = (args: unknown[]) => {
@@ -1384,50 +1474,57 @@ const normalizeOtaLoggerArgs = (args: unknown[]) => {
 	return { message, data }
 }
 
-const shouldAppendMeterBootLog = (message: string, data: unknown) => {
-	const record = data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>) : {}
-	if (message.includes('[boot] packet ack')) {
-		const status = Number(record.status ?? 0)
-		const requested = Number(record.requested ?? 0)
-		const packetIndex = Number(record.packetIndex ?? 0)
-		return status !== 0 || packetIndex < 3 || requested % 64 === 0
-	}
-	if (message.includes('[boot] tx') && String(record.cmd || '').toLowerCase() === '0x53') return false
-	if (message.includes('[boot] rx')) {
-		const hex = String(record.hex || '').toUpperCase()
-		if (hex.length >= 8 && hex.slice(6, 8) === '53') return false
-	}
-	return true
+const inferOtaDebugScope = (message: string): OtaDebugLogScope => {
+	if (message.includes('[socket]')) return 'socket'
+	if (message.includes('[boot]')) return 'boot'
+	if (message.toLowerCase().includes('download')) return 'download'
+	return 'ota'
+}
+
+const writeOtaLog = (
+	level: OtaDebugLogLevel,
+	consoleWriter: (...args: unknown[]) => void,
+	args: unknown[]
+) => {
+	consoleWriter('[ota]', ...args)
+	const { message, data } = normalizeOtaLoggerArgs(args)
+	appendCurrentOtaDebug(level, inferOtaDebugScope(message), message, data)
 }
 
 const otaLogger = {
-	debug: (...args: unknown[]) => console.log('[ota]', ...args),
-	info: (...args: unknown[]) => console.log('[ota]', ...args),
-	warn: (...args: unknown[]) => console.warn('[ota]', ...args),
-	error: (...args: unknown[]) => console.error('[ota]', ...args),
+	debug: (...args: unknown[]) => writeOtaLog('debug', console.log, args),
+	info: (...args: unknown[]) => writeOtaLog('info', console.log, args),
+	warn: (...args: unknown[]) => writeOtaLog('warn', console.warn, args),
+	error: (...args: unknown[]) => writeOtaLog('error', console.error, args),
 }
 
 const meterOtaLogger = {
-	debug: (...args: unknown[]) => {
-		console.log('[ota]', ...args)
-		const { message, data } = normalizeOtaLoggerArgs(args)
-		if (shouldAppendMeterBootLog(message, data)) appendMeterOtaDebug('debug', 'boot', message, data)
-	},
-	info: (...args: unknown[]) => {
-		console.log('[ota]', ...args)
-		const { message, data } = normalizeOtaLoggerArgs(args)
-		if (shouldAppendMeterBootLog(message, data)) appendMeterOtaDebug('info', 'boot', message, data)
-	},
-	warn: (...args: unknown[]) => {
-		console.warn('[ota]', ...args)
-		const { message, data } = normalizeOtaLoggerArgs(args)
-		if (shouldAppendMeterBootLog(message, data)) appendMeterOtaDebug('warn', 'boot', message, data)
-	},
-	error: (...args: unknown[]) => {
-		console.error('[ota]', ...args)
-		const { message, data } = normalizeOtaLoggerArgs(args)
-		if (shouldAppendMeterBootLog(message, data)) appendMeterOtaDebug('error', 'boot', message, data)
-	},
+	debug: (...args: unknown[]) => writeOtaLog('debug', console.log, args),
+	info: (...args: unknown[]) => writeOtaLog('info', console.log, args),
+	warn: (...args: unknown[]) => writeOtaLog('warn', console.warn, args),
+	error: (...args: unknown[]) => writeOtaLog('error', console.error, args),
+}
+
+const toggleOtaDebugOverlay = () => {
+	otaDebugOverlayVisible.value = !otaDebugOverlayVisible.value
+}
+
+const closeOtaDebugOverlay = () => {
+	otaDebugOverlayVisible.value = false
+}
+
+const copyOtaDebugLog = async () => {
+	try {
+		await copyOtaDebugLogs(getOtaDebugHeader(props.connType === 'mqtt' ? 'bms-4g-ota' : 'bms-ota'))
+		uni.showToast({ title: t('deviceDetail.toast.otaDebugCopied') as string, icon: 'none' })
+	} catch (e) {
+		uni.showToast({ title: t('deviceDetail.toast.otaDebugCopyFailed') as string, icon: 'none' })
+	}
+}
+
+const clearOtaDebugLog = () => {
+	resetOtaDebugLog()
+	uni.showToast({ title: t('deviceDetail.toast.otaDebugCleared') as string, icon: 'none' })
 }
 
 const toggleMeterOtaDebug = () => {
@@ -1482,11 +1579,13 @@ type BootOtaRunOptions = {
 	finalizeBurstIntervalsMs?: number[]
 	forceWriteWithResponse?: boolean
 	minFrameIntervalMs?: number
+	minFrameIntervalMode?: 'max' | 'set'
 	packetDelayMs?: number
 	pageBoundaryDelayMs?: number
 	adaptiveSlowdownOnPacketTimeout?: boolean
 	adaptivePacketDelayMs?: number
 	adaptivePageBoundaryDelayMs?: number
+	tracePacketTiming?: boolean
 	logger?: typeof otaLogger
 }
 
@@ -1522,25 +1621,7 @@ const getBleBootOtaRuntimeOptions = ({
 		}
 	}
 	if (isMqtt) {
-		return {
-			queryTimeoutMs: 12000,
-			enterBootTimeoutMs: 20000,
-			enterBootTimeoutAsSuccess: true,
-			prepareTimeoutMs: 20000,
-			bootPacketTimeoutMs: 20000,
-			finalizeDelayMs: 1500,
-			finalizeTimeoutMs: 20000,
-			finalizeAssumeSuccessOnTimeout: false,
-			terminalPacketWriteErrorAsComplete: false,
-			requireFinalPacketAck: true,
-			minFrameIntervalMs: 120,
-			packetDelayMs: 80,
-			pageBoundaryDelayMs: 500,
-			adaptiveSlowdownOnPacketTimeout: true,
-			adaptivePacketDelayMs: 180,
-			adaptivePageBoundaryDelayMs: 1200,
-			logger,
-		}
+		return getMqttBmsBootOtaRuntimeOptions(logger)
 	}
 	return {
 		finalizeTimeoutMs: shouldRelaxBleFinalize ? 6000 : undefined,
@@ -1563,8 +1644,17 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 	const transportAny = rawTransport as any
 	const prevMinFrameIntervalMs =
 		transportAny && typeof transportAny.minFrameIntervalMs === 'number' ? transportAny.minFrameIntervalMs : undefined
-	if (options?.minFrameIntervalMs && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
-		transportAny.minFrameIntervalMs = Math.max(transportAny.minFrameIntervalMs || 0, options.minFrameIntervalMs)
+	const prevTransportLogger = transportAny && 'logger' in transportAny ? transportAny.logger : undefined
+	if (options?.minFrameIntervalMs != null && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
+		const nextMinFrameIntervalMs = Math.max(0, options.minFrameIntervalMs)
+		transportAny.minFrameIntervalMs =
+			options.minFrameIntervalMode === 'set'
+				? nextMinFrameIntervalMs
+				: Math.max(transportAny.minFrameIntervalMs || 0, nextMinFrameIntervalMs)
+	}
+	const runLogger = options?.logger || otaLogger
+	if (transportAny && 'logger' in transportAny) {
+		transportAny.logger = runLogger
 	}
 	const otaTransport = {
 		request: (frameBytes: Uint8Array, overrideOptions?: { timeoutMs?: number; suppressTimeoutLog?: boolean }) => {
@@ -1600,6 +1690,28 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 		},
 	}
 	try {
+		runLogger.info('[boot] runtime options', {
+			connType: props.connType,
+			sourceAddress: `0x${(sourceAddress & 0xff).toString(16).padStart(2, '0').toUpperCase()}`,
+			targetAddress: `0x${(targetAddress & 0xff).toString(16).padStart(2, '0').toUpperCase()}`,
+			queryTargetAddress:
+				options?.queryTargetAddress == null
+					? undefined
+					: `0x${(options.queryTargetAddress & 0xff).toString(16).padStart(2, '0').toUpperCase()}`,
+			queryTimeoutMs: options?.queryTimeoutMs,
+			enterBootTimeoutMs: options?.enterBootTimeoutMs,
+			prepareTimeoutMs: options?.prepareTimeoutMs,
+			bootPacketTimeoutMs: options?.bootPacketTimeoutMs,
+			finalizeTimeoutMs: options?.finalizeTimeoutMs,
+			minFrameIntervalMs: transportAny?.minFrameIntervalMs,
+			minFrameIntervalMode: options?.minFrameIntervalMode || 'max',
+			packetDelayMs: options?.packetDelayMs,
+			pageBoundaryDelayMs: options?.pageBoundaryDelayMs,
+			adaptiveSlowdownOnPacketTimeout: !!options?.adaptiveSlowdownOnPacketTimeout,
+			adaptivePacketDelayMs: options?.adaptivePacketDelayMs,
+			adaptivePageBoundaryDelayMs: options?.adaptivePageBoundaryDelayMs,
+			tracePacketTiming: !!options?.tracePacketTiming,
+		})
 		await bootOtaUpgrade({
 			transport: otaTransport,
 			firmware,
@@ -1620,7 +1732,8 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			terminalPacketWriteErrorAsComplete: options?.terminalPacketWriteErrorAsComplete,
 			requireFinalPacketAck: options?.requireFinalPacketAck,
 			finalizeBurstIntervalsMs: options?.finalizeBurstIntervalsMs,
-			logger: options?.logger || otaLogger,
+			tracePacketTiming: options?.tracePacketTiming,
+			logger: runLogger,
 			onProgress: (p) => {
 				if (options?.logger) {
 					const packetIndex = Number(p.packetIndex ?? -1)
@@ -1646,6 +1759,9 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 		if (prevMinFrameIntervalMs != null && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
 			transportAny.minFrameIntervalMs = prevMinFrameIntervalMs
 		}
+		if (transportAny && 'logger' in transportAny) {
+			transportAny.logger = prevTransportLogger
+		}
 	}
 }
 
@@ -1660,7 +1776,17 @@ const startBmsOta = async () => {
 
 	otaState.show = true
 	otaState.running = true
+	otaDebugOverlayVisible.value = false
 	updateOtaStage('checking', 0)
+	if (developerStore.enabled) {
+		resetOtaDebugLog(getOtaDebugHeader(props.connType === 'mqtt' ? 'bms-4g-ota' : 'bms-ota'))
+		appendCurrentOtaDebug('info', 'bms-ota', 'bms ota start', {
+			connType: props.connType,
+			fwVersion: fwVersionText.value,
+			needUpgrade: !!props.otaNeedUpgrade,
+			targetVersion: String(props.otaInfo?.targetVersion || '').trim(),
+		})
+	}
 
 	try {
 		props.onPausePolling && props.onPausePolling()
@@ -1703,6 +1829,9 @@ const startBmsOta = async () => {
 		}
 
 		if (!data.need_upgrade) {
+			appendCurrentOtaDebug('info', 'bms-ota', 'bms ota already latest', {
+				version: versionText,
+			})
 			otaState.show = false
 			uni.showToast({ title: t('deviceDetail.toast.otaLatest') as string, icon: 'none' })
 			return
@@ -1715,6 +1844,9 @@ const startBmsOta = async () => {
 		}
 		const ok = await confirmModal(confirmText)
 		if (!ok) {
+			appendCurrentOtaDebug('info', 'bms-ota', 'bms ota canceled by user', {
+				targetVersion: targetVersionText || '',
+			})
 			otaState.show = false
 			return
 		}
@@ -1723,15 +1855,31 @@ const startBmsOta = async () => {
 		if (!firmwareUrl) throw new Error('firmware url missing')
 
 		updateOtaStage('downloading', 5)
+		appendCurrentOtaDebug('info', 'download', 'firmware download start', {
+			url: summarizeUrl(firmwareUrl),
+			targetVersion: targetVersionText || '',
+		})
 		const firmware = await downloadFirmware(firmwareUrl)
+		appendCurrentOtaDebug('info', 'download', 'firmware download done', {
+			size: firmware.length,
+		})
 		updateOtaStage('prepare', 10)
 
 		const macRaw = String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim()
 		const isGaugeDevice = isMeterMac(macRaw)
 		const otaTargetAddress = isGaugeDevice ? BOOT_TARGET_METER : BOOT_TARGET_BMS
+		appendCurrentOtaDebug('info', 'boot', 'boot ota start', {
+			targetAddress: `0x${otaTargetAddress.toString(16).padStart(2, '0').toUpperCase()}`,
+			isGaugeDevice,
+			firmwareSize: firmware.length,
+		})
 		await runBootOtaUpgrade(firmware, otaTargetAddress, getBleBootOtaRuntimeOptions({ isMeterUpgrade: isGaugeDevice }))
 
 		updateOtaStage('success', 100)
+		appendCurrentOtaDebug('info', 'bms-ota', 'bms ota success', {
+			progress: otaState.progress,
+			message: otaState.message,
+		})
 		syncOtaState({
 			checking: false,
 			checked: false,
@@ -1743,6 +1891,11 @@ const startBmsOta = async () => {
 		})
 		uni.showToast({ title: t('deviceDetail.toast.otaSuccess') as string, icon: 'none' })
 	} catch (e) {
+		appendCurrentOtaDebug('error', 'bms-ota', 'bms ota failed', {
+			error: formatDebugError(e),
+			progress: otaState.progress,
+			message: otaState.message,
+		})
 		syncOtaState({
 			checking: false,
 			errorMessage: e instanceof Error ? e.message : String(e || ''),
@@ -1781,6 +1934,7 @@ const startBmsOta = async () => {
 const startMeterOta = async () => {
 	const BOOT_TARGET_METER = 0xfc
 	if (developerStore.enabled) {
+		otaDebugOverlayVisible.value = false
 		resetOtaDebugLog(getMeterOtaDebugHeader())
 	}
 	if (!showMeterUpgradeCard.value) {
@@ -2395,11 +2549,157 @@ const loadSection = (k: keyof typeof opened) => {
 }
 
 .ota {
+	position: relative;
 	width: 640rpx;
 	background: #ffffff;
 	border-radius: 22rpx;
 	padding: 30rpx 28rpx;
 	box-sizing: border-box;
+	overflow: visible;
+}
+
+.ota-debug-trigger {
+	position: absolute;
+	top: 18rpx;
+	right: 18rpx;
+	z-index: 12;
+	width: 58rpx;
+	height: 58rpx;
+	border-radius: 50%;
+	background: #eef2ff;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.ota-debug-trigger--hover {
+	opacity: 0.82;
+}
+
+.ota-debug-trigger__dot {
+	position: absolute;
+	top: 8rpx;
+	right: 8rpx;
+	width: 12rpx;
+	height: 12rpx;
+	border-radius: 50%;
+	background: #ff4d4f;
+	box-shadow: 0 0 0 3rpx #eef2ff;
+}
+
+.ota-debug-mask {
+	position: fixed;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	z-index: 10099;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding-left: 32rpx;
+	padding-right: 32rpx;
+	box-sizing: border-box;
+}
+
+.ota-debug-float {
+	width: 100%;
+	max-width: 686rpx;
+	padding: 22rpx;
+	box-sizing: border-box;
+	border-radius: 22rpx;
+	background: #111827;
+	box-shadow: 0 18rpx 60rpx rgba(0, 0, 0, 0.26);
+	overflow: hidden;
+}
+
+.ota-debug-float__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 18rpx;
+}
+
+.ota-debug-float__title-wrap {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 6rpx;
+}
+
+.ota-debug-float__title {
+	font-size: 28rpx;
+	font-weight: 700;
+	color: #f9fafb;
+}
+
+.ota-debug-float__count {
+	font-size: 22rpx;
+	color: #9ca3af;
+}
+
+.ota-debug-float__close {
+	width: 56rpx;
+	height: 56rpx;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.08);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.ota-debug-float__close--hover {
+	opacity: 0.78;
+}
+
+.ota-debug-float__actions {
+	margin-top: 18rpx;
+	display: flex;
+	gap: 14rpx;
+}
+
+.ota-debug-float__btn {
+	padding: 12rpx 20rpx;
+	border-radius: 999rpx;
+	background: #2563eb;
+	color: #ffffff;
+	font-size: 22rpx;
+	font-weight: 700;
+}
+
+.ota-debug-float__btn--ghost {
+	background: rgba(255, 255, 255, 0.1);
+	color: #d1d5db;
+}
+
+.ota-debug-float__btn--hover {
+	opacity: 0.82;
+}
+
+.ota-debug-float__body {
+	margin-top: 18rpx;
+	padding: 16rpx;
+	box-sizing: border-box;
+	border-radius: 16rpx;
+	background: #030712;
+}
+
+.ota-debug-float__line {
+	display: block;
+	font-size: 20rpx;
+	line-height: 1.55;
+	color: #d1d5db;
+	font-family: monospace;
+	word-break: break-all;
+	white-space: pre-wrap;
+}
+
+.ota-debug-float__empty {
+	padding: 80rpx 0;
+	text-align: center;
+	color: #9ca3af;
+	font-size: 24rpx;
 }
 
 .ota__title {

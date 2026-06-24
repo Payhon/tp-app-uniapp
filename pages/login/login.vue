@@ -2,7 +2,7 @@
 	<view class="auth-page">
 		<image class="page-bg" :src="$img('bg@2x.png')" mode="aspectFill" />
 		<view class="brand">
-			<image class="brand-logo" :src="loginLogoUrl" mode="heightFix" @tap="onBrandLogoTap" />
+			<image v-if="loginLogoUrl" class="brand-logo" :src="loginLogoUrl" mode="heightFix" @tap="onBrandLogoTap" />
 		</view>
 
 		<view class="auth-card">
@@ -143,7 +143,15 @@ const captchaLoading = ref<boolean>(false)
 const logoTapCount = ref<number>(0)
 const debugInfo = ref<AppDebugInfo>(createDefaultAppDebugInfo())
 const defaultLoginLogoUrl = '/static/image/logo@2x.png'
-const loginLogoUrl = ref<string>(defaultLoginLogoUrl)
+const getInitialLoginLogoUrl = (): string => {
+	// #ifdef MP-WEIXIN
+	return ''
+	// #endif
+	// #ifndef MP-WEIXIN
+	return defaultLoginLogoUrl
+	// #endif
+}
+const loginLogoUrl = ref<string>(getInitialLoginLogoUrl())
 const wxmpLoginOnly = ref<boolean>(false)
 
 let logoTapResetTimer: ReturnType<typeof setTimeout> | null = null
@@ -209,17 +217,22 @@ const refreshDeveloperDebugInfo = async () => {
 const loadWxmpRuntimeConfig = async () => {
 	// #ifdef MP-WEIXIN
 	wxmpLoginOnly.value = false
-	loginLogoUrl.value = defaultLoginLogoUrl
+	loginLogoUrl.value = ''
 	try {
 		const runtime = await fetchWxmpRuntimeConfig()
 		if (runtime) {
-			wxmpLoginOnly.value = isPackWxmpRuntime(runtime)
+			const isPackRuntime = isPackWxmpRuntime(runtime)
+			wxmpLoginOnly.value = isPackRuntime
 			const logo = String(runtime.login_logo_url || '').trim()
-			loginLogoUrl.value = logo || defaultLoginLogoUrl
+			if (logo) {
+				loginLogoUrl.value = logo
+			} else if (!isPackRuntime) {
+				loginLogoUrl.value = defaultLoginLogoUrl
+			}
 		}
 	} catch (e) {
 		wxmpLoginOnly.value = false
-		loginLogoUrl.value = defaultLoginLogoUrl
+		loginLogoUrl.value = ''
 	}
 	// #endif
 }

@@ -13,7 +13,10 @@ onShow(() => {
 	// - 某些基座/机型 midButton 点击不触发生命周期 hook
 	// - 此时会切到 tabBar 的中间页；在这里主动弹出 ActionSheet
 	const baseTabUrl = String(uni.getStorageSync(LAST_TAB_URL_KEY) || '/pages/home/home')
-	showAddDeviceActionSheet({ baseTabUrl })
+	const handled = showAddDeviceActionSheet({ baseTabUrl })
+	if (!handled) {
+		uni.switchTab({ url: baseTabUrl })
+	}
 })
 </script>
 
@@ -24,4 +27,3 @@ onShow(() => {
 	height: 100%;
 }
 </style>
-

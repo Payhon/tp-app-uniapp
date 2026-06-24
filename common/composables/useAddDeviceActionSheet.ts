@@ -17,14 +17,38 @@ export type ShowAddDeviceActionSheetOptions = {
 
 type GuardState = {
 	lastAt: number
+	scanActive: boolean
+	suppressUntil: number
 }
 
 const getGuardState = (): GuardState => {
 	const g = (globalThis as any).__ADD_DEVICE_MID_BUTTON_GUARD__ as GuardState | undefined
-	if (g && typeof g.lastAt === 'number') return g
-	const next: GuardState = { lastAt: 0 }
+	if (g && typeof g.lastAt === 'number') {
+		g.scanActive = Boolean(g.scanActive)
+		g.suppressUntil = Number(g.suppressUntil || 0)
+		return g
+	}
+	const next: GuardState = { lastAt: 0, scanActive: false, suppressUntil: 0 }
 	;(globalThis as any).__ADD_DEVICE_MID_BUTTON_GUARD__ = next
 	return next
+}
+
+function isActionSheetSuppressed(guard: GuardState) {
+	return guard.scanActive || Date.now() < Number(guard.suppressUntil || 0)
+}
+
+function suppressActionSheet(guard: GuardState, durationMs: number) {
+	guard.suppressUntil = Math.max(Number(guard.suppressUntil || 0), Date.now() + durationMs)
+}
+
+function beginScanFlow(guard: GuardState) {
+	guard.scanActive = true
+	suppressActionSheet(guard, 300_000)
+}
+
+function endScanFlow(guard: GuardState, suppressMs = 800) {
+	guard.scanActive = false
+	guard.suppressUntil = Date.now() + suppressMs
 }
 
 function normalizeTabUrl(url: string): string {
@@ -46,12 +70,6 @@ function switchToBaseTab(baseTabUrl: string, next: () => void) {
 			setTimeout(() => next(), 50)
 		},
 		fail: () => next()
-	})
-}
-
-function navigateByUrl(baseTabUrl: string, url: string) {
-	switchToBaseTab(baseTabUrl, () => {
-		uni.navigateTo({ url })
 	})
 }
 
@@ -89,11 +107,12 @@ function resolveScanRoute(
 }
 
 export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOptions = {}) {
+	const guard = getGuardState()
+	if (isActionSheetSuppressed(guard)) return false
 	// #ifdef APP-PLUS
 	// 避免某些平台/页面生命周期重复触发导致弹出两次
-	const guard = getGuardState()
 	const now = Date.now()
-	if (now - guard.lastAt < 400) return
+	if (now - guard.lastAt < 400) return false
 	guard.lastAt = now
 	// #endif
 
@@ -103,7 +122,7 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 		switchToBaseTab(baseTabUrl, () => {
 			void ensureLoggedIn()
 		})
-		return
+		return true
 	}
 
 	uni.showActionSheet({
@@ -111,33 +130,42 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 		success: (res: { tapIndex: number }) => {
 			const idx = Number(res.tapIndex)
 			if (idx === 0) {
+				suppressActionSheet(guard, 1200)
 				switchToBaseTab(baseTabUrl, () => {
 					uni.navigateTo({ url: '/pages/device-provision/ble-scan' })
 				})
 				return
 			}
 			if (idx === 1) {
-				uni.scanCode({
-					success: async (scanRes: { result?: unknown }) => {
-						const parsed = parseAddDeviceScanCode(String(scanRes.result ?? ''))
-						if (!parsed) {
-							uni.showToast({ title: t('pages.deviceProvision.invalidCode'), icon: 'none' })
-							return
+				const runScan = () => {
+					beginScanFlow(guard)
+					uni.scanCode({
+						success: async (scanRes: { result?: unknown }) => {
+							const parsed = parseAddDeviceScanCode(String(scanRes.result ?? ''))
+							if (!parsed) {
+								endScanFlow(guard, 800)
+								uni.showToast({ title: t('pages.deviceProvision.invalidCode'), icon: 'none' })
+								return
+							}
+							try {
+								await boundDevicesStore.refresh({ force: true })
+							} catch (e) {}
+							const decision = resolveScanRoute(parsed, boundDevicesStore)
+							if (decision.action === 'unsupported' || !decision.url) {
+								endScanFlow(guard, 800)
+								uni.showToast({ title: t('pages.deviceProvision.unsupportedDeviceType'), icon: 'none' })
+								return
+							}
+							endScanFlow(guard, 2000)
+							uni.navigateTo({ url: decision.url })
+						},
+						fail: () => {
+							// 用户取消扫码，不提示
+							endScanFlow(guard, 500)
 						}
-						try {
-							await boundDevicesStore.refresh({ force: true })
-						} catch (e) {}
-						const decision = resolveScanRoute(parsed, boundDevicesStore)
-						if (decision.action === 'unsupported' || !decision.url) {
-							uni.showToast({ title: t('pages.deviceProvision.unsupportedDeviceType'), icon: 'none' })
-							return
-						}
-						navigateByUrl(baseTabUrl, decision.url)
-					},
-					fail: () => {
-						// 用户取消扫码，不提示
-					}
-				})
+					})
+				}
+				switchToBaseTab(baseTabUrl, runScan)
 			}
 		},
 		fail: () => {
@@ -147,4 +175,5 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 			}
 		}
 	})
+	return true
 }
