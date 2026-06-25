@@ -90,6 +90,11 @@ export const resetPasswordByCode = (identifier: string, verifyCode: string, pass
 	)
 }
 
-export const deleteCurrentAccount = (password: string) => {
-	return apiRequest<unknown>('/api/v1/app/auth/delete_account', { password: String(password || '') }, 'POST')
+export const deleteCurrentAccount = (password?: string, appid?: string) => {
+	const payload: Record<string, string> = {}
+	const pwd = String(password || '').trim()
+	const wxAppID = String(appid || '').trim()
+	if (pwd) payload.password = pwd
+	if (wxAppID) payload.appid = wxAppID
+	return apiRequest<unknown>('/api/v1/app/auth/delete_account', payload, 'POST')
 }

@@ -1261,8 +1261,18 @@ const closeDeleteAccountPopup = () => {
   showDeletePassword.value = false;
 };
 
-const confirmDeleteAccount = () => {
+const getDeleteAccountAppID = () => {
+  // #ifdef MP-WEIXIN
+  return getRuntimeAppId();
+  // #endif
+  // #ifndef MP-WEIXIN
+  return "";
+  // #endif
+};
+
+const confirmDeleteAccount = async () => {
   if (!ensureLogin()) return;
+  await loadWxmpRuntimeMode();
   uni.showModal({
     title: t("pages.my.settingPage.deleteAccount") as string,
     content: t("pages.my.settingPage.deleteAccountConfirm") as string,
@@ -1272,25 +1282,21 @@ const confirmDeleteAccount = () => {
       if (!res.confirm) return;
       deletePassword.value = "";
       showDeletePassword.value = false;
+      if (isPackWxmp.value) {
+        submitDeleteAccountRequest("");
+        return;
+      }
       deleteAccountPopupVisible.value = true;
     },
   });
 };
 
-const submitDeleteAccount = async () => {
+const submitDeleteAccountRequest = async (password: string) => {
   if (deletingAccount.value) return;
-  const pwd = String(deletePassword.value || "").trim();
-  if (!pwd) {
-    uni.showToast({
-      title: t("pages.my.settingPage.currentPasswordPlaceholder") as string,
-      icon: "none",
-    });
-    return;
-  }
 
   deletingAccount.value = true;
   try {
-    const res = await deleteCurrentAccount(pwd);
+    const res = await deleteCurrentAccount(password, getDeleteAccountAppID());
     if (res && (res as any).code === 200) {
       deleteAccountPopupVisible.value = false;
       deletePassword.value = "";
@@ -1319,6 +1325,18 @@ const submitDeleteAccount = async () => {
   } finally {
     deletingAccount.value = false;
   }
+};
+
+const submitDeleteAccount = async () => {
+  const pwd = String(deletePassword.value || "").trim();
+  if (!pwd) {
+    uni.showToast({
+      title: t("pages.my.settingPage.currentPasswordPlaceholder") as string,
+      icon: "none",
+    });
+    return;
+  }
+  await submitDeleteAccountRequest(pwd);
 };
 
 const goChangePassword = () => {
