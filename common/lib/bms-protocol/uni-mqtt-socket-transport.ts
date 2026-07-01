@@ -1,5 +1,6 @@
 import { BMS_FUNC, BmsProtocolError, buildReadFrame, parseFrame } from './frame'
 import { parseBootFrame } from './boot-frame'
+import type { BmsRequestOptions } from './types'
 
 type LoggerLike = {
 	debug?: (...args: any[]) => void
@@ -8,13 +9,16 @@ type LoggerLike = {
 	error?: (...args: any[]) => void
 }
 
-type ReqExpect = {
+export type MqttSocketResponseExpectation = {
 	functionCode: number
 	targetAddress: number
 	sourceAddress: number
+	readByteCount?: number
 	socketStartAddress?: number
 	socketQuantity?: number
 }
+
+type ReqExpect = MqttSocketResponseExpectation
 
 function isExpectedBootSourceAddress(expectedSourceAddress: number, parsedSourceAddress: number): boolean {
 	const expect = expectedSourceAddress & 0xff
@@ -96,6 +100,15 @@ function buildMqttSocketReadFrame(reqFrameBytes: Uint8Array): Uint8Array {
 	})
 }
 
+function normalizeExpectedByteCount(options: BmsRequestOptions, requestQuantity?: number): number | undefined {
+	const optionByteCount = Number(options.expectedReadByteCount)
+	if (Number.isFinite(optionByteCount) && optionByteCount > 0) return Math.trunc(optionByteCount)
+	const optionQuantity = Number(options.expectedReadQuantity)
+	if (Number.isFinite(optionQuantity) && optionQuantity > 0) return Math.trunc(optionQuantity) * 2
+	if (requestQuantity != null && Number.isFinite(requestQuantity) && requestQuantity > 0) return Math.trunc(requestQuantity) * 2
+	return undefined
+}
+
 function isSocketWakeupQueryFrame(reqFrameBytes: Uint8Array, expectBoot: boolean): boolean {
 	if (expectBoot) return false
 	if (reqFrameBytes.length < 9) return false
@@ -129,6 +142,61 @@ export function shouldScheduleSocketWakeupResend(
 	if (!Number.isFinite(idleMs) || idleMs <= 0) return true
 	if (!Number.isFinite(lastResponseAt) || lastResponseAt <= 0) return true
 	return now - lastResponseAt >= idleMs
+}
+
+export function isExpectedMqttSocketResponse(
+	frameBytes: Uint8Array,
+	expect: MqttSocketResponseExpectation,
+	expectBoot?: boolean,
+): boolean {
+	try {
+		if (expectBoot) {
+			const parsed = parseBootFrame(frameBytes)
+			if (parsed.targetAddress !== expect.targetAddress) return false
+			const expectedCommand = expect.functionCode & 0xff
+			const actualCommand = parsed.command & 0xff
+			if (actualCommand !== expectedCommand) {
+				if (expectedCommand !== 0x54 || actualCommand !== 0x53) return false
+			}
+			return isExpectedBootSourceAddress(expect.sourceAddress, parsed.sourceAddress)
+		}
+		const parsed = parseFrame(frameBytes)
+		if (parsed.type === 'error') {
+			return (
+				parsed.targetAddress === expect.targetAddress &&
+				parsed.sourceAddress === expect.sourceAddress &&
+				parsed.functionCode === (expect.functionCode | 0x80)
+			)
+		}
+		if (parsed.functionCode === BMS_FUNC.SOCKET_READ && expect.functionCode === BMS_FUNC.SOCKET_READ) {
+			if (parsed.targetAddress !== expect.targetAddress) return false
+			if ((expect.sourceAddress & 0xff) !== 0xfa && parsed.sourceAddress !== expect.sourceAddress) return false
+			if (expect.socketStartAddress != null && expect.socketQuantity != null) {
+				const socketRead = parsed as { socketStartAddress?: number; socketQuantity?: number }
+				const respStart = socketRead.socketStartAddress
+				const respQty = socketRead.socketQuantity
+				if (respStart == null || respQty == null) return false
+				const reqStart = expect.socketStartAddress
+				const reqEnd = reqStart + expect.socketQuantity
+				const respEnd = respStart + respQty
+				return Math.max(reqStart, respStart) < Math.min(reqEnd, respEnd)
+			}
+			return true
+		}
+		if (
+			parsed.targetAddress !== expect.targetAddress ||
+			parsed.sourceAddress !== expect.sourceAddress ||
+			parsed.functionCode !== expect.functionCode
+		) {
+			return false
+		}
+		if (expect.readByteCount != null) {
+			return parsed.type === 'read' && parsed.byteCount === expect.readByteCount
+		}
+		return true
+	} catch {
+		return false
+	}
 }
 
 function formatErr(err: unknown): string {
@@ -553,12 +621,19 @@ export class UniMqttSocketBmsTransport {
 		pending.wakeupTimer = null
 	}
 
-	request(frameBytes: Uint8Array | ArrayLike<number>, { timeoutMs = this.requestTimeoutMs }: { timeoutMs?: number } = {}): Promise<Uint8Array> {
-		this._queue = this._queue.catch(() => undefined).then(() => this._requestSerial(frameBytes, { timeoutMs }))
+	request(frameBytes: Uint8Array | ArrayLike<number>, options: BmsRequestOptions = {}): Promise<Uint8Array> {
+		const requestOptions: BmsRequestOptions & { timeoutMs: number } = {
+			...options,
+			timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
+		}
+		this._queue = this._queue.catch(() => undefined).then(() => this._requestSerial(frameBytes, requestOptions))
 		return this._queue
 	}
 
-	private async _requestSerial(frameBytes: Uint8Array | ArrayLike<number>, { timeoutMs }: { timeoutMs: number }): Promise<Uint8Array> {
+	private async _requestSerial(
+		frameBytes: Uint8Array | ArrayLike<number>,
+		{ timeoutMs, ...requestOptions }: BmsRequestOptions & { timeoutMs: number },
+	): Promise<Uint8Array> {
 		if (!this._connected || !this._socketTask) throw new BmsProtocolError('WebSocket is not connected')
 		if (this._pending) throw new BmsProtocolError('Previous request still pending')
 
@@ -569,6 +644,8 @@ export class UniMqttSocketBmsTransport {
 		const bootTrace = expectBoot ? getBootFrameTrace(req) : null
 		if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes')
 		if (expectBoot && req.length < 9) throw new BmsProtocolError('Invalid boot request frame bytes')
+		const reqFunctionCode = expectBoot ? 0 : req[4] & 0xff
+		const requestQuantity = !expectBoot && req.length >= 9 ? ((req[7] & 0xff) << 8) | (req[8] & 0xff) : undefined
 
 		const now = Date.now()
 		const delta = now - this._lastTxAt
@@ -585,13 +662,17 @@ export class UniMqttSocketBmsTransport {
 					sourceAddress: req[2] & 0xff,
 				}
 			: {
-					functionCode: req[4] & 0xff,
+					functionCode: reqFunctionCode,
 					targetAddress: req[2] & 0xff,
 					sourceAddress: req[3] & 0xff,
+					readByteCount:
+						reqFunctionCode === BMS_FUNC.READ_HOLDING_REGISTERS
+							? normalizeExpectedByteCount(requestOptions, requestQuantity)
+							: undefined,
 					socketStartAddress:
-						(req[4] & 0xff) === BMS_FUNC.SOCKET_READ && req.length >= 9 ? ((req[5] & 0xff) << 8) | (req[6] & 0xff) : undefined,
+						reqFunctionCode === BMS_FUNC.SOCKET_READ && req.length >= 9 ? ((req[5] & 0xff) << 8) | (req[6] & 0xff) : undefined,
 					socketQuantity:
-						(req[4] & 0xff) === BMS_FUNC.SOCKET_READ && req.length >= 9 ? ((req[7] & 0xff) << 8) | (req[8] & 0xff) : undefined,
+						reqFunctionCode === BMS_FUNC.SOCKET_READ && req.length >= 9 ? ((req[7] & 0xff) << 8) | (req[8] & 0xff) : undefined,
 				}
 
 		const deferred = defer<Uint8Array>()
@@ -685,44 +766,7 @@ export class UniMqttSocketBmsTransport {
 	}
 
 	private _isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect, expectBoot?: boolean): boolean {
-		try {
-			if (expectBoot) {
-				const parsed = parseBootFrame(frameBytes)
-				if (parsed.targetAddress !== expect.targetAddress) return false
-				const expectedCommand = expect.functionCode & 0xff
-				const actualCommand = parsed.command & 0xff
-				if (actualCommand !== expectedCommand) {
-					if (expectedCommand !== 0x54 || actualCommand !== 0x53) return false
-				}
-				return isExpectedBootSourceAddress(expect.sourceAddress, parsed.sourceAddress)
-			}
-			const parsed = parseFrame(frameBytes)
-			if (parsed.type === 'error') {
-				return (
-					parsed.targetAddress === expect.targetAddress &&
-					parsed.sourceAddress === expect.sourceAddress &&
-					parsed.functionCode === (expect.functionCode | 0x80)
-				)
-			}
-			if (parsed.functionCode === BMS_FUNC.SOCKET_READ && expect.functionCode === BMS_FUNC.SOCKET_READ) {
-				if (parsed.targetAddress !== expect.targetAddress) return false
-				if ((expect.sourceAddress & 0xff) !== 0xfa && parsed.sourceAddress !== expect.sourceAddress) return false
-				if (expect.socketStartAddress != null && expect.socketQuantity != null) {
-					const socketRead = parsed as { socketStartAddress?: number; socketQuantity?: number }
-					const respStart = socketRead.socketStartAddress
-					const respQty = socketRead.socketQuantity
-					if (respStart == null || respQty == null) return false
-					const reqStart = expect.socketStartAddress
-					const reqEnd = reqStart + expect.socketQuantity
-					const respEnd = respStart + respQty
-					return Math.max(reqStart, respStart) < Math.min(reqEnd, respEnd)
-				}
-				return true
-			}
-			return parsed.targetAddress === expect.targetAddress && parsed.sourceAddress === expect.sourceAddress && parsed.functionCode === expect.functionCode
-		} catch {
-			return false
-		}
+		return isExpectedMqttSocketResponse(frameBytes, expect, expectBoot)
 	}
 }
 

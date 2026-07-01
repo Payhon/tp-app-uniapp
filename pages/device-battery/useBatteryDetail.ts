@@ -1037,6 +1037,10 @@ export const useBatteryDetail = () => {
 					log('poll failed', { err: formatErr(e) })
 				}
 				handleFirstFrameReadFailure(c, e)
+				if (!isInstrumentSession() && connType.value === 'mqtt' && deviceId.value) {
+					log('mqtt realtime poll failed, refresh cloud telemetry fallback', { err: formatErr(e) })
+					await refreshCloudTelemetry()
+				}
 			} finally {
 				syncBmsDataLoading()
 			}
@@ -1376,6 +1380,8 @@ export const useBatteryDetail = () => {
 
 	const retryBmsDataRead = () => {
 		if (connecting.value || firstFrameRecovering) return
+		instrumentPassthroughUnavailable.value = false
+		instrumentStatusFailCount = 0
 		firstFrameFailCount = 0
 		firstFrameAutoReconnectCount = 0
 		bmsDataLoadAttempts.value = 0
@@ -1391,6 +1397,8 @@ export const useBatteryDetail = () => {
 
 	const reconnectBmsData = async () => {
 		if (connecting.value || firstFrameRecovering) return
+		instrumentPassthroughUnavailable.value = false
+		instrumentStatusFailCount = 0
 		firstFrameRecovering = true
 		firstFrameFailCount = 0
 		firstFrameAutoReconnectCount = 0
@@ -1429,6 +1437,7 @@ export const useBatteryDetail = () => {
 		bmsDataLoadPhase,
 		bmsDataLoadAttempts,
 		bmsDataLoadLastError,
+		instrumentPassthroughUnavailable,
 		sessionMode,
 		pausePolling,
 		resumePolling,

@@ -1151,7 +1151,7 @@ export default {
       deviceName: "仪表设备",
       sessionTitle: "仪表临时连接",
       sessionHint:
-        "当前通过蓝牙直连仪表，可继续扫码并把仪表切换到新的 BMS 目标。",
+        "当前通过蓝牙直连仪表。若这是有线仪表，请检查仪表与 BMS 板连接、BMS 板供电是否正常；也可以继续扫码绑定 BMS。",
       scanBindBms: "继续扫码绑定 BMS",
       onlyBmsMacTip: "请扫描 BMS 设备二维码",
       bindTargetSuccess: "仪表目标已切换",
@@ -1276,6 +1276,9 @@ export default {
         mcuProtectionOff: "MCU退出保护",
         manualChargeDischargeOn: "手动打开充放电管",
         manualChargeDischargeOff: "手动关闭充放电管",
+        disableCharge: "禁止充电",
+        disableDischarge: "禁止放电",
+        allowChargeDischarge: "允许充放电",
         manualHeatingOn: "手动打开加热",
         manualHeatingOff: "手动关闭加热",
         gpsPowerOn: "GPS电源打开",

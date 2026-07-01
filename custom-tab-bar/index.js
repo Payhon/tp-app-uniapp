@@ -4,6 +4,10 @@ const DEVICE_TYPE_BMS = 'bms'
 const DEVICE_TYPE_METER = 'meter'
 const DEVICE_PREFIXES_STORAGE_KEY = '__DEVICE_MAC_PREFIXES__'
 const BOUND_DEVICE_SNAPSHOT_STORAGE_KEY = '__BOUND_DEVICES_SNAPSHOT__'
+const DEFAULT_DEVICE_MAC_PREFIXES = Object.freeze({
+  [DEVICE_TYPE_BMS]: Object.freeze(['AC']),
+  [DEVICE_TYPE_METER]: Object.freeze(['AA'])
+})
 
 function normalizeHex(input) {
   return String(input || '')
@@ -23,12 +27,47 @@ function normalizeMac(input) {
   return hex
 }
 
+function readStoredDevicePrefixConfig() {
+  try {
+    const raw = wx.getStorageSync(DEVICE_PREFIXES_STORAGE_KEY)
+    if (!raw) return {}
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw)
+        return parsed && typeof parsed === 'object' ? parsed : {}
+      } catch (e) {
+        return {}
+      }
+    }
+    return raw && typeof raw === 'object' ? raw : {}
+  } catch (e) {
+    return {}
+  }
+}
+
+function normalizePrefixList(configValue, fallbackValue) {
+  const values = []
+    .concat(Array.isArray(fallbackValue) ? fallbackValue : [])
+    .concat(Array.isArray(configValue) ? configValue : [])
+    .map((prefix) => normalizeHex(prefix))
+    .filter(Boolean)
+  return Array.from(new Set(values))
+}
+
+function getDevicePrefixConfig() {
+  const stored = readStoredDevicePrefixConfig()
+  return {
+    [DEVICE_TYPE_BMS]: normalizePrefixList(stored[DEVICE_TYPE_BMS], DEFAULT_DEVICE_MAC_PREFIXES[DEVICE_TYPE_BMS]),
+    [DEVICE_TYPE_METER]: normalizePrefixList(stored[DEVICE_TYPE_METER], DEFAULT_DEVICE_MAC_PREFIXES[DEVICE_TYPE_METER])
+  }
+}
+
 function resolveDeviceTypeByMac(mac) {
   const normalized = normalizeMac(mac)
   if (!normalized) return null
-  const prefixConfig = wx.getStorageSync(DEVICE_PREFIXES_STORAGE_KEY) || {}
-  const bmsPrefixes = Array.isArray(prefixConfig[DEVICE_TYPE_BMS]) ? prefixConfig[DEVICE_TYPE_BMS] : []
-  const meterPrefixes = Array.isArray(prefixConfig[DEVICE_TYPE_METER]) ? prefixConfig[DEVICE_TYPE_METER] : []
+  const prefixConfig = getDevicePrefixConfig()
+  const bmsPrefixes = prefixConfig[DEVICE_TYPE_BMS]
+  const meterPrefixes = prefixConfig[DEVICE_TYPE_METER]
   if (meterPrefixes.some((prefix) => normalized.startsWith(normalizeHex(prefix)))) return DEVICE_TYPE_METER
   if (bmsPrefixes.some((prefix) => normalized.startsWith(normalizeHex(prefix)))) return DEVICE_TYPE_BMS
   return null
@@ -185,14 +224,15 @@ Component({
           success: async (scanRes) => {
             const raw = String((scanRes && scanRes.result) || '')
             const normalized = raw.replace(/^0x/i, '').replace(/[^0-9a-fA-F]/g, '').toUpperCase()
-            const isMac = /^[0-9A-F]{12}$/.test(normalized)
+            const mac = normalizeMac(normalized)
+            const isMac = !!mac
             const isUuid = /^[0-9A-F]{32}$/.test(normalized)
             if (!isMac && !isUuid) {
               wx.showToast({ title: dict.invalidCode, icon: 'none' })
               return
             }
             const parsed = isMac
-              ? { type: 'mac', value: normalized, deviceType: resolveDeviceTypeByMac(normalized) }
+              ? { type: 'mac', value: mac, deviceType: resolveDeviceTypeByMac(mac) }
               : { type: 'uuid', value: normalized }
             const decision = resolveScanRoute(parsed)
             if (decision.action === 'unsupported' || !decision.url) {

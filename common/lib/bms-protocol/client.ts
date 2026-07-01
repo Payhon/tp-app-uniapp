@@ -352,13 +352,25 @@ export class BmsClient {
 				startAddress: r.startAddress,
 				quantity: r.quantity,
 			});
-			const resp = await this._request(req);
+			const resp = await this._request(req, {
+				expectedReadQuantity: r.quantity,
+				expectedReadByteCount: r.quantity * 2,
+			});
 			if (resp.type === 'error') throw new BmsProtocolError('BMS error response', resp);
 			if (resp.type !== 'read') throw new BmsProtocolError('Unexpected response type', resp);
 			let dataBytes = resp.data;
 			if (resp.functionCode === BMS_FUNC.SOCKET_READ) {
 				const parsed = parseSocketReadPayload(resp.data);
 				const payloadRegs = splitIntoRegistersBE(parsed.payload);
+				if (payloadRegs.length !== parsed.quantity) {
+					throw new BmsProtocolError('Socket read response quantity mismatch', {
+						expectStart: r.startAddress,
+						expectQty: r.quantity,
+						gotStart: parsed.startAddress,
+						gotQty: parsed.quantity,
+						payloadQty: payloadRegs.length,
+					});
+				}
 				this._cacheSocketRegisters(parsed.startAddress, payloadRegs);
 				const respStart = parsed.startAddress;
 				const respEnd = respStart + payloadRegs.length;
@@ -381,6 +393,14 @@ export class BmsClient {
 				continue;
 			}
 			const regs = splitIntoRegistersBE(dataBytes);
+			if (regs.length !== r.quantity) {
+				throw new BmsProtocolError('Read response quantity mismatch', {
+					expectStart: r.startAddress,
+					expectQty: r.quantity,
+					gotQty: regs.length,
+					functionCode: resp.functionCode,
+				});
+			}
 			out.set(regs, offset);
 			offset += regs.length;
 		}

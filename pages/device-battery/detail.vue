@@ -218,6 +218,7 @@ const {
 	connecting,
 	bmsDataLoading,
 	bmsDataLoadPhase,
+	instrumentPassthroughUnavailable,
 	sessionMode,
 	loadById,
 	loadInstrumentSession,
@@ -266,8 +267,17 @@ const isFourGDevice = computed(() => {
 const isFourGConnPill = computed(() => !connecting.value && connType.value !== 'bluetooth' && isFourGDevice.value)
 const isFourGOnline = computed(() => Number(battery.value?.is_online || 0) === 1)
 const isMeterDevice = computed(() => isMeterMac(currentBleMac.value))
-const showMeterScanHandoff = computed(() => sessionMode.value === 'instrument' && allowScanHandoff.value)
-const showMeterPanelReady = computed(() => showMeterScanHandoff.value && connType.value === 'bluetooth' && !connecting.value)
+const meterHasBmsStatus = computed(() => sessionMode.value === 'instrument' && !!status.value)
+const showMeterScanHandoff = computed(
+	() => sessionMode.value === 'instrument' && allowScanHandoff.value && !meterHasBmsStatus.value
+)
+const showMeterPanelReady = computed(
+	() =>
+		showMeterScanHandoff.value &&
+		connType.value === 'bluetooth' &&
+		!connecting.value &&
+		(!bmsDataLoading.value || instrumentPassthroughUnavailable.value)
+)
 const showMeterFloatingPanel = computed(() => showMeterPanelReady.value && meterPanelVisible.value && activeTab.value === 0)
 const showMeterPanelTrigger = computed(() => showMeterPanelReady.value && !meterPanelVisible.value)
 const otaCheckState = reactive<DeviceOtaCheckState>({

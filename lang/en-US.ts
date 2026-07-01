@@ -1160,7 +1160,7 @@ export default {
       deviceName: "Meter Device",
       sessionTitle: "Temporary Meter Session",
       sessionHint:
-        "Connected to the meter over BLE. You can scan a BMS QR code and switch the meter target.",
+        "Connected to the meter over BLE. If this is a wired meter, check the meter-to-BMS connection and BMS power. You can still scan a BMS QR code to switch the target.",
       scanBindBms: "Scan BMS QR",
       onlyBmsMacTip: "Please scan a BMS QR code",
       bindTargetSuccess: "Meter target updated",
@@ -1294,6 +1294,9 @@ export default {
         mcuProtectionOff: "MCU Protection Off",
         manualChargeDischargeOn: "Manual Charge/Discharge On",
         manualChargeDischargeOff: "Manual Charge/Discharge Off",
+        disableCharge: "Disable Charging",
+        disableDischarge: "Disable Discharging",
+        allowChargeDischarge: "Allow Charging/Discharging",
         manualHeatingOn: "Manual Heating On",
         manualHeatingOff: "Manual Heating Off",
         gpsPowerOn: "GPS Power On",
