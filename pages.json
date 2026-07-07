@@ -72,6 +72,14 @@
 				"enablePullDownRefresh": false,
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
+		},
+		{
+			"path": "pages/my/warranty/index",
+			"style": {
+				"navigationBarTitleText": "%pages.my.warrantyTitle%",
+				"enablePullDownRefresh": true,
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
 		}
 	],
 	"subPackages": [

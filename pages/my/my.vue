@@ -137,6 +137,27 @@
         <view v-if="isOrgUser" class="menu-divider"></view>
 
         <view
+          v-if="isLoggedIn && !isOrgUser"
+          class="menu-item"
+          hover-class="menu-item--hover"
+          @tap="goWarranty"
+        >
+          <view class="menu-left">
+            <image
+              class="menu-icon"
+              src="/static/image/my/icon-warranty@2x.png"
+              mode="aspectFit"
+            />
+            <text class="menu-title">{{ $t("pages.my.warranty") }}</text>
+          </view>
+          <view class="menu-right">
+            <u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
+          </view>
+        </view>
+
+        <view v-if="isLoggedIn && !isOrgUser" class="menu-divider"></view>
+
+        <view
           class="menu-item"
           hover-class="menu-item--hover"
           @tap="goHelpFeedback"
@@ -543,6 +564,10 @@ const goHelpFeedback = () => {
 
 const goOrgDevices = () => {
   uni.navigateTo({ url: "/pages/org-devices/index" });
+};
+
+const goWarranty = () => {
+  uni.navigateTo({ url: "/pages/my/warranty/index" });
 };
 
 const goContact = () => {
