@@ -151,7 +151,7 @@ import { useBoundDevicesStore } from '@/store/bound-devices'
 import { useUserStore } from '@/store/user'
 import { appBoundDeviceList, appRemoveDevice, appUnbindDevice, updateDeviceName } from '@/service/device'
 import { imageUrl } from '@/common/assets/images'
-import { fetchWxmpRuntimeConfig, isPackWxmpRuntime } from '@/common/wxmp-runtime'
+import { fetchWxmpRuntimeConfig, shouldUseDefaultWxmpBrandAsset } from '@/common/wxmp-runtime'
 import type { HomeDeviceCardModel } from '@/types/home'
 
 type DeviceListItem = {
@@ -262,7 +262,7 @@ const loadWxmpRuntimeConfig = async () => {
 		const banner = String(runtime?.home_banner_url || '').trim()
 		if (banner) {
 			homeBannerUrl.value = banner
-		} else if (runtime && !isPackWxmpRuntime(runtime)) {
+		} else if (shouldUseDefaultWxmpBrandAsset(runtime)) {
 			homeBannerUrl.value = defaultHomeBannerUrl
 		}
 	} catch (e) {}

@@ -18,6 +18,10 @@ export function isPackWxmpRuntime(config?: WxmpRuntimeConfig | null): boolean {
 	return config?.login_only === true || String(config?.source_type || '').toUpperCase() === 'PACK'
 }
 
+export function shouldUseDefaultWxmpBrandAsset(config?: WxmpRuntimeConfig | null): boolean {
+	return config?.login_only === false && String(config?.source_type || '').toUpperCase() === 'TENANT'
+}
+
 export async function fetchWxmpRuntimeConfig(): Promise<WxmpRuntimeConfig | null> {
 	// #ifdef MP-WEIXIN
 	const appid = getRuntimeAppId()

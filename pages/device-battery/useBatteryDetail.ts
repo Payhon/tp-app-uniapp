@@ -1025,6 +1025,9 @@ export const useBatteryDetail = () => {
 				})
 				if (!shouldContinuePolling()) return
 				status.value = nextStatus
+				if (connType.value === 'mqtt' && battery.value) {
+					battery.value = { ...battery.value, is_online: 1 }
+				}
 				markFirstFrameSuccess()
 				if (connType.value === 'mqtt' || connType.value === 'bluetooth') {
 					dataSourceMode.value = 'realtime'

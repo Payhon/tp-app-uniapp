@@ -111,7 +111,7 @@ import { fetchLoginCaptcha, loginByPassword, wxmpLogin } from '@/service/app-aut
 import api from '@/API/'
 import { createDefaultAppDebugInfo, getAppDebugInfo, type AppDebugInfo } from '@/common/app-debug'
 import { getRuntimeAppId, openPublicAppPage } from '@/common/public-content'
-import { fetchWxmpRuntimeConfig, isPackWxmpRuntime } from '@/common/wxmp-runtime'
+import { fetchWxmpRuntimeConfig, isPackWxmpRuntime, shouldUseDefaultWxmpBrandAsset } from '@/common/wxmp-runtime'
 import type { ApiResponse } from '@/types/api'
 import { useDeveloperStore } from '@/store/developer'
 import { useUserStore } from '@/store/user'
@@ -226,7 +226,7 @@ const loadWxmpRuntimeConfig = async () => {
 			const logo = String(runtime.login_logo_url || '').trim()
 			if (logo) {
 				loginLogoUrl.value = logo
-			} else if (!isPackRuntime) {
+			} else if (shouldUseDefaultWxmpBrandAsset(runtime)) {
 				loginLogoUrl.value = defaultLoginLogoUrl
 			}
 		}
