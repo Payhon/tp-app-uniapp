@@ -460,6 +460,8 @@ const onDisconnectBluetooth = async () => {
 	})
 }
 
+const isRealtimeDataTab = (tab: number) => tab === 0 || tab === 1
+
 watch(
 	() => activeTab.value,
 	(tab) => {
@@ -468,6 +470,17 @@ watch(
 		} else {
 			resumePolling()
 		}
+	},
+	{ immediate: true }
+)
+
+watch(
+	() => [activeTab.value, connType.value, !!client.value, connecting.value] as const,
+	([tab, currentConnType, hasClient, isConnecting]) => {
+		if (!isRealtimeDataTab(tab)) return
+		if (isConnecting || !hasClient) return
+		if (currentConnType !== 'mqtt' && currentConnType !== 'bluetooth') return
+		resumePolling()
 	},
 	{ immediate: true }
 )

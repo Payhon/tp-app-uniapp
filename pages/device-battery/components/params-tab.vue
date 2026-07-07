@@ -568,6 +568,18 @@ const guardRealtimeConnection = () => {
 	return true
 }
 
+const shouldRunMqttSleepWakeupProbe = (client: BmsClient): boolean => {
+	if (props.connType !== 'mqtt') return false
+	const transport = client.getTransport() as any
+	if (typeof transport?.shouldRunSleepWakeupProbe === 'function') return !!transport.shouldRunSleepWakeupProbe()
+	return true
+}
+
+const prepareMqttSleepWakeup = async (client: BmsClient): Promise<void> => {
+	if (!shouldRunMqttSleepWakeupProbe(client)) return
+	await client.wakeupReadLink({ timeoutMs: MQTT_SLEEP_WAKEUP_PROBE_TIMEOUT_MS })
+}
+
 const toggle = async (k: BasicSectionKey) => {
 	if (loading[k]) return
 	if (opened[k]) {
@@ -581,10 +593,15 @@ const toggle = async (k: BasicSectionKey) => {
 		applyPollingState()
 		return
 	}
+	const client = props.client
+	if (!client) return
 	loading[k] = true
 	applyPollingState()
 	try {
-		await loadSection(k)
+		await prepareMqttSleepWakeup(client)
+		if (props.client !== client) return
+		const ok = await loadSection(k)
+		if (ok === false) throw new Error(`load ${k} returned no values`)
 		opened[k] = true
 	} catch (e) {
 		console.error('[params] load section failed', k, e)
@@ -808,6 +825,8 @@ const SINGLE_KEYS = [
 	'CELL_OV_PROTECT_RELEASE_DELAY_S',
 	'NORMAL_CELL_UV_ALARM_V',
 	'NORMAL_CELL_UV_PROTECT_V',
+	'LOW_TEMP_CELL_UV_ALARM_V',
+	'LOW_TEMP_CELL_UV_PROTECT_V',
 	'CELL_UV_ALARM_DELAY_S',
 	'CELL_UV_PROTECT_DELAY_S',
 	'CELL_UV_ALARM_RELEASE_V',
@@ -908,6 +927,8 @@ const VIRTUAL_CAPACITY_PERMISSION_KEY = '627'
 const VIRTUAL_CAPACITY_ADDRESS = 0x0627
 const VIRTUAL_CAPACITY_TARGET_ADDRESS = 0x00
 const VIRTUAL_CAPACITY_SCALE_AH = 1000
+const MQTT_PARAM_READ_TIMEOUT_MS = 15_000
+const MQTT_SLEEP_WAKEUP_PROBE_TIMEOUT_MS = 2_500
 
 const otherItems = computed(() => mkItems(filterParamEntries(OTHER_KEYS)))
 const numberingItems = computed(() => mkItems(filterParamEntries(NUMBERING_KEYS)))
@@ -1015,6 +1036,7 @@ const otaState = reactive({
 const advancedPopup = reactive({
 	show: false,
 })
+let advancedLoadSeq = 0
 
 const batteryTypePicker = reactive({
 	show: false,
@@ -1069,6 +1091,7 @@ const closeEditPopup = () => {
 }
 
 const closeAdvanced = () => {
+	advancedLoadSeq += 1
 	advancedPopup.show = false
 	applyPollingState()
 }
@@ -2067,12 +2090,23 @@ const openOta = () => {
 
 const openAdvanced = () => {
 	if (!guardRealtimeConnection()) return
+	const client = props.client
+	if (!client) return
 	try {
+		const seq = (advancedLoadSeq += 1)
 		advancedPopup.show = true
 		setTimeout(() => {
-			loadKeysCached('other', OTHER_KEYS)
-			loadKeysCached('numbering', NUMBERING_KEYS)
-			loadKeysCached('system', SYSTEM_LOAD_KEYS)
+			void (async () => {
+				await prepareMqttSleepWakeup(client)
+				if (seq !== advancedLoadSeq || !advancedPopup.show || props.client !== client) return
+				loadKeysCached('other', OTHER_KEYS)
+				loadKeysCached('numbering', NUMBERING_KEYS)
+				loadKeysCached('system', SYSTEM_LOAD_KEYS)
+			})().catch(() => {
+				if (seq === advancedLoadSeq && advancedPopup.show) {
+					uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
+				}
+			})
 		}, 50)
 		applyPollingState()
 	} catch (e) {
@@ -2086,9 +2120,29 @@ const loadKeys = async (keys: string[]) => {
 	if (!c) return false
 	const allowedKeys = keys.filter((k) => canAccessParamKey(k))
 	if (!allowedKeys.length) return true
-	const values = await c.readParamsByKeys(allowedKeys)
+	const readOptions = props.connType === 'mqtt' ? { timeoutMs: MQTT_PARAM_READ_TIMEOUT_MS } : {}
+	const readOnce = () => c.readParamsByKeys(allowedKeys, readOptions)
+	let values = await readOnce()
+	const hasAnyValue = () =>
+		allowedKeys.some((k) => Object.prototype.hasOwnProperty.call(values, k) && values[k] != null)
+	if (props.connType === 'mqtt' && !hasAnyValue()) {
+		console.warn('[params] mqtt read returned no values, retry once', {
+			keys: allowedKeys,
+			connType: props.connType,
+		})
+		await new Promise((resolve) => setTimeout(resolve, 160))
+		if (props.client !== c) return false
+		values = await readOnce()
+	}
 	for (const k of allowedKeys) {
 		paramValues[k] = Object.prototype.hasOwnProperty.call(values, k) ? values[k] : null
+	}
+	if (props.connType === 'mqtt' && !hasAnyValue()) {
+		console.warn('[params] mqtt read failed after retry', {
+			keys: allowedKeys,
+			connType: props.connType,
+		})
+		return false
 	}
 	return true
 }
@@ -2107,15 +2161,17 @@ const loadKeysCached = async (section: keyof typeof loaded, keys: string[]) => {
 	if (loaded[section]) return
 	const ok = await loadKeys(keys)
 	if (ok) loaded[section] = true
+	return ok
 }
 
 const loadSection = (k: keyof typeof opened) => {
-	if (props.realtimeOccupied) return
-	if (!props.client || props.connType === 'offline') return
+	if (props.realtimeOccupied) return false
+	if (!props.client || props.connType === 'offline') return false
 	if (k === 'single') return loadKeysCached('single', SINGLE_KEYS)
 	if (k === 'voltage') return loadKeysCached('voltage', VOLTAGE_KEYS)
 	if (k === 'current') return loadKeysCached('current', CURRENT_KEYS)
 	if (k === 'temperature') return loadKeysCached('temperature', TEMP_KEYS.map((x) => x.actualKey))
+	return false
 }
 </script>
 

@@ -23,6 +23,8 @@ import type { BmsHistoryProtectionCounters, BmsHistoryStatusRecord, BmsParamDef,
 
 type AddressRange = { startAddress: number; quantity: number }
 
+export const BMS_STATUS_READ_CANCELED_MESSAGE = 'BMS status read canceled'
+
 function chunkRanges(startAddress: number, quantity: number, maxChunk: number): AddressRange[] {
 	const ranges: AddressRange[] = [];
 	let addr = startAddress;
@@ -76,6 +78,23 @@ type DecodableParamRange = {
 	endAddress: number
 	functionCode?: number
 	targetAddress?: number
+}
+type ReadRegistersOptions = {
+	functionCode?: number
+	targetAddress?: number
+	timeoutMs?: number
+}
+type ReadAllStatusOptions = {
+	shouldContinue?: () => boolean
+	timeoutMs?: number
+}
+type ReadParamsByKeysOptions = {
+	timeoutMs?: number
+}
+type WakeupReadLinkOptions = {
+	startAddress?: number
+	quantity?: number
+	timeoutMs?: number
 }
 
 function decodeParam(def: DecodableParamDef, view: RegisterView): number | string | null {
@@ -250,8 +269,8 @@ export class BmsClient {
 	/**
 	 * 读取电池串数/电芯温度数量（0x100，高字节=S，低字节=N）
 	 */
-	async readSn(): Promise<{ s: number; n: number; word: number }> {
-		const head = await this.readRegisters(0x100, 1);
+	async readSn(options: Pick<ReadRegistersOptions, 'timeoutMs'> = {}): Promise<{ s: number; n: number; word: number }> {
+		const head = await this.readRegisters(0x100, 1, { timeoutMs: options.timeoutMs });
 		const word = head[0] & 0xffff;
 		const s = (word >> 8) & 0xff;
 		const n = word & 0xff;
@@ -332,7 +351,7 @@ export class BmsClient {
 	async readRegisters(
 		startAddress: number,
 		quantity: number,
-		{ functionCode = BMS_FUNC.READ_HOLDING_REGISTERS, targetAddress }: { functionCode?: number; targetAddress?: number } = {}
+		{ functionCode = BMS_FUNC.READ_HOLDING_REGISTERS, targetAddress, timeoutMs }: ReadRegistersOptions = {}
 	): Promise<Uint16Array> {
 		const ranges = chunkRanges(startAddress, quantity, this.maxReadRegisters);
 		const out = new Uint16Array(quantity);
@@ -355,6 +374,7 @@ export class BmsClient {
 			const resp = await this._request(req, {
 				expectedReadQuantity: r.quantity,
 				expectedReadByteCount: r.quantity * 2,
+				timeoutMs,
 			});
 			if (resp.type === 'error') throw new BmsProtocolError('BMS error response', resp);
 			if (resp.type !== 'read') throw new BmsProtocolError('Unexpected response type', resp);
@@ -560,16 +580,25 @@ export class BmsClient {
 		await this.writeRegisters(0x57c, regs);
 	}
 
-	async readAllStatus(): Promise<BmsStatus> {
-		const { s, n } = await this.readSn();
+	async readAllStatus(options: ReadAllStatusOptions = {}): Promise<BmsStatus> {
+		const assertContinue = () => {
+			if (options.shouldContinue && !options.shouldContinue()) {
+				throw new BmsProtocolError(BMS_STATUS_READ_CANCELED_MESSAGE);
+			}
+		};
+		const readOptions = { timeoutMs: options.timeoutMs };
+		assertContinue();
+		const { s, n } = await this.readSn(readOptions);
+		assertContinue();
 		const cellVoltagesStart = STATUS_DYNAMIC_START;
 		const macStart = cellVoltagesStart + s + n + 16 + 16 + 16;
 		const macRegs = 5; // 10 bytes
 		const lastAddr = macStart + macRegs - 1;
-		const headRegs = await this.readRegisters(STATUS_REG_START, STATUS_FIXED_READ_END - STATUS_REG_START + 1);
+		const headRegs = await this.readRegisters(STATUS_REG_START, STATUS_FIXED_READ_END - STATUS_REG_START + 1, readOptions);
+		assertContinue();
 		const legacyGapRegs = new Uint16Array(STATUS_LEGACY_GAP_END - STATUS_LEGACY_GAP_START + 1);
 		try {
-			const alarmHighRegs = await this.readRegisters(STATUS_LEGACY_GAP_START, 1);
+			const alarmHighRegs = await this.readRegisters(STATUS_LEGACY_GAP_START, 1, readOptions);
 			legacyGapRegs.set(alarmHighRegs.slice(0, 1), 0);
 		} catch (e) {
 			this._debug('[bms]', '[bms] optional alarm high register unavailable', {
@@ -577,7 +606,9 @@ export class BmsClient {
 				err: e instanceof Error ? e.message : String(e || ''),
 			});
 		}
-		const tailRegs = await this.readRegisters(STATUS_DYNAMIC_START, lastAddr - STATUS_DYNAMIC_START + 1);
+		assertContinue();
+		const tailRegs = await this.readRegisters(STATUS_DYNAMIC_START, lastAddr - STATUS_DYNAMIC_START + 1, readOptions);
+		assertContinue();
 		const regs = buildStatusRegisterView({
 			headRegisters: headRegs,
 			legacyGapRegisters: legacyGapRegs,
@@ -648,7 +679,7 @@ export class BmsClient {
 		return out;
 	}
 
-	async readParamsByKeys(paramKeys: string[]): Promise<Record<string, unknown>> {
+	async readParamsByKeys(paramKeys: string[], options: ReadParamsByKeysOptions = {}): Promise<Record<string, unknown>> {
 		const out: Record<string, unknown> = {};
 		const ranges: DecodableParamRange[] = [];
 
@@ -698,6 +729,7 @@ export class BmsClient {
 					const regs = await this.readRegisters(range.startAddress, range.quantity, {
 						functionCode: first.functionCode,
 						targetAddress: first.targetAddress,
+						timeoutMs: options.timeoutMs,
 					});
 					const view = new RegisterView(range.startAddress, regs);
 					for (const item of inRange) out[item.key] = decodeParam(item.def, view);
@@ -708,6 +740,23 @@ export class BmsClient {
 		}
 
 		return out;
+	}
+
+	async wakeupReadLink(options: WakeupReadLinkOptions = {}): Promise<boolean> {
+		try {
+			await this.readRegisters(options.startAddress ?? STATUS_REG_START, options.quantity ?? 1, {
+				timeoutMs: options.timeoutMs,
+			});
+			return true;
+		} catch (e) {
+			this._debug('[bms]', '[bms] wakeup read probe failed', {
+				startAddress: `0x${(options.startAddress ?? STATUS_REG_START).toString(16)}`,
+				quantity: options.quantity ?? 1,
+				timeoutMs: options.timeoutMs,
+				err: e instanceof Error ? e.message : String(e || ''),
+			});
+			return false;
+		}
 	}
 
 	async readRoParam(paramKey: string): Promise<unknown> {

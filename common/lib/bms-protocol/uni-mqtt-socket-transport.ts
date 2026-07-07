@@ -49,13 +49,72 @@ function hexToBytes(hex: string): Uint8Array {
 	return out
 }
 
+function bytesToUtf8Text(bytes: Uint8Array): string {
+	try {
+		if (typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8').decode(bytes)
+	} catch {}
+	let s = ''
+	for (let i = 0; i < bytes.length; i += 0x8000) {
+		const chunk = bytes.slice(i, i + 0x8000)
+		s += String.fromCharCode.apply(null, Array.from(chunk))
+	}
+	return s
+}
+
+export function socketMessageToText(data: unknown): string {
+	if (typeof data === 'string') return data
+	if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) {
+		return bytesToUtf8Text(new Uint8Array(data))
+	}
+	if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data as ArrayBufferView)) {
+		const view = data as ArrayBufferView
+		return bytesToUtf8Text(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
+	}
+	if (Array.isArray(data)) return bytesToUtf8Text(Uint8Array.from(data))
+	try {
+		return JSON.stringify(data)
+	} catch {
+		return String(data || '')
+	}
+}
+
+function isLikelyHexTextPayload(txt: string): boolean {
+	const clean = String(txt || '')
+		.trim()
+		.replace(/^0x/i, '')
+		.replace(/\s+/g, '')
+	return clean.length >= 4 && clean.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(clean)
+}
+
+function isExplicitSocketBridgeErrorText(txt: string, obj: any): boolean {
+	const controlType = String(obj?.type || '').trim()
+	if (controlType === 'socket_error' || controlType === 'socket_occupied') return true
+	const lower = String(txt || '').trim().toLowerCase()
+	if (!lower) return false
+	return (
+		lower.includes('failed') ||
+		lower.includes('error') ||
+		lower.includes('required') ||
+		lower.includes('invalid') ||
+		lower.includes('occupied') ||
+		lower.includes('unavailable') ||
+		lower.includes('denied') ||
+		lower.includes('unauthorized') ||
+		lower.includes('失败') ||
+		lower.includes('错误') ||
+		lower.includes('不可用') ||
+		lower.includes('被占用')
+	)
+}
+
 const SOCKET_CLOUD_READ_START = 0x0900
 const SOCKET_CLOUD_READ_END_EXCLUSIVE = 0x0924
 const SOCKET_OWNER_FEATURE = 'mqtt_socket_owner_v1'
 const SOCKET_READY_TIMEOUT_MS = 1200
 const SOCKET_HEARTBEAT_MS = 15000
 const MAX_BOOT_FRAME_BYTES = 2048
-const DEFAULT_SLEEP_WAKEUP_IDLE_MS = 30000
+const MAX_NORMAL_FRAME_BYTES = 4096
+export const DEFAULT_SOCKET_SLEEP_WAKEUP_IDLE_MS = 180000
 const DEFAULT_SLEEP_WAKEUP_RESEND_DELAY_MS = 1200
 
 export const MQTT_SOCKET_OCCUPIED_CODE = 'MQTT_SOCKET_OCCUPIED'
@@ -140,6 +199,20 @@ export function shouldScheduleSocketWakeupResend(
 	if (!Number.isFinite(delayMs) || delayMs <= 0) return false
 	if (!Number.isFinite(timeoutMs) || timeoutMs <= delayMs + 200) return false
 	if (!Number.isFinite(idleMs) || idleMs <= 0) return true
+	if (!Number.isFinite(lastResponseAt) || lastResponseAt <= 0) return true
+	return now - lastResponseAt >= idleMs
+}
+
+export function shouldRunSocketWakeupProbe({
+	lastResponseAt,
+	now,
+	idleMs,
+}: {
+	lastResponseAt: number
+	now: number
+	idleMs: number
+}): boolean {
+	if (!Number.isFinite(idleMs) || idleMs <= 0) return false
 	if (!Number.isFinite(lastResponseAt) || lastResponseAt <= 0) return true
 	return now - lastResponseAt >= idleMs
 }
@@ -250,6 +323,25 @@ function getBootFrameTrace(bytes: Uint8Array | ArrayLike<number>): Record<string
 	return trace
 }
 
+function getExpectedNormalFrameLength(bytes: Uint8Array): number | null {
+	if (bytes.length < 6) return null
+	const functionCode = bytes[4] & 0xff
+	if (functionCode & 0x80) return 9
+	if (
+		functionCode === BMS_FUNC.READ_HOLDING_REGISTERS ||
+		functionCode === BMS_FUNC.HISTORY_PROTECTION_COUNT ||
+		functionCode === BMS_FUNC.HISTORY_STATUS_RECORD ||
+		functionCode === BMS_FUNC.READ_UUID ||
+		functionCode === BMS_FUNC.SOCKET_READ
+	) {
+		return 9 + (bytes[5] & 0xff)
+	}
+	if (functionCode === BMS_FUNC.WRITE_MULTIPLE_REGISTERS || functionCode === BMS_FUNC.ASSIGN_SLAVE_ADDR) {
+		return 12
+	}
+	return null
+}
+
 class FrameCollector {
 	private _logger?: LoggerLike
 	private _buf: Uint8Array
@@ -268,35 +360,57 @@ class FrameCollector {
 	}
 
 	tryShiftOneValidFrame(): Uint8Array | null {
-		const bytes = this._buf
-		if (bytes.length < 6) return null
+		for (;;) {
+			const bytes = this._buf
+			if (bytes.length < 6) return null
 
-		let start = -1
-		for (let i = 0; i < bytes.length - 1; i += 1) {
-			if (bytes[i] === 0x7f && bytes[i + 1] === 0x55) {
-				start = i
-				break
+			let start = -1
+			for (let i = 0; i < bytes.length - 1; i += 1) {
+				if (bytes[i] === 0x7f && bytes[i + 1] === 0x55) {
+					start = i
+					break
+				}
 			}
-		}
-		if (start < 0) {
-			this._buf = bytes.slice(Math.max(0, bytes.length - 1))
-			return null
-		}
-		if (start > 0) this._buf = bytes.slice(start)
+			if (start < 0) {
+				this._buf = bytes.slice(Math.max(0, bytes.length - 1))
+				return null
+			}
+			if (start > 0) this._buf = bytes.slice(start)
+			if (this._buf.length < 6) return null
 
-		for (let j = 2; j < this._buf.length; j += 1) {
-			if (this._buf[j] !== 0xfd) continue
-			const candidate = this._buf.slice(0, j + 1)
+			const expectedLen = getExpectedNormalFrameLength(this._buf)
+			if (expectedLen == null || expectedLen < 6 || expectedLen > MAX_NORMAL_FRAME_BYTES) {
+				this._logger?.debug &&
+					this._logger.debug('[socket] drop unsupported frame candidate:', {
+						functionCode: this._buf[4] == null ? undefined : `0x${(this._buf[4] & 0xff).toString(16).toUpperCase()}`,
+						expectedLen,
+					})
+				this._buf = this._buf.slice(1)
+				continue
+			}
+			if (this._buf.length < expectedLen) return null
+
+			const candidate = this._buf.slice(0, expectedLen)
+			if (candidate[candidate.length - 1] !== 0xfd) {
+				this._logger?.debug &&
+					this._logger.debug('[socket] drop malformed frame candidate:', {
+						expectedLen,
+						tail: `0x${(candidate[candidate.length - 1] & 0xff).toString(16).toUpperCase()}`,
+					})
+				this._buf = this._buf.slice(1)
+				continue
+			}
 			try {
 				parseFrame(candidate)
-				this._buf = this._buf.slice(j + 1)
+				this._buf = this._buf.slice(expectedLen)
 				return candidate
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e)
 				this._logger?.debug && this._logger.debug('[socket] drop invalid frame:', msg)
+				this._buf = this._buf.slice(1)
+				continue
 			}
 		}
-		return null
 	}
 
 	tryShiftOneBootFrame(): Uint8Array | null {
@@ -408,7 +522,7 @@ export class UniMqttSocketBmsTransport {
 		this.platform = String(options.platform || '').trim()
 		this.minFrameIntervalMs = options.minFrameIntervalMs ?? 80
 		this.requestTimeoutMs = options.requestTimeoutMs ?? 10000
-		this.sleepWakeupIdleMs = options.sleepWakeupIdleMs ?? DEFAULT_SLEEP_WAKEUP_IDLE_MS
+		this.sleepWakeupIdleMs = options.sleepWakeupIdleMs ?? DEFAULT_SOCKET_SLEEP_WAKEUP_IDLE_MS
 		this.sleepWakeupResendDelayMs = options.sleepWakeupResendDelayMs ?? DEFAULT_SLEEP_WAKEUP_RESEND_DELAY_MS
 		this.logger = options.logger ?? console
 
@@ -425,6 +539,14 @@ export class UniMqttSocketBmsTransport {
 
 	get connected() {
 		return this._connected
+	}
+
+	shouldRunSleepWakeupProbe(now = Date.now()): boolean {
+		return shouldRunSocketWakeupProbe({
+			lastResponseAt: this._lastResponseAt,
+			now,
+			idleMs: this.sleepWakeupIdleMs,
+		})
 	}
 
 	async connect(): Promise<void> {
@@ -513,7 +635,8 @@ export class UniMqttSocketBmsTransport {
 
 		socketTask.onMessage((res: { data: unknown }) => {
 			try {
-				const txt = typeof res.data === 'string' ? res.data : String(res.data || '')
+				const txt = socketMessageToText(res.data).trim()
+				if (!txt) return
 				if (txt === 'pong') return
 				let payloadHex = ''
 				let obj: any = null
@@ -549,16 +672,22 @@ export class UniMqttSocketBmsTransport {
 				}
 				payloadHex = String(obj?.hex || '')
 				if (!payloadHex) {
-					this._bridgeError = txt
-					const err = new BmsProtocolError(txt || 'WebSocket bridge rejected')
-					if (!settled) {
-						failReady(err)
-					} else if (this._pending) {
-						this._rejectPending(err)
+					if (isLikelyHexTextPayload(txt)) {
+						payloadHex = txt
+					} else if (isExplicitSocketBridgeErrorText(txt, obj)) {
+						this._bridgeError = txt
+						const err = new BmsProtocolError(txt || 'WebSocket bridge rejected')
+						if (!settled) {
+							failReady(err)
+						} else if (this._pending) {
+							this._rejectPending(err)
+						}
+						try {
+							socketTask.close({})
+						} catch (e) {}
+						return
 					}
-					try {
-						socketTask.close({})
-					} catch (e) {}
+					this.logger?.debug && this.logger.debug('[socket] ignore non-frame message:', txt)
 					return
 				}
 				const bytes = hexToBytes(payloadHex)
@@ -758,7 +887,15 @@ export class UniMqttSocketBmsTransport {
 	private _handleFrame(frameBytes: Uint8Array) {
 		if (!this._pending) return
 		const { expect, resolve, expectBoot } = this._pending
-		if (!this._isExpectedResponse(frameBytes, expect, expectBoot)) return
+		if (!this._isExpectedResponse(frameBytes, expect, expectBoot)) {
+			this.logger?.debug &&
+				this.logger.debug('[socket] ignore unexpected frame', {
+					expectBoot: !!expectBoot,
+					expect,
+					hex: bytesToHexUpper(frameBytes).slice(0, 128),
+				})
+			return
+		}
 		this._lastResponseAt = Date.now()
 		this._clearPendingTimers(this._pending)
 		this._pending = null

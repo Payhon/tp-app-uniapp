@@ -35,6 +35,13 @@ function buildSocketReadResponse(startAddress: number, registers: number[]): Uin
 	return buildReadResponse({ functionCode: BMS_FUNC.SOCKET_READ, data })
 }
 
+function hexToBytes(hex: string): Uint8Array {
+	const normalized = hex.trim()
+	const out = new Uint8Array(normalized.length / 2)
+	for (let i = 0; i < normalized.length; i += 2) out[i / 2] = parseInt(normalized.slice(i, i + 2), 16) & 0xff
+	return out
+}
+
 const normalExpect: MqttSocketResponseExpectation = {
 	functionCode: BMS_FUNC.READ_HOLDING_REGISTERS,
 	targetAddress: 0xfe,
@@ -50,6 +57,18 @@ assert(
 assert(
 	isExpectedMqttSocketResponse(buildRegisterReadResponse([0x1234, 0x5678]), normalExpect),
 	'normal 0x03 response with the expected byteCount should satisfy the pending request',
+)
+
+const singleUvDelayExpect: MqttSocketResponseExpectation = {
+	functionCode: BMS_FUNC.READ_HOLDING_REGISTERS,
+	targetAddress: 0xfe,
+	sourceAddress: 0x01,
+	readByteCount: 8,
+}
+
+assert(
+	isExpectedMqttSocketResponse(hexToBytes('7F5501FE030814140B5409603214D464FD'), singleUvDelayExpect),
+	'normal 0x03 response for 0x040D qty=4 should satisfy the pending request',
 )
 
 const socketExpect: MqttSocketResponseExpectation = {

@@ -11,7 +11,7 @@ import {
 	type AppBatteryCurrentTelemetry,
 	type AppBatteryReportReq,
 } from '@/service/app-battery'
-import { BmsClient } from '@/common/lib/bms-protocol/client'
+import { BMS_STATUS_READ_CANCELED_MESSAGE, BmsClient } from '@/common/lib/bms-protocol/client'
 import {
 	createUniMqttSocketBmsTransport,
 	isMqttSocketOccupiedError,
@@ -64,6 +64,7 @@ const RELAY_HEARTBEAT_MS = 15_000
 const RELAY_RECONNECT_DELAY_MS = 3_000
 const POLL_INTERVAL_MS = 2_000
 const CLOUD_POLL_INTERVAL_MS = 5_000
+const MQTT_STATUS_READ_TIMEOUT_MS = 5_000
 const INSTRUMENT_WARMUP_POLL_INTERVAL_MS = 1_200
 const INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD = 3
 const FIRST_FRAME_SLOW_HINT_MS = 9_000
@@ -116,6 +117,8 @@ const isInstrumentNoPassthroughError = (err: unknown) => {
 		msg.includes('request timeout')
 	)
 }
+
+const isStatusReadCanceled = (err: unknown) => formatErr(err) === BMS_STATUS_READ_CANCELED_MESSAGE
 
 const countTrue = (obj?: Record<string, boolean>) => {
 	if (!obj) return 0
@@ -423,6 +426,8 @@ export const useBatteryDetail = () => {
 	const sessionMode = ref<DeviceDetailSessionMode>('cloud')
 
 	let pollTimer: number | null = null
+	let pollingActiveClient: BmsClient | null = null
+	let pollingGeneration = 0
 	let firstFrameSlowTimer: number | null = null
 	let cloudPollTimer: number | null = null
 	let mqttTransport: MqttTransportLike | null = null
@@ -451,9 +456,11 @@ export const useBatteryDetail = () => {
 
 	const stopPolling = () => {
 		if (pollTimer != null) {
-			clearInterval(pollTimer)
+			clearTimeout(pollTimer)
 			pollTimer = null
 		}
+		pollingActiveClient = null
+		pollingGeneration += 1
 	}
 
 	const clearFirstFrameSlowTimer = () => {
@@ -519,7 +526,12 @@ export const useBatteryDetail = () => {
 	}
 
 	const shouldShowBmsDataLoading = () => {
-		return !status.value && (connType.value === 'bluetooth' || connType.value === 'mqtt') && !instrumentPassthroughUnavailable.value
+		return (
+			!pollingPaused.value &&
+			!status.value &&
+			(connType.value === 'bluetooth' || connType.value === 'mqtt') &&
+			!instrumentPassthroughUnavailable.value
+		)
 	}
 
 	const syncBmsDataLoading = () => {
@@ -990,17 +1002,29 @@ export const useBatteryDetail = () => {
 		return attachBleEntry(entry, { retain: true })
 	}
 
-	const startPolling = (c: BmsClient) => {
+	const startPolling = (c: BmsClient, options?: { force?: boolean }) => {
+		if (!options?.force && pollingActiveClient === c) return
 		stopPolling()
 		if (pollingPaused.value) return
 		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
+		pollingActiveClient = c
+		pollingGeneration += 1
+		const generation = pollingGeneration
+		const shouldContinuePolling = () =>
+			!pollingPaused.value && client.value === c && pollingActiveClient === c && pollingGeneration === generation
 		syncBmsDataLoading()
 		beginFirstFrameWait()
 		const run = async () => {
+			if (!shouldContinuePolling()) return
 			syncBmsDataLoading()
 			beginFirstFrameWait()
 			try {
-				status.value = await c.readAllStatus()
+				const nextStatus = await c.readAllStatus({
+					shouldContinue: shouldContinuePolling,
+					timeoutMs: connType.value === 'mqtt' ? MQTT_STATUS_READ_TIMEOUT_MS : undefined,
+				})
+				if (!shouldContinuePolling()) return
+				status.value = nextStatus
 				markFirstFrameSuccess()
 				if (connType.value === 'mqtt' || connType.value === 'bluetooth') {
 					dataSourceMode.value = 'realtime'
@@ -1019,6 +1043,8 @@ export const useBatteryDetail = () => {
 				} catch (e) {}
 				pollErrLogged = 0
 			} catch (e) {
+				if (isStatusReadCanceled(e)) return
+				if (!shouldContinuePolling()) return
 				if (isInstrumentSession() && connType.value === 'bluetooth' && isInstrumentNoPassthroughError(e)) {
 					instrumentStatusFailCount += 1
 					if (instrumentStatusFailCount >= INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD) {
@@ -1046,11 +1072,11 @@ export const useBatteryDetail = () => {
 			}
 		}
 		const scheduleNext = (delayMs: number) => {
-			if (pollingPaused.value || client.value !== c) return
+			if (!shouldContinuePolling()) return
 			if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 			pollTimer = setTimeout(async () => {
 				pollTimer = null
-				if (pollingPaused.value || client.value !== c) return
+				if (!shouldContinuePolling()) return
 				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 				await run()
 				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
@@ -1068,6 +1094,7 @@ export const useBatteryDetail = () => {
 	const pausePolling = () => {
 		pollingPaused.value = true
 		stopPolling()
+		clearFirstFrameSlowTimer()
 		bmsDataLoading.value = false
 	}
 
@@ -1389,7 +1416,7 @@ export const useBatteryDetail = () => {
 		bmsDataLoadPhase.value = 'reading'
 		clearFirstFrameSlowTimer()
 		if (client.value && (connType.value === 'bluetooth' || connType.value === 'mqtt')) {
-			startPolling(client.value)
+			startPolling(client.value, { force: true })
 			return
 		}
 		void connectAuto({ preserveCurrentBle: true, probe: true, preserveFirstFrameState: true })
