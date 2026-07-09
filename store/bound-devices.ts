@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 
 import { normalizeHex, normalizeMac } from '@/common/device-provision/ble'
 import { resolveAddTrackingViewMode, type HomeDeviceViewMode } from '@/common/device-view-mode'
+import { isAuthExpiredApiResponse } from '@/common/auth/session-expired'
 import { appBoundDeviceList } from '@/service/device'
 import { useUserStore } from '@/store/user'
 
@@ -87,6 +88,10 @@ export const useBoundDevicesStore = defineStore('boundDevices', {
 		for (let page = 1; page <= maxPages; page += 1) {
 			// eslint-disable-next-line no-await-in-loop
 			const rsp = await appBoundDeviceList({ page, page_size: pageSize, view_mode: nextViewMode })
+			if (isAuthExpiredApiResponse(rsp)) {
+				this.clear()
+				return
+			}
 			if (!rsp || (rsp as any).code !== 200) break
 
 			const rawList = (rsp as any).data?.list as unknown

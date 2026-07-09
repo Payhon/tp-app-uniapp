@@ -152,6 +152,7 @@ import { useUserStore } from '@/store/user'
 import { appBoundDeviceList, appRemoveDevice, appUnbindDevice, updateDeviceName } from '@/service/device'
 import { imageUrl } from '@/common/assets/images'
 import { fetchWxmpRuntimeConfig, shouldUseDefaultWxmpBrandAsset } from '@/common/wxmp-runtime'
+import { isAuthExpiredApiResponse } from '@/common/auth/session-expired'
 import type { HomeDeviceCardModel } from '@/types/home'
 
 type DeviceListItem = {
@@ -289,18 +290,24 @@ const syncCurrentViewMode = () => {
 	currentViewMode.value = isOrgUser.value ? getStoredHomeDeviceViewMode(userStore.userInfo) : 'self_bound'
 }
 
-const ensureUserInfo = async () => {
-	if (!apiRequest || !isLoggedIn.value) return
+const ensureUserInfo = async (): Promise<boolean> => {
+	if (!apiRequest || !isLoggedIn.value) return true
 	const current = userStore.userInfo as Record<string, unknown> | null
 	if (current && (current.user_kind || current.org_id || current.org_type || current.authority)) {
-		return
+		return true
 	}
 	try {
 		const res = await apiRequest<Record<string, unknown>>('/api/v1/user/detail', {}, 'get')
 		if (res && (res as any).code === 200 && (res as any).data) {
 			userStore.setUserInfo((res as any).data as any)
+			return true
+		}
+		if (isAuthExpiredApiResponse(res)) {
+			refreshLoginState()
+			return false
 		}
 	} catch (e) {}
+	return true
 }
 
 const formatDeviceIdentifier = (item: DeviceListItem): string => {
@@ -429,7 +436,14 @@ const load = async (reset = true) => {
 			return
 		}
 
-		await ensureUserInfo()
+		if (!(await ensureUserInfo())) {
+			deviceCards.value = []
+			total.value = 0
+			page.value = 1
+			boundDevicesStore.clear()
+			releaseHomeBleClients()
+			return
+		}
 		syncCurrentViewMode()
 
 		const nextPage = reset ? 1 : page.value
