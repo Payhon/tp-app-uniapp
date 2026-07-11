@@ -11,7 +11,10 @@
     </view>
 
     <view class="ctb__item" data-index="1" data-url="/pages/my/my" bindtap="onSwitchTab">
-      <image class="ctb__icon" src="{{selected === 1 ? '/static/image/navbar-me-on@2x.png' : '/static/image/navbar-me@2x.png'}}" mode="aspectFit" />
+      <view class="ctb__icon-wrap">
+        <image class="ctb__icon" src="{{selected === 1 ? '/static/image/navbar-me-on@2x.png' : '/static/image/navbar-me@2x.png'}}" mode="aspectFit" />
+        <view wx:if="{{warrantyReminderNeeded}}" class="ctb__dot"></view>
+      </view>
       <text class="ctb__text {{selected === 1 ? 'ctb__text--active' : ''}}">{{textMe}}</text>
     </view>
   </view>

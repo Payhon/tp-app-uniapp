@@ -4,6 +4,7 @@ const DEVICE_TYPE_BMS = 'bms'
 const DEVICE_TYPE_METER = 'meter'
 const DEVICE_PREFIXES_STORAGE_KEY = '__DEVICE_MAC_PREFIXES__'
 const BOUND_DEVICE_SNAPSHOT_STORAGE_KEY = '__BOUND_DEVICES_SNAPSHOT__'
+const WARRANTY_PROFILE_REMINDER_STORAGE_KEY = '__WARRANTY_PROFILE_REMINDER_NEEDED__'
 const DEFAULT_DEVICE_MAC_PREFIXES = Object.freeze({
   [DEVICE_TYPE_BMS]: Object.freeze(['AC']),
   [DEVICE_TYPE_METER]: Object.freeze(['AA'])
@@ -129,18 +130,21 @@ Component({
     textAddDevice: '',
     textMe: '',
     textCancel: '',
+    warrantyReminderNeeded: false,
     actionSheetVisible: false,
     actionSheetItems: []
   },
   lifetimes: {
     attached() {
       this.updateTexts()
+      this.updateWarrantyReminder()
       this.updateSelectedFromRoute()
     }
   },
   pageLifetimes: {
     show() {
       this.updateTexts()
+      this.updateWarrantyReminder()
       this.updateSelectedFromRoute()
     }
   },
@@ -155,6 +159,14 @@ Component({
         textCancel: dict.cancel,
         actionSheetItems: [dict.bleSearch, dict.cameraScan]
       })
+    },
+    updateWarrantyReminder() {
+      const raw = wx.getStorageSync(WARRANTY_PROFILE_REMINDER_STORAGE_KEY)
+      const needed = raw === true || raw === 1 || raw === '1' || raw === 'true'
+      this.setData({ warrantyReminderNeeded: needed })
+    },
+    setWarrantyReminder(needed) {
+      this.setData({ warrantyReminderNeeded: Boolean(needed) })
     },
     setSelected(index) {
       this.setData({ selected: Number(index) || 0 })

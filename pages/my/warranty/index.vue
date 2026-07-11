@@ -1,10 +1,14 @@
 <template>
   <view class="warranty-page">
+    <view v-if="profile?.warranty_profile_reminder_needed" class="reminder-banner">
+      <u-icon name="info-circle" size="16" color="#9A6700"></u-icon>
+      <text class="reminder-banner__text">{{ t("pages.warranty.profileReminderHint") }}</text>
+    </view>
     <view class="card profile-card">
       <view class="card-header">
         <text class="card-title">{{ t("pages.warranty.profileTitle") }}</text>
         <button
-          v-if="!editingProfile"
+          v-if="!editingProfile && hasSavedProfile"
           class="edit-btn"
           hover-class="edit-btn--active"
           :aria-label="t('pages.warranty.editProfile')"
@@ -15,30 +19,44 @@
             <view class="edit-pencil-tip"></view>
           </view>
         </button>
+        <button
+          v-else-if="!editingProfile"
+          class="fill-profile-btn"
+          hover-class="fill-profile-btn--active"
+          @tap="startProfileEdit"
+        >
+          {{ t("pages.warranty.fillProfile") }}
+        </button>
       </view>
-      <view class="field">
-        <text class="field-label">{{ t("pages.warranty.contactName") }}</text>
-        <input
-          v-if="editingProfile"
-          v-model="contactName"
-          class="field-input"
-          :placeholder="t('pages.warranty.contactNamePlaceholder')"
-          maxlength="100"
-        />
-        <text v-else class="field-value">{{ displayProfileText(contactName) }}</text>
+      <view v-if="!editingProfile && !hasSavedProfile" class="profile-empty-state">
+        <text class="profile-empty-state__title">{{ t("pages.warranty.profileNotFilled") }}</text>
+        <text class="profile-empty-state__hint">{{ t("pages.warranty.profileNotFilledHint") }}</text>
       </view>
-      <view class="field">
-        <text class="field-label">{{ t("pages.warranty.contactPhone") }}</text>
-        <input
-          v-if="editingProfile"
-          v-model="contactPhone"
-          class="field-input"
-          :placeholder="t('pages.warranty.contactPhonePlaceholder')"
-          maxlength="50"
-          type="text"
-        />
-        <text v-else class="field-value">{{ displayProfileText(contactPhone) }}</text>
-      </view>
+      <template v-else>
+        <view class="field">
+          <text class="field-label">{{ t("pages.warranty.contactName") }}</text>
+          <input
+            v-if="editingProfile"
+            v-model="contactName"
+            class="field-input"
+            :placeholder="t('pages.warranty.contactNamePlaceholder')"
+            maxlength="100"
+          />
+          <text v-else class="field-value">{{ displayProfileText(contactName) }}</text>
+        </view>
+        <view class="field">
+          <text class="field-label">{{ t("pages.warranty.contactPhone") }}</text>
+          <input
+            v-if="editingProfile"
+            v-model="contactPhone"
+            class="field-input"
+            :placeholder="t('pages.warranty.contactPhonePlaceholder')"
+            maxlength="50"
+            type="text"
+          />
+          <text v-else class="field-value">{{ displayProfileText(contactPhone) }}</text>
+        </view>
+      </template>
       <button v-if="editingProfile" class="save-btn" :loading="saving" :disabled="saving" @tap="saveProfile">
         {{ t("common.save") }}
       </button>
@@ -80,7 +98,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app";
 import { useI18n } from "vue-i18n";
 import {
@@ -88,8 +106,10 @@ import {
   saveAppWarrantyProfile,
   type AppWarrantyProfile,
 } from "@/service/user-warranty";
+import { useWarrantyReminderStore } from "@/store/warranty-reminder";
 
 const { t } = useI18n();
+const warrantyReminderStore = useWarrantyReminderStore();
 
 const profile = ref<AppWarrantyProfile | null>(null);
 const contactName = ref("");
@@ -97,6 +117,8 @@ const contactPhone = ref("");
 const loading = ref(false);
 const saving = ref(false);
 const editingProfile = ref(false);
+const editOnLoad = ref(false);
+const hasSavedProfile = computed(() => Boolean(profile.value?.warranty_profile_exists));
 
 function displayText(value: unknown) {
   const text = String(value ?? "").trim();
@@ -121,7 +143,9 @@ async function loadProfile() {
       profile.value = (res as any).data as AppWarrantyProfile;
       contactName.value = String(profile.value.contact_name || "");
       contactPhone.value = String(profile.value.contact_phone || "");
-      editingProfile.value = false;
+      warrantyReminderStore.applyProfile(profile.value);
+      editingProfile.value = editOnLoad.value && !profile.value.warranty_profile_completed;
+      editOnLoad.value = false;
     }
   } catch (e) {
     uni.showToast({
@@ -146,6 +170,7 @@ async function saveProfile() {
       profile.value = (res as any).data as AppWarrantyProfile;
       contactName.value = String(profile.value.contact_name || "");
       contactPhone.value = String(profile.value.contact_phone || "");
+      warrantyReminderStore.applyProfile(profile.value);
       editingProfile.value = false;
       uni.showToast({
         title: t("pages.warranty.saveSuccess") as string,
@@ -162,7 +187,8 @@ async function saveProfile() {
   }
 }
 
-onLoad(() => {
+onLoad((options) => {
+  editOnLoad.value = String((options as Record<string, unknown>)?.edit || "") === "1";
   loadProfile();
 });
 
@@ -189,6 +215,26 @@ onPullDownRefresh(() => {
 
 .profile-card {
   box-shadow: 0 16rpx 38rpx rgba(15, 23, 42, 0.04);
+}
+
+.reminder-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  margin-bottom: 20rpx;
+  padding: 20rpx 22rpx;
+  border: 1rpx solid #f0d7a1;
+  border-radius: 12rpx;
+  background: #fff8e8;
+  box-sizing: border-box;
+}
+
+.reminder-banner__text {
+  flex: 1;
+  min-width: 0;
+  color: #6b4f00;
+  font-size: 26rpx;
+  line-height: 1.5;
 }
 
 .cards {
@@ -231,6 +277,25 @@ onPullDownRefresh(() => {
   background: #eef2ff;
 }
 
+.fill-profile-btn {
+  height: 58rpx;
+  padding: 0 18rpx;
+  margin: 0;
+  border-radius: 29rpx;
+  background: #0b3bff;
+  color: #ffffff;
+  font-size: 24rpx;
+  line-height: 58rpx;
+}
+
+.fill-profile-btn::after {
+  border: none;
+}
+
+.fill-profile-btn--active {
+  background: #082fc7;
+}
+
 .edit-pencil {
   position: relative;
   width: 30rpx;
@@ -263,6 +328,26 @@ onPullDownRefresh(() => {
   align-items: center;
   min-height: 92rpx;
   border-bottom: 1rpx solid #eef0f4;
+}
+
+.profile-empty-state {
+  padding: 18rpx 0 8rpx;
+}
+
+.profile-empty-state__title {
+  display: block;
+  color: #1f2937;
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.profile-empty-state__hint {
+  display: block;
+  margin-top: 10rpx;
+  color: #4b5563;
+  font-size: 26rpx;
+  line-height: 1.5;
 }
 
 .field-label {

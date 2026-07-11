@@ -21,6 +21,9 @@ export type AppWarrantyProfile = {
 	contact_name?: string | null
 	contact_phone?: string | null
 	warranty_cards_enabled: boolean
+	warranty_profile_exists: boolean
+	warranty_profile_completed: boolean
+	warranty_profile_reminder_needed: boolean
 	batteries: AppWarrantyBatteryCard[]
 }
 

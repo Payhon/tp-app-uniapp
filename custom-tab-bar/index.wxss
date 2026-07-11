@@ -49,6 +49,24 @@
   height: 44rpx;
 }
 
+.ctb__icon-wrap {
+  position: relative;
+  width: 44rpx;
+  height: 44rpx;
+}
+
+.ctb__dot {
+  position: absolute;
+  top: -4rpx;
+  right: -8rpx;
+  width: 14rpx;
+  height: 14rpx;
+  border: 2rpx solid #ffffff;
+  border-radius: 50%;
+  background: #f04438;
+  box-sizing: border-box;
+}
+
 .ctb__text {
   margin-top: 8rpx;
   font-size: 22rpx;

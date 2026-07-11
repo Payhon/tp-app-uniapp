@@ -1,6 +1,7 @@
 <script lang="ts">
 import api from '@/API/'
 import { syncCurrentUniLocale } from '@/lang'
+import { useWarrantyReminderStore } from '@/store/warranty-reminder'
 // #ifdef APP-PLUS
 import { showAddDeviceActionSheet } from '@/common/composables/useAddDeviceActionSheet'
 // #endif
@@ -47,6 +48,9 @@ export default {
 		try {
 			syncCurrentUniLocale()
 		} catch (e) {}
+		try {
+			void useWarrantyReminderStore().refresh()
+		} catch (e) {}
 
 		// #ifdef APP-PLUS
 		try {
@@ -67,6 +71,9 @@ export default {
 	},
 
 	onShow() {
+		try {
+			void useWarrantyReminderStore().refresh()
+		} catch (e) {}
 		// #ifdef APP-PLUS
 		if (typeof uni.onPushMessage !== 'function') return
 		uni.onPushMessage(async (res: PushMessage) => {

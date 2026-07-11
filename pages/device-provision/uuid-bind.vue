@@ -40,6 +40,7 @@ import { useI18n } from 'vue-i18n'
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { extractApiErrorMessage } from '@/common/api-error'
 import { normalizeHex } from '@/common/device-provision/ble'
+import { navigateToWarrantyProfileForCompletion, shouldGuideWarrantyProfileAfterNewBinding } from '@/common/warranty-profile-reminder'
 import { getDeviceProvisionInfo, postDeviceProvisionBind } from '@/service/deviceProvision'
 
 const { t } = useI18n()
@@ -150,6 +151,11 @@ async function run() {
 			})
 			status.value = 'success'
 			done.value = true
+			const newlyBound = Boolean((bindRes as any)?.data?.newly_bound)
+			if (await shouldGuideWarrantyProfileAfterNewBinding(newlyBound)) {
+				navigateToWarrantyProfileForCompletion()
+				return
+			}
 			uni.showToast({ title: t('pages.deviceProvision.bindSuccess'), icon: 'success' })
 			goDeviceDetail(boundDeviceId)
 	} catch (e) {

@@ -149,6 +149,7 @@ import { useInjected } from '@/common/composables/useInjected'
 import { canBleAutoConnect, connectBleClient, disconnectBleClient, getBleClientEntry, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
 import { useBoundDevicesStore } from '@/store/bound-devices'
 import { useUserStore } from '@/store/user'
+import { useWarrantyReminderStore } from '@/store/warranty-reminder'
 import { appBoundDeviceList, appRemoveDevice, appUnbindDevice, updateDeviceName } from '@/service/device'
 import { imageUrl } from '@/common/assets/images'
 import { fetchWxmpRuntimeConfig, shouldUseDefaultWxmpBrandAsset } from '@/common/wxmp-runtime'
@@ -179,6 +180,7 @@ const { t } = useI18n()
 const { apiRequest } = useInjected()
 const userStore = useUserStore()
 const boundDevicesStore = useBoundDevicesStore()
+const warrantyReminderStore = useWarrantyReminderStore()
 
 const isLoggedIn = ref(false)
 const loading = ref(false)
@@ -714,6 +716,7 @@ const setMpTabSelected = () => {
 onShow(() => {
 	uni.setStorageSync('__last_tab_url__', '/pages/home/home')
 	refreshLoginState()
+	void warrantyReminderStore.refresh()
 	setMpTabSelected()
 	void loadWxmpRuntimeConfig()
 	load(true)

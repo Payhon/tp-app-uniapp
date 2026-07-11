@@ -151,6 +151,7 @@
             <text class="menu-title">{{ $t("pages.my.warranty") }}</text>
           </view>
           <view class="menu-right">
+            <view v-if="warrantyReminderNeeded" class="warranty-reminder-dot"></view>
             <u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
           </view>
         </view>
@@ -255,6 +256,7 @@ import {
 import { resolveAvatarUrl } from "@/common/avatar";
 import AppAvatar from "@/components/app-avatar/app-avatar.vue";
 import { useUserStore } from "@/store/user";
+import { useWarrantyReminderStore } from "@/store/warranty-reminder";
 import { useInjected } from "@/common/composables/useInjected";
 import { appBoundDeviceList } from "@/service/device";
 import {
@@ -265,6 +267,7 @@ import {
 
 const { t, locale } = useI18n();
 const userStore = useUserStore();
+const warrantyReminderStore = useWarrantyReminderStore();
 const { apiRequest, login } = useInjected();
 
 const STORAGE_BT_AUTO_CONNECT = "bluetoothAutoConnect";
@@ -294,6 +297,9 @@ const refreshLoginState = () => {
 
 const userInfo = computed(() => userStore.userInfo);
 const isOrgUser = computed(() => isOrgUserLike(userInfo.value));
+const warrantyReminderNeeded = computed(
+  () => isLoggedIn.value && !isOrgUser.value && warrantyReminderStore.reminderNeeded,
+);
 const currentHomeViewMode = ref<HomeDeviceViewMode>("self_bound");
 
 const currentHomeViewModeLabel = computed(() => {
@@ -513,6 +519,7 @@ onLoad(() => {
 onShow(() => {
   uni.setStorageSync("__last_tab_url__", "/pages/my/my");
   refreshLoginState();
+  void warrantyReminderStore.refresh();
   setMpTabSelected();
   currentHomeViewMode.value = getStoredHomeDeviceViewMode(userStore.userInfo);
   void (async () => {
@@ -833,6 +840,16 @@ export default {
 .menu-right {
   display: flex;
   align-items: center;
+}
+
+.warranty-reminder-dot {
+  width: 14rpx;
+  height: 14rpx;
+  margin-right: 14rpx;
+  border: 2rpx solid #ffffff;
+  border-radius: 50%;
+  background: #f04438;
+  box-sizing: border-box;
 }
 
 .menu-right-text {
