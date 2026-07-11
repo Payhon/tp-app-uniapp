@@ -30,6 +30,21 @@ import {
 import { normalizeMac } from '@/common/device-provision/ble'
 import type { DeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
+import {
+	beginCloudTelemetryRequest,
+	beginDetailDataSession,
+	captureDetailDataSession,
+	commitCloudTelemetryResponse,
+	createDetailDataArbiterState,
+	decideCloudTelemetryResponse,
+	disposeDetailDataSession,
+	isDetailDataSessionCurrent,
+	markRealtimeStatusFailure,
+	markRealtimeStatusSuccess,
+	shouldUseCompleteCloudSnapshot,
+	type CloudTelemetryRequestKind,
+	type DetailDataSessionToken,
+} from './detail-data-arbiter'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
 type DataSourceMode = 'realtime' | 'cloud_fallback' | 'offline'
@@ -50,6 +65,11 @@ type ConnectAutoOptions = {
 type LoadByIdOptions = {
 	handoff?: DeviceDetailHandoff | null
 	preferWarmBle?: boolean
+}
+
+type RealtimeFallbackContext = {
+	sourceClient: BmsClient
+	pollingGeneration: number
 }
 
 type BmsDataLoadPhase = 'idle' | 'reading' | 'slow' | 'retrying' | 'failed'
@@ -302,7 +322,16 @@ const buildStatusFromCloudTelemetry = (
 	battery: AppBatteryDetail | null,
 	payload: AppBatteryCurrentTelemetry
 ): BmsStatus | null => {
-	if (isPlainObject(payload.snapshot)) return payload.snapshot as unknown as BmsStatus
+	if (
+		isPlainObject(payload.snapshot) &&
+		shouldUseCompleteCloudSnapshot({
+			hasSnapshot: true,
+			snapshotTs: payload.snapshot_ts,
+			lastReportTs: payload.last_report_ts,
+		})
+	) {
+		return payload.snapshot as unknown as BmsStatus
+	}
 
 	const current = payload.current || {}
 	if (Object.keys(current).length === 0 && Number(payload.is_online || 0) !== 1) return null
@@ -445,7 +474,12 @@ export const useBatteryDetail = () => {
 	let relaySocketOpen = false
 	let relayHeartbeatTimer: number | null = null
 	let relayReconnectTimer: number | null = null
-	let relayClosing = false
+	let relayClosingTask: any = null
+	let dataArbiter = createDetailDataArbiterState()
+	let componentDisposed = false
+	let detailRequestSequence = 0
+	let latestDetailRequestSequence = 0
+	let connectAttemptSequence = 0
 
 	let reportQueue: AppBatteryReportReq[] = []
 	let reportFlushing = false
@@ -453,6 +487,21 @@ export const useBatteryDetail = () => {
 	let reportRetryStep = 0
 	let lastSnapshotReportAt = 0
 	let lastStateFingerprint = ''
+
+	const captureSession = () => captureDetailDataSession(dataArbiter)
+
+	const isSessionCurrent = (token: DetailDataSessionToken) =>
+		!componentDisposed && isDetailDataSessionCurrent(dataArbiter, token)
+
+	const startSession = (sessionKey: string, nextDeviceId: string): DetailDataSessionToken | null => {
+		if (componentDisposed) return null
+		dataArbiter = beginDetailDataSession(dataArbiter, { sessionKey, deviceId: nextDeviceId })
+		if (dataArbiter.disposed) return null
+		latestDetailRequestSequence = ++detailRequestSequence
+		connectAttemptSequence += 1
+		connecting.value = false
+		return captureSession()
+	}
 
 	const stopPolling = () => {
 		if (pollTimer != null) {
@@ -709,6 +758,17 @@ export const useBatteryDetail = () => {
 		} catch (e) {}
 	}
 
+	const sendRelayMessageToTask = (task: any, payload: Record<string, unknown> | string) => {
+		if (!task || relaySocketTask !== task || !relaySocketOpen) return
+		try {
+			const data = typeof payload === 'string' ? payload : JSON.stringify(payload)
+			task.send({
+				data,
+				fail: () => {},
+			})
+		} catch (e) {}
+	}
+
 	const sendRelayHeartbeat = () => {
 		sendRelayMessage({
 			type: 'relay_heartbeat',
@@ -722,21 +782,85 @@ export const useBatteryDetail = () => {
 		clearRelayReconnectTimer()
 		relaySocketOpen = false
 		if (relaySocketTask) {
-			relayClosing = true
-			try {
-				relaySocketTask.close({})
-			} catch (e) {}
+			const task = relaySocketTask
+			relayClosingTask = task
 			relaySocketTask = null
+			try {
+				task.close({})
+			} catch (e) {}
 		}
 	}
 
-	const refreshCloudTelemetry = async (options?: { bootstrapOnly?: boolean }) => {
-		if (!deviceId.value || isInstrumentSession()) return false
+	const refreshCloudTelemetry = async (options?: {
+		bootstrapOnly?: boolean
+		requestKind?: CloudTelemetryRequestKind
+		sessionToken?: DetailDataSessionToken
+		fallbackContext?: RealtimeFallbackContext
+	}) => {
+		const expectedSession = options?.sessionToken || captureSession()
+		const expectedDeviceId = expectedSession.deviceId
+		const requestKind = options?.requestKind || (options?.bootstrapOnly ? 'bootstrap' : 'cloud_mode')
+		const fallbackContext = options?.fallbackContext
+		const isFallbackContextCurrent = () =>
+			requestKind !== 'fallback' ||
+			(!!fallbackContext &&
+				!pollingPaused.value &&
+				client.value === fallbackContext.sourceClient &&
+				pollingActiveClient === fallbackContext.sourceClient &&
+				pollingGeneration === fallbackContext.pollingGeneration)
+		const isCloudModeAllowed = () => requestKind !== 'cloud_mode' || !client.value
+		const isRequestContextCurrent = () =>
+			isSessionCurrent(expectedSession) &&
+			deviceId.value === expectedDeviceId &&
+			!isInstrumentSession() &&
+			isFallbackContextCurrent() &&
+			isCloudModeAllowed()
+		if (
+			!expectedDeviceId ||
+			!isRequestContextCurrent()
+		) {
+			return false
+		}
+		const request = beginCloudTelemetryRequest(dataArbiter, requestKind)
+		dataArbiter = request.state
 		if (!status.value) bmsDataLoading.value = true
 		try {
-			const rsp = await appBatteryCurrentTelemetry(deviceId.value)
+			const rsp = await appBatteryCurrentTelemetry(expectedDeviceId)
 			if (!rsp || (rsp as any).code !== 200) throw new Error((rsp as any)?.message || 'current telemetry fetch failed')
 			const payload = ((rsp as any).data || {}) as AppBatteryCurrentTelemetry
+			if (!isRequestContextCurrent()) {
+				log('cloud telemetry response ignored', {
+					deviceId: expectedDeviceId,
+					request_kind: requestKind,
+					reason: requestKind === 'cloud_mode' && client.value ? 'realtime_client_active' : 'request_context_changed',
+				})
+				if (
+					isSessionCurrent(request.token) &&
+					dataArbiter.latestCloudRequestSequence === request.token.requestSequence
+				) {
+					syncBmsDataLoading()
+				}
+				return false
+			}
+			const decision = decideCloudTelemetryResponse(dataArbiter, request.token, {
+				deviceId: payload.device_id,
+				lastReportTs: payload.last_report_ts,
+			})
+			if (!decision.apply) {
+				log('cloud telemetry response ignored', {
+					deviceId: expectedDeviceId,
+					request_kind: requestKind,
+					reason: decision.reason,
+				})
+				if (
+					isSessionCurrent(request.token) &&
+					dataArbiter.latestCloudRequestSequence === request.token.requestSequence
+				) {
+					syncBmsDataLoading()
+				}
+				return false
+			}
+			dataArbiter = commitCloudTelemetryResponse(dataArbiter, decision.reportTs)
 			const nextStatus = buildStatusFromCloudTelemetry(battery.value, payload)
 			const hasCurrent = !!payload.current && Object.keys(payload.current).length > 0
 			if (battery.value) {
@@ -746,13 +870,17 @@ export const useBatteryDetail = () => {
 				}
 			}
 			const realtimeClientActive =
-				!!options?.bootstrapOnly &&
 				dataSourceMode.value === 'realtime' &&
 				(connType.value === 'mqtt' || connType.value === 'bluetooth') &&
 				!!client.value
-			if (realtimeClientActive) {
+			if (requestKind === 'bootstrap' && realtimeClientActive) {
 				if (!status.value) {
 					status.value = nextStatus
+				}
+			} else if (requestKind === 'fallback') {
+				if (nextStatus) {
+					status.value = nextStatus
+					dataSourceMode.value = 'cloud_fallback'
 				}
 			} else {
 				status.value = nextStatus
@@ -761,33 +889,48 @@ export const useBatteryDetail = () => {
 			}
 			syncBmsDataLoading()
 			log('cloud telemetry refreshed', {
-				deviceId: deviceId.value,
+				deviceId: expectedDeviceId,
+				request_kind: requestKind,
+				last_report_ts: payload.last_report_ts || 0,
+				snapshot_ts: payload.snapshot_ts || 0,
 				is_online: payload.is_online,
 				keys: payload.current ? Object.keys(payload.current).length : 0,
 				has_snapshot: !!payload.snapshot,
 				conn_type: connType.value,
-				preserved_realtime_conn: realtimeClientActive,
+				preserved_realtime_conn: requestKind === 'fallback' || (requestKind === 'bootstrap' && realtimeClientActive),
 			})
 			return true
 		} catch (e) {
-			log('cloud telemetry fetch failed', { err: formatErr(e) })
-			syncBmsDataLoading()
+			if (
+				isSessionCurrent(request.token) &&
+				dataArbiter.latestCloudRequestSequence === request.token.requestSequence
+			) {
+				log('cloud telemetry fetch failed', { deviceId: expectedDeviceId, err: formatErr(e) })
+				syncBmsDataLoading()
+			}
 			return false
 		}
 	}
 
-	const scheduleCloudPolling = () => {
+	const scheduleCloudPolling = (expectedSession: DetailDataSessionToken = captureSession()) => {
 		stopCloudPolling()
-		if (!deviceId.value || isInstrumentSession()) return
+		const canContinueCloudMode = () =>
+			!client.value &&
+			!!deviceId.value &&
+			deviceId.value === expectedSession.deviceId &&
+			!isInstrumentSession() &&
+			isSessionCurrent(expectedSession)
+		if (!canContinueCloudMode()) return
 		cloudPollTimer = setTimeout(async () => {
 			cloudPollTimer = null
-			if (!deviceId.value || isInstrumentSession()) return
-			await refreshCloudTelemetry()
-			if (connType.value !== 'bluetooth') scheduleCloudPolling()
+			if (!canContinueCloudMode()) return
+			await refreshCloudTelemetry({ requestKind: 'cloud_mode', sessionToken: expectedSession })
+			if (canContinueCloudMode()) scheduleCloudPolling(expectedSession)
 		}, CLOUD_POLL_INTERVAL_MS) as unknown as number
 	}
 
-	const activateCloudReportMode = async () => {
+	const activateCloudReportMode = async (expectedSession: DetailDataSessionToken = captureSession()) => {
+		if (!isSessionCurrent(expectedSession)) return false
 		stopPolling()
 		stopCloudPolling()
 		closeRelaySocket()
@@ -796,34 +939,49 @@ export const useBatteryDetail = () => {
 			releaseBleClient(bleCacheKey)
 			bleCacheKey = null
 		}
-		try {
-			await mqttTransport?.disconnect()
-		} catch (e) {}
+		const transportToDisconnect = mqttTransport
 		mqttTransport = null
-		const ok = await refreshCloudTelemetry()
+		try {
+			await transportToDisconnect?.disconnect()
+		} catch (e) {}
+		if (!isSessionCurrent(expectedSession)) return false
+		const ok = await refreshCloudTelemetry({ requestKind: 'cloud_mode', sessionToken: expectedSession })
+		if (!isSessionCurrent(expectedSession)) return false
 		if (!ok && Number(battery.value?.is_online || 0) === 1) {
 			connType.value = 'mqtt'
 			dataSourceMode.value = 'cloud_fallback'
 		}
 		if (!ok && connType.value !== 'mqtt') dataSourceMode.value = 'offline'
-		scheduleCloudPolling()
+		scheduleCloudPolling(expectedSession)
 		return ok
 	}
 
-	const scheduleRelayReconnect = () => {
+	const scheduleRelayReconnect = (expectedSession: DetailDataSessionToken = captureSession()) => {
 		if (relayReconnectTimer != null) return
-		if (connType.value !== 'bluetooth' || !deviceId.value) return
+		if (connType.value !== 'bluetooth' || !deviceId.value || !isSessionCurrent(expectedSession)) return
 		relayReconnectTimer = setTimeout(() => {
 			relayReconnectTimer = null
-			void connectRelaySocket()
+			if (!isSessionCurrent(expectedSession)) return
+			void connectRelaySocket(expectedSession)
 		}, RELAY_RECONNECT_DELAY_MS) as unknown as number
 	}
 
-	const executeRelayCommand = async (payload: Record<string, any>) => {
+	const executeRelayCommand = async (
+		payload: Record<string, any>,
+		context: { task: any; sessionToken: DetailDataSessionToken; sourceClient: BmsClient | null }
+	) => {
 		const cmdId = String(payload?.cmd_id || '').trim()
 		if (!cmdId) return
-		if (!client.value || connType.value !== 'bluetooth') {
-			sendRelayMessage({
+		const { task, sessionToken, sourceClient } = context
+		const isCommandContextCurrent = () =>
+			isSessionCurrent(sessionToken) &&
+			relaySocketTask === task &&
+			relaySocketOpen &&
+			!!sourceClient &&
+			client.value === sourceClient &&
+			connType.value === 'bluetooth'
+		if (!isCommandContextCurrent() || !sourceClient) {
+			sendRelayMessageToTask(task, {
 				type: 'relay_result',
 				cmd_id: cmdId,
 				ok: false,
@@ -839,16 +997,21 @@ export const useBatteryDetail = () => {
 			if (commandType === 'read_param') {
 				const paramKey = String(payload?.param_key || '').trim()
 				if (!paramKey) throw new Error('param_key is required')
-				const value = await client.value.readParam(paramKey)
+				const value = await sourceClient.readParam(paramKey)
+				if (!isCommandContextCurrent()) return
 				result = { value }
 			} else if (commandType === 'write_param') {
 				const paramKey = String(payload?.param_key || '').trim()
 				if (!paramKey) throw new Error('param_key is required')
-				await client.value.writeParam(paramKey, payload?.value)
+				await sourceClient.writeParam(paramKey, payload?.value)
+				if (!isCommandContextCurrent()) return
 				let value: unknown = null
 				try {
-					value = await client.value.readParam(paramKey)
-				} catch (e) {}
+					value = await sourceClient.readParam(paramKey)
+				} catch (e) {
+					if (!isCommandContextCurrent()) return
+				}
+				if (!isCommandContextCurrent()) return
 				result = { value }
 			} else if (commandType === 'write_registers') {
 				const startAddress = Number(payload?.start_address)
@@ -856,12 +1019,13 @@ export const useBatteryDetail = () => {
 				if (!Number.isFinite(startAddress) || startAddress < 0) throw new Error('start_address invalid')
 				if (!values.length) throw new Error('register_values is required')
 				const regs = new Uint16Array(values.map((v: any) => Number(v) & 0xffff))
-				await client.value.writeRegisters(Number(startAddress), regs)
+				await sourceClient.writeRegisters(Number(startAddress), regs)
+				if (!isCommandContextCurrent()) return
 				result = { written: true }
 			} else {
 				throw new Error(`unsupported command_type: ${commandType}`)
 			}
-			sendRelayMessage({
+			sendRelayMessageToTask(task, {
 				type: 'relay_result',
 				cmd_id: cmdId,
 				ok: true,
@@ -869,7 +1033,8 @@ export const useBatteryDetail = () => {
 				ts: Date.now(),
 			})
 		} catch (e) {
-			sendRelayMessage({
+			if (!isCommandContextCurrent()) return
+			sendRelayMessageToTask(task, {
 				type: 'relay_result',
 				cmd_id: cmdId,
 				ok: false,
@@ -879,8 +1044,8 @@ export const useBatteryDetail = () => {
 		}
 	}
 
-	const connectRelaySocket = async () => {
-		if (connType.value !== 'bluetooth' || !deviceId.value) return
+	const connectRelaySocket = async (expectedSession: DetailDataSessionToken = captureSession()) => {
+		if (connType.value !== 'bluetooth' || !deviceId.value || !isSessionCurrent(expectedSession)) return
 		if (relaySocketTask) return
 		const wsUrl = buildRelayWsUrl()
 		const token = getAccessToken()
@@ -893,8 +1058,14 @@ export const useBatteryDetail = () => {
 			})
 			relaySocketTask = task
 			task.onOpen(() => {
+				if (!isSessionCurrent(expectedSession) || relaySocketTask !== task) {
+					try {
+						task.close({})
+					} catch (e) {}
+					return
+				}
 				relaySocketOpen = true
-				sendRelayMessage({
+				sendRelayMessageToTask(task, {
 					device_id: deviceId.value,
 					token,
 					platform: getReportPlatform(),
@@ -907,6 +1078,7 @@ export const useBatteryDetail = () => {
 				}, RELAY_HEARTBEAT_MS) as unknown as number
 			})
 			task.onMessage((res: { data: unknown }) => {
+				if (!isSessionCurrent(expectedSession) || relaySocketTask !== task) return
 				const txt = socketMessageToText(res?.data).trim()
 				if (!txt || txt === 'pong') return
 				try {
@@ -917,35 +1089,46 @@ export const useBatteryDetail = () => {
 						return
 					}
 					if (type === 'relay_command') {
-						void executeRelayCommand(payload)
+						void executeRelayCommand(payload, {
+							task,
+							sessionToken: expectedSession,
+							sourceClient: client.value,
+						})
 					}
 				} catch (e) {
 					// ignore non-json messages
 				}
 			})
 			task.onError(() => {
+				if (relaySocketTask !== task) return
 				relaySocketOpen = false
 			})
 			task.onClose(() => {
+				const wasClosing = relayClosingTask === task
+				if (wasClosing) relayClosingTask = null
+				if (relaySocketTask !== task) {
+					return
+				}
 				relaySocketOpen = false
 				clearRelayHeartbeatTimer()
 				relaySocketTask = null
-				if (relayClosing) {
-					relayClosing = false
-					return
-				}
-				scheduleRelayReconnect()
+				if (wasClosing) return
+				if (isSessionCurrent(expectedSession)) scheduleRelayReconnect(expectedSession)
 			})
 		} catch (e) {
+			if (!isSessionCurrent(expectedSession)) return
 			log('relay socket connect failed', { err: formatErr(e) })
 			relaySocketTask = null
 			relaySocketOpen = false
-			scheduleRelayReconnect()
+			scheduleRelayReconnect(expectedSession)
 		}
 	}
 
-	const attachBleEntry = (entry: ReturnType<typeof getBleClientEntry>, options?: { retain?: boolean }) => {
-		if (!entry) return false
+	const attachBleEntry = (
+		entry: ReturnType<typeof getBleClientEntry>,
+		options?: { retain?: boolean; sessionToken?: DetailDataSessionToken }
+	) => {
+		if (!entry || (options?.sessionToken && !isSessionCurrent(options.sessionToken))) return false
 		stopCloudPolling()
 		if (bleCacheKey && bleCacheKey !== entry.key) {
 			releaseBleClient(bleCacheKey)
@@ -964,16 +1147,22 @@ export const useBatteryDetail = () => {
 		if (!isInstrumentSession()) {
 			void reportConnectionStatus(true, 'bluetooth')
 			void flushReportQueue()
-			void connectRelaySocket()
+			void connectRelaySocket(options?.sessionToken || captureSession())
 		}
 		return true
 	}
 
-	const validateWarmBleEntry = async (entry: BleClientEntry, reason: string) => {
+	const validateWarmBleEntry = async (
+		entry: BleClientEntry,
+		reason: string,
+		expectedSession: DetailDataSessionToken = captureSession()
+	) => {
+		if (!isSessionCurrent(expectedSession)) return false
 		try {
 			await withTimeout(entry.client.readUuid(), WARM_BLE_PROBE_TIMEOUT_MS, 'warm BLE probe')
-			return true
+			return isSessionCurrent(expectedSession)
 		} catch (e) {
+			if (!isSessionCurrent(expectedSession)) return false
 			log('warm ble probe failed, reconnect required', {
 				reason,
 				mac: entry.mac,
@@ -987,10 +1176,39 @@ export const useBatteryDetail = () => {
 		}
 	}
 
-	const attachWarmBleFromBattery = async (reason: string) => {
+	const validateAndAttachWarmBleEntry = async (
+		entry: BleClientEntry,
+		reason: string,
+		expectedSession: DetailDataSessionToken
+	) => {
+		if (!isSessionCurrent(expectedSession)) return false
+		const alreadyRetained = bleCacheKey === entry.key
+		if (!alreadyRetained) {
+			const retainedEntry = retainBleClient(entry.key)
+			if (retainedEntry !== entry) {
+				if (retainedEntry) releaseBleClient(retainedEntry.key)
+				return false
+			}
+		}
+		let attached = false
+		try {
+			if (!(await validateWarmBleEntry(entry, reason, expectedSession))) return false
+			if (!isSessionCurrent(expectedSession)) return false
+			attached = attachBleEntry(entry, { retain: false, sessionToken: expectedSession })
+			return attached
+		} finally {
+			if (!alreadyRetained && !attached) releaseBleClient(entry.key)
+		}
+	}
+
+	const attachWarmBleFromBattery = async (
+		reason: string,
+		expectedSession: DetailDataSessionToken = captureSession()
+	) => {
+		if (!isSessionCurrent(expectedSession)) return false
 		const decision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
 		if (!decision.ok || !decision.mac) return false
-		const entry = getBleClientEntry(decision.mac, { touch: true })
+		const entry = getBleClientEntry(decision.mac)
 		if (!entry) return false
 		log('load battery detail reuse warm ble', {
 			reason,
@@ -998,12 +1216,14 @@ export const useBatteryDetail = () => {
 			ble_mac: decision.mac,
 			cached_device_id: entry.deviceId,
 		})
-		if (!(await validateWarmBleEntry(entry, reason))) return false
-		return attachBleEntry(entry, { retain: true })
+		return validateAndAttachWarmBleEntry(entry, reason, expectedSession)
 	}
 
 	const startPolling = (c: BmsClient, options?: { force?: boolean }) => {
 		if (!options?.force && pollingActiveClient === c) return
+		const expectedSession = captureSession()
+		if (!isSessionCurrent(expectedSession)) return
+		const realtimeConnType = connType.value
 		stopPolling()
 		if (pollingPaused.value) return
 		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
@@ -1011,7 +1231,11 @@ export const useBatteryDetail = () => {
 		pollingGeneration += 1
 		const generation = pollingGeneration
 		const shouldContinuePolling = () =>
-			!pollingPaused.value && client.value === c && pollingActiveClient === c && pollingGeneration === generation
+			!pollingPaused.value &&
+			client.value === c &&
+			pollingActiveClient === c &&
+			pollingGeneration === generation &&
+			isSessionCurrent(expectedSession)
 		syncBmsDataLoading()
 		beginFirstFrameWait()
 		const run = async () => {
@@ -1024,14 +1248,16 @@ export const useBatteryDetail = () => {
 					timeoutMs: connType.value === 'mqtt' ? MQTT_STATUS_READ_TIMEOUT_MS : undefined,
 				})
 				if (!shouldContinuePolling()) return
+				dataArbiter = markRealtimeStatusSuccess(dataArbiter, Date.now())
 				status.value = nextStatus
-				if (connType.value === 'mqtt' && battery.value) {
+				if (realtimeConnType === 'mqtt' || realtimeConnType === 'bluetooth') {
+					connType.value = realtimeConnType
+					dataSourceMode.value = 'realtime'
+				}
+				if (realtimeConnType === 'mqtt' && battery.value) {
 					battery.value = { ...battery.value, is_online: 1 }
 				}
 				markFirstFrameSuccess()
-				if (connType.value === 'mqtt' || connType.value === 'bluetooth') {
-					dataSourceMode.value = 'realtime'
-				}
 				instrumentStatusFailCount = 0
 				instrumentPassthroughUnavailable.value = false
 				if (status.value) {
@@ -1066,9 +1292,28 @@ export const useBatteryDetail = () => {
 					log('poll failed', { err: formatErr(e) })
 				}
 				handleFirstFrameReadFailure(c, e)
-				if (!isInstrumentSession() && connType.value === 'mqtt' && deviceId.value) {
-					log('mqtt realtime poll failed, refresh cloud telemetry fallback', { err: formatErr(e) })
-					await refreshCloudTelemetry()
+				if (!isInstrumentSession() && realtimeConnType === 'mqtt' && deviceId.value) {
+					const failure = markRealtimeStatusFailure(dataArbiter, Date.now())
+					dataArbiter = failure.state
+					if (failure.shouldFallback) {
+						log('mqtt realtime poll failed, refresh cloud telemetry fallback', {
+							err: formatErr(e),
+							consecutive_failures: dataArbiter.consecutiveRealtimeFailures,
+						})
+						await refreshCloudTelemetry({
+							requestKind: 'fallback',
+							sessionToken: expectedSession,
+							fallbackContext: {
+								sourceClient: c,
+								pollingGeneration: generation,
+							},
+						})
+					} else {
+						log('mqtt realtime poll failed, preserve last realtime status', {
+							err: formatErr(e),
+							consecutive_failures: dataArbiter.consecutiveRealtimeFailures,
+						})
+					}
 				}
 			} finally {
 				syncBmsDataLoading()
@@ -1137,10 +1382,11 @@ export const useBatteryDetail = () => {
 			releaseBleClient(bleCacheKey)
 			bleCacheKey = null
 		}
-		try {
-			await mqttTransport?.disconnect()
-		} catch (e) {}
+		const transportToDisconnect = mqttTransport
 		mqttTransport = null
+		try {
+			await transportToDisconnect?.disconnect()
+		} catch (e) {}
 		log('disconnectAll done')
 	}
 
@@ -1153,7 +1399,11 @@ export const useBatteryDetail = () => {
 		return disconnectBleClient(bleKey)
 	}
 
-	const connectBleFirst = async (options?: ConnectAutoOptions): Promise<boolean> => {
+	const connectBleFirst = async (
+		options?: ConnectAutoOptions,
+		expectedSession: DetailDataSessionToken = captureSession()
+	): Promise<boolean> => {
+		if (!isSessionCurrent(expectedSession)) return false
 		const decision = canBleAutoConnect(battery.value?.bms_comm_type, battery.value?.ble_mac)
 		if (!decision.ok || !decision.mac) return false
 		if (options?.preserveCurrentBle && hasCurrentBleTarget(decision.mac)) {
@@ -1169,16 +1419,19 @@ export const useBatteryDetail = () => {
 				probe: options?.probe !== false,
 				preferredDeviceId: isInstrumentSession() ? instrumentPreferredDeviceId : undefined,
 			})
-			if (!entry) return false
-			return attachBleEntry(entry, { retain: true })
+			if (!entry || !isSessionCurrent(expectedSession)) return false
+			return attachBleEntry(entry, { retain: true, sessionToken: expectedSession })
 		} catch (e) {
+			if (!isSessionCurrent(expectedSession)) return false
 			log('ble connect failed', { err: e instanceof Error ? e.message : String(e || '') })
 			return false
 		}
 	}
 
-	const connectSocketBridge = async (): Promise<boolean> => {
+	const connectSocketBridge = async (expectedSession: DetailDataSessionToken = captureSession()): Promise<boolean> => {
+		if (!isSessionCurrent(expectedSession)) return false
 		realtimeOccupied.value = false
+		let nextTransport: MqttTransportLike | null = null
 		try {
 			closeRelaySocket()
 			const wsUrl = buildSocketBridgeWsUrl()
@@ -1186,15 +1439,21 @@ export const useBatteryDetail = () => {
 			if (!wsUrl) throw new Error('socket bridge ws url not configured')
 			if (!token) throw new Error('token missing')
 			log('socket bridge connect start', { wsUrl, deviceId: deviceId.value })
-			mqttTransport = createUniMqttSocketBmsTransport({
+			nextTransport = createUniMqttSocketBmsTransport({
 				wsUrl,
-				deviceId: deviceId.value,
+				deviceId: expectedSession.deviceId,
 				token,
 				platform: getReportPlatform(),
 				logger: console as any,
 			})
-			await mqttTransport.connect()
-			const c = new BmsClient({ transport: mqttTransport })
+			await nextTransport.connect()
+			if (!isSessionCurrent(expectedSession)) {
+				await nextTransport.disconnect().catch(() => {})
+				return false
+			}
+			stopCloudPolling()
+			mqttTransport = nextTransport
+			const c = new BmsClient({ transport: nextTransport })
 			client.value = c
 			connType.value = 'mqtt'
 			dataSourceMode.value = 'realtime'
@@ -1204,43 +1463,57 @@ export const useBatteryDetail = () => {
 			log('socket bridge connect ok', { wsUrl })
 			return true
 		} catch (e) {
+			if (!isSessionCurrent(expectedSession)) {
+				await nextTransport?.disconnect().catch(() => {})
+				return false
+			}
 			if (isMqttSocketOccupiedError(e)) {
 				log('socket bridge occupied, fallback to cloud report mode', { err: formatErr(e) })
 				try {
-					await mqttTransport?.disconnect()
+					await nextTransport?.disconnect()
 				} catch (e2) {}
-				mqttTransport = null
+				if (!isSessionCurrent(expectedSession)) return false
+				if (mqttTransport === nextTransport) mqttTransport = null
 				client.value = null
 				realtimeOccupied.value = true
-				await activateCloudReportMode()
+				await activateCloudReportMode(expectedSession)
+				if (!isSessionCurrent(expectedSession)) return false
 				return true
 			}
 			log('socket bridge connect failed', { err: e instanceof Error ? e.message : String(e || '') })
 			try {
-				await mqttTransport?.disconnect()
+				await nextTransport?.disconnect()
 			} catch (e2) {}
-			mqttTransport = null
+			if (mqttTransport === nextTransport) mqttTransport = null
 			return false
 		}
 	}
 
 	const connectAuto = async (options?: ConnectAutoOptions) => {
 		if (!hasConnectTarget() || connecting.value) return
+		const expectedSession = captureSession()
+		if (!isSessionCurrent(expectedSession)) return
+		const attemptSequence = ++connectAttemptSequence
+		const isConnectAttemptCurrent = () =>
+			connectAttemptSequence === attemptSequence && isSessionCurrent(expectedSession)
 		connecting.value = true
 		try {
-			if (options?.preserveCurrentBle && (await attachWarmBleFromBattery('connect-auto'))) return
+			if (options?.preserveCurrentBle && (await attachWarmBleFromBattery('connect-auto', expectedSession))) return
+			if (!isConnectAttemptCurrent()) return
 			if (!options?.preserveCurrentBle) {
 				await disconnectAll({
 					preserveFirstFrameState: options?.preserveFirstFrameState,
 					preserveStatus: options?.preserveStatus,
 				})
+				if (!isConnectAttemptCurrent()) return
 			}
 			if (isInstrumentSession()) {
 				log('connectAuto instrument session', {
 					ble_mac: battery.value?.ble_mac ?? null,
 					device_name: battery.value?.device_name ?? null,
 				})
-				if (await connectBleFirst(options)) return
+				if (await connectBleFirst(options, expectedSession)) return
+				if (!isConnectAttemptCurrent()) return
 				connType.value = 'offline'
 				return
 			}
@@ -1256,28 +1529,33 @@ export const useBatteryDetail = () => {
 			})
 			if (treatBleOnly) {
 				log('connectAuto choose BLE-only')
-				if (bleDecision.ok && (await connectBleFirst(options))) return
+				if (bleDecision.ok && (await connectBleFirst(options, expectedSession))) return
+				if (!isConnectAttemptCurrent()) return
 				connType.value = 'offline'
 				return
 			}
 			if (isCloudCapableBattery()) {
 				log('connectAuto choose 4G socket bridge')
-				if (await connectSocketBridge()) return
+				if (await connectSocketBridge(expectedSession)) return
+				if (!isConnectAttemptCurrent()) return
 				log('connectAuto socket bridge failed, fallback to cloud report mode')
-				await activateCloudReportMode()
+				await activateCloudReportMode(expectedSession)
 				return
 			}
-			if (bleDecision.ok && (await connectBleFirst(options))) return
+			if (bleDecision.ok && (await connectBleFirst(options, expectedSession))) return
+			if (!isConnectAttemptCurrent()) return
 			log('connectAuto BLE not available, try remote transport')
 			connType.value = 'offline'
 			dataSourceMode.value = 'offline'
 		} finally {
-			connecting.value = false
+			if (connectAttemptSequence === attemptSequence) connecting.value = false
 		}
 	}
 
 	requestFirstFrameReconnect = (sourceClient: BmsClient, reason: string, err?: unknown) => {
 		if (firstFrameRecovering || status.value || client.value !== sourceClient || connType.value !== 'bluetooth') return
+		const expectedSession = captureSession()
+		if (!isSessionCurrent(expectedSession)) return
 		firstFrameRecovering = true
 		firstFrameAutoReconnectCount += 1
 		bmsDataLoadPhase.value = 'retrying'
@@ -1290,31 +1568,51 @@ export const useBatteryDetail = () => {
 		})
 		void (async () => {
 			await disconnectAll({ preserveFirstFrameState: true })
+			if (!isSessionCurrent(expectedSession)) return
 			if (bleKey) {
 				try {
 					await disconnectBleClient(bleKey)
 				} catch (e) {}
 			}
+			if (!isSessionCurrent(expectedSession)) return
 			await sleep(FIRST_FRAME_RECONNECT_DELAY_MS)
-			if (!status.value && hasConnectTarget()) {
+			if (isSessionCurrent(expectedSession) && !status.value && hasConnectTarget()) {
 				await connectAuto({ preserveCurrentBle: false, probe: true, preserveFirstFrameState: true })
 			}
 		})()
 			.catch((e) => {
+				if (!isSessionCurrent(expectedSession)) return
 				log('first frame auto reconnect failed', { err: formatErr(e) })
 				if (!status.value) bmsDataLoadPhase.value = 'failed'
 			})
 			.finally(() => {
-				firstFrameRecovering = false
-				syncBmsDataLoading()
+				if (isSessionCurrent(expectedSession)) {
+					firstFrameRecovering = false
+					syncBmsDataLoading()
+				}
 			})
 	}
 
-	const refreshCloudBatteryDetail = async (nextId: string) => {
+	const refreshCloudBatteryDetail = async (
+		nextId: string,
+		expectedSession: DetailDataSessionToken = captureSession()
+	) => {
+		if (!isSessionCurrent(expectedSession) || expectedSession.deviceId !== nextId) return false
+		const requestSequence = ++detailRequestSequence
+		latestDetailRequestSequence = requestSequence
 		log('load battery detail start', { deviceId: nextId })
 		const rsp = await appBatteryDetail(nextId)
+		if (!isSessionCurrent(expectedSession) || latestDetailRequestSequence !== requestSequence) return false
 		if (rsp && (rsp as any).code === 200) {
 			const nextBattery = (rsp as any).data as AppBatteryDetail
+			if (String(nextBattery?.device_id || '').trim() !== nextId) {
+				log('load battery detail ignored', {
+					deviceId: nextId,
+					payload_device_id: nextBattery?.device_id || '',
+					reason: 'payload_device_mismatch',
+				})
+				return false
+			}
 			battery.value = battery.value ? ({ ...battery.value, ...nextBattery } as AppBatteryDetail) : nextBattery
 			log('load battery detail ok', {
 				device_number: (battery.value as any)?.device_number,
@@ -1332,9 +1630,15 @@ export const useBatteryDetail = () => {
 	const loadById = async (id: string, options?: LoadByIdOptions) => {
 		const nextId = String(id || '').trim()
 		if (!nextId) return
+		const previousDeviceId = deviceId.value
+		const previousSessionMode = sessionMode.value
 		if (nextId !== deviceId.value || sessionMode.value !== 'cloud') {
 			resetReportState({ clearQueue: true })
 		}
+		const expectedSession = startSession(`cloud:${nextId}`, nextId)
+		if (!expectedSession) return
+		await disconnectAll()
+		if (!isSessionCurrent(expectedSession)) return
 		sessionMode.value = 'cloud'
 		deviceId.value = nextId
 		status.value = null
@@ -1344,6 +1648,7 @@ export const useBatteryDetail = () => {
 		instrumentStatusFailCount = 0
 		instrumentPreferredDeviceId = ''
 		instrumentPassthroughUnavailable.value = false
+		if (previousDeviceId !== nextId || previousSessionMode !== 'cloud') battery.value = null
 		const handoff =
 			options?.handoff && String(options.handoff.deviceId || '').trim() === nextId ? options.handoff : null
 		if (handoff) {
@@ -1356,31 +1661,46 @@ export const useBatteryDetail = () => {
 				item_uuid: handoff.itemUuid || null,
 				comm_chip_id: null,
 			} as AppBatteryDetail
-			const warmEntry = getBleClientEntry(handoff.bleMac, { touch: true })
-			if (warmEntry && (await validateWarmBleEntry(warmEntry, 'handoff'))) {
+			const warmEntry = getBleClientEntry(handoff.bleMac)
+			if (warmEntry && (await validateAndAttachWarmBleEntry(warmEntry, 'handoff', expectedSession))) {
+				if (!isSessionCurrent(expectedSession)) return
 				log('load battery detail use warm ble', { deviceId: nextId, ble_mac: handoff.bleMac })
-				attachBleEntry(warmEntry, { retain: true })
 			} else if (options?.preferWarmBle !== false) {
+				if (!isSessionCurrent(expectedSession)) return
 				log('load battery detail warm ble missing, reconnect', { deviceId: nextId, ble_mac: handoff.bleMac })
 				void connectAuto({ preserveCurrentBle: false, probe: true })
 			}
-			void refreshCloudBatteryDetail(nextId)
+			void refreshCloudBatteryDetail(nextId, expectedSession)
 			return
 		}
-		const ok = await refreshCloudBatteryDetail(nextId)
-		if (!ok) return
+		const ok = await refreshCloudBatteryDetail(nextId, expectedSession)
+		if (!ok || !isSessionCurrent(expectedSession)) return
 		if (isCloudCapableBattery()) {
-			void refreshCloudTelemetry({ bootstrapOnly: true })
+			void refreshCloudTelemetry({ bootstrapOnly: true, sessionToken: expectedSession })
 			void connectAuto({ preserveCurrentBle: false, preserveStatus: true })
 			return
 		}
-		if (options?.preferWarmBle !== false && (await attachWarmBleFromBattery('cloud-detail'))) return
+		if (
+			options?.preferWarmBle !== false &&
+			(await attachWarmBleFromBattery('cloud-detail', expectedSession))
+		) {
+			return
+		}
+		if (!isSessionCurrent(expectedSession)) return
 		void connectAuto({ preserveCurrentBle: options?.preferWarmBle !== false })
 	}
 
-	const loadInstrumentSession = ({ bleMac, deviceName, deviceId: preferredDeviceId }: LoadInstrumentSessionOptions) => {
+	const loadInstrumentSession = async ({
+		bleMac,
+		deviceName,
+		deviceId: preferredDeviceId,
+	}: LoadInstrumentSessionOptions) => {
 		const normalizedMac = normalizeMac(bleMac)
 		if (!normalizedMac) return
+		const expectedSession = startSession(`instrument:${normalizedMac}`, '')
+		if (!expectedSession) return
+		await disconnectAll()
+		if (!isSessionCurrent(expectedSession)) return
 		resetReportState({ clearQueue: true })
 		resetFirstFrameState()
 		sessionMode.value = 'instrument'
@@ -1409,6 +1729,7 @@ export const useBatteryDetail = () => {
 	}
 
 	const retryBmsDataRead = () => {
+		if (!isSessionCurrent(captureSession())) return
 		if (connecting.value || firstFrameRecovering) return
 		instrumentPassthroughUnavailable.value = false
 		instrumentStatusFailCount = 0
@@ -1427,6 +1748,8 @@ export const useBatteryDetail = () => {
 
 	const reconnectBmsData = async () => {
 		if (connecting.value || firstFrameRecovering) return
+		const expectedSession = captureSession()
+		if (!isSessionCurrent(expectedSession)) return
 		instrumentPassthroughUnavailable.value = false
 		instrumentStatusFailCount = 0
 		firstFrameRecovering = true
@@ -1438,20 +1761,37 @@ export const useBatteryDetail = () => {
 		const bleKey = bleCacheKey || String(battery.value?.ble_mac || '').trim()
 		try {
 			await disconnectAll({ preserveFirstFrameState: true })
+			if (!isSessionCurrent(expectedSession)) return
 			if (bleKey) {
 				try {
 					await disconnectBleClient(bleKey)
 				} catch (e) {}
 			}
+			if (!isSessionCurrent(expectedSession)) return
 			await sleep(FIRST_FRAME_RECONNECT_DELAY_MS)
+			if (!isSessionCurrent(expectedSession)) return
 			await connectAuto({ preserveCurrentBle: false, probe: true, preserveFirstFrameState: true })
 		} catch (e) {
+			if (!isSessionCurrent(expectedSession)) return
 			log('manual bms data reconnect failed', { err: formatErr(e) })
 			if (!status.value) bmsDataLoadPhase.value = 'failed'
 		} finally {
-			firstFrameRecovering = false
-			syncBmsDataLoading()
+			if (isSessionCurrent(expectedSession)) {
+				firstFrameRecovering = false
+				syncBmsDataLoading()
+			}
 		}
+	}
+
+	const dispose = async () => {
+		if (componentDisposed) return
+		componentDisposed = true
+		dataArbiter = disposeDetailDataSession(dataArbiter)
+		latestDetailRequestSequence = ++detailRequestSequence
+		connectAttemptSequence += 1
+		connecting.value = false
+		firstFrameRecovering = false
+		await disconnectAll()
 	}
 
 	return {
@@ -1477,5 +1817,6 @@ export const useBatteryDetail = () => {
 		disconnectBluetooth,
 		retryBmsDataRead,
 		reconnectBmsData,
+		dispose,
 	}
 }

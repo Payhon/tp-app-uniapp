@@ -44,6 +44,7 @@ export type AppBatteryCurrentTelemetry = {
 	device_id: string
 	is_online: number
 	last_report_ts?: number
+	snapshot_ts?: number
 	current?: Record<string, AppBatteryCurrentTelemetryValue>
 	snapshot?: Record<string, unknown> | null
 	[key: string]: unknown
@@ -161,6 +162,7 @@ const normalizeLegacyCurrentTelemetry = (deviceId: string, rows: unknown): AppBa
 		device_id: deviceId,
 		is_online: freshMs >= 0 && freshMs <= 300_000 ? 1 : 0,
 		last_report_ts: lastReportTs,
+		snapshot_ts: 0,
 		current,
 		snapshot: null,
 	}

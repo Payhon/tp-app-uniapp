@@ -209,6 +209,37 @@ const canShowHistoryTab = ref(false)
 const historyTabRef = ref<HistoryTabExposed | null>(null)
 const allowScanHandoff = ref(false)
 const meterPanelVisible = ref(true)
+let pageActive = true
+let pageLifecycleGeneration = 0
+let scanLoadingVisible = false
+let scanOperationSequence = 0
+let activeScanOperation = 0
+const pageTimers = new Set<ReturnType<typeof setTimeout>>()
+const capturePageLifecycle = () => pageLifecycleGeneration
+const isPageLifecycleCurrent = (generation: number) => pageActive && pageLifecycleGeneration === generation
+const schedulePageTask = (callback: () => void, delayMs: number, generation: number) => {
+	const timer = setTimeout(() => {
+		pageTimers.delete(timer)
+		if (!isPageLifecycleCurrent(generation)) return
+		callback()
+	}, delayMs)
+	pageTimers.add(timer)
+	return timer
+}
+const clearPageTasks = () => {
+	for (const timer of pageTimers) clearTimeout(timer)
+	pageTimers.clear()
+}
+const isScanOperationCurrent = (operation: number, pageGeneration: number) =>
+	activeScanOperation === operation && isPageLifecycleCurrent(pageGeneration)
+const finishScanOperation = (operation: number, pageGeneration: number) => {
+	if (activeScanOperation !== operation) return
+	activeScanOperation = 0
+	if (scanLoadingVisible) {
+		scanLoadingVisible = false
+		if (isPageLifecycleCurrent(pageGeneration)) uni.hideLoading()
+	}
+}
 const {
 	battery,
 	status,
@@ -222,10 +253,10 @@ const {
 	sessionMode,
 	loadById,
 	loadInstrumentSession,
-	disconnectAll,
 	disconnectBluetooth,
 	retryBmsDataRead,
 	reconnectBmsData,
+	dispose,
 	pausePolling,
 	resumePolling,
 } = useBatteryDetail()
@@ -432,23 +463,32 @@ function safeDecodeURIComponent(input: string): string {
 	}
 }
 
-const reconnectInstrumentSession = async (options: { meterBleMac: string; meterName: string; reason: string }) => {
+const reconnectInstrumentSession = async (options: {
+	meterBleMac: string
+	meterName: string
+	reason: string
+	pageGeneration?: number
+	scanOperation?: number
+}) => {
 	const { meterBleMac, meterName, reason } = options
-	if (!meterBleMac) return
+	const pageGeneration = options.pageGeneration ?? capturePageLifecycle()
+	if (!meterBleMac || !isPageLifecycleCurrent(pageGeneration)) return
 	const disconnected = await disconnectBluetooth()
+	if (!isPageLifecycleCurrent(pageGeneration)) return
 	console.log('[meter-session] reconnect instrument session', {
 		meter_ble_mac: meterBleMac,
 		disconnected,
 		reason,
 		reconnect_after_ms: 900,
 	})
-	setTimeout(() => {
-		loadInstrumentSession({
+	schedulePageTask(() => {
+		if (options.scanOperation != null && scanOperationSequence !== options.scanOperation) return
+		void loadInstrumentSession({
 			bleMac: meterBleMac,
 			deviceId: '',
 			deviceName: meterName || (t('deviceDetail.meter.deviceName') as string),
 		})
-	}, 450)
+	}, 450, pageGeneration)
 }
 
 const onDisconnectBluetooth = async () => {
@@ -513,6 +553,8 @@ watch(
 
 const scanAndBindBms = async () => {
 	if (!ensureLoggedIn()) return
+	const pageGeneration = capturePageLifecycle()
+	if (!isPageLifecycleCurrent(pageGeneration)) return
 	const activeClient = client.value
 	if (!activeClient || connType.value !== 'bluetooth') {
 		uni.showToast({ title: t('deviceDetail.toast.noConnection') as string, icon: 'none' })
@@ -520,29 +562,39 @@ const scanAndBindBms = async () => {
 	}
 	const meterBleMac = String(battery.value?.ble_mac || '').trim()
 	const meterName = String(battery.value?.device_name || '').trim()
+	if (activeScanOperation !== 0) return
+	const scanOperation = ++scanOperationSequence
+	activeScanOperation = scanOperation
 	uni.scanCode({
 		onlyFromCamera: true,
 		scanType: ['qrCode'],
 		success: async (result) => {
-			const parsed = parseAddDeviceScanCode((result as any)?.result)
-			console.log('[meter-session] scan result', {
-				raw: String((result as any)?.result || ''),
-				parsed,
-				meter_ble_mac: meterBleMac || null,
-			})
-			if (!parsed || parsed.type !== 'mac' || parsed.deviceType !== DEVICE_TYPE_BMS) {
-				uni.showToast({ title: t('deviceDetail.meter.onlyBmsMacTip') as string, icon: 'none' })
+			if (!isScanOperationCurrent(scanOperation, pageGeneration)) {
+				finishScanOperation(scanOperation, pageGeneration)
 				return
 			}
-			uni.showLoading({ title: t('common.loading') as string, mask: true })
-			pausePolling()
-			await new Promise((resolve) => setTimeout(resolve, 160))
 			try {
+				const parsed = parseAddDeviceScanCode((result as any)?.result)
+				console.log('[meter-session] scan result', {
+					raw: String((result as any)?.result || ''),
+					parsed,
+					meter_ble_mac: meterBleMac || null,
+				})
+				if (!parsed || parsed.type !== 'mac' || parsed.deviceType !== DEVICE_TYPE_BMS) {
+					uni.showToast({ title: t('deviceDetail.meter.onlyBmsMacTip') as string, icon: 'none' })
+					return
+				}
+				scanLoadingVisible = true
+				uni.showLoading({ title: t('common.loading') as string, mask: true })
+				pausePolling()
+				await new Promise((resolve) => setTimeout(resolve, 160))
+				if (!isScanOperationCurrent(scanOperation, pageGeneration) || client.value !== activeClient) return
 				console.log('[meter-session] configure meter target start', {
 					meter_ble_mac: meterBleMac || null,
 					target_bms_mac: parsed.value,
 				})
 				await activeClient.configureMeterMac({ meterAddress: 0xfc, mac: mac12ToColon(parsed.value) })
+				if (!isScanOperationCurrent(scanOperation, pageGeneration) || client.value !== activeClient) return
 				console.log('[meter-session] configure meter target ok', {
 					meter_ble_mac: meterBleMac || null,
 					target_bms_mac: parsed.value,
@@ -552,8 +604,11 @@ const scanAndBindBms = async () => {
 					meterBleMac,
 					meterName,
 					reason: 'configure_ack',
+					pageGeneration,
+					scanOperation,
 				})
 			} catch (e) {
+				if (!isScanOperationCurrent(scanOperation, pageGeneration)) return
 				console.error('[meter-session] configure meter target failed', e)
 				const errMessage = e instanceof Error ? e.message : String(e || '')
 				const isTimeout = errMessage.includes('BLE request timeout')
@@ -567,24 +622,29 @@ const scanAndBindBms = async () => {
 						meterBleMac,
 						meterName,
 						reason: 'configure_timeout',
+						pageGeneration,
+						scanOperation,
 					})
 				} else {
 					uni.showToast({ title: t('deviceDetail.meter.bindTargetFailed') as string, icon: 'none' })
 					if (activeTab.value !== 2 && activeTab.value !== 3) {
-						setTimeout(() => {
+						schedulePageTask(() => {
+							if (scanOperationSequence !== scanOperation) return
 							resumePolling()
-						}, 300)
+						}, 300, pageGeneration)
 					}
 				}
 			} finally {
-				uni.hideLoading()
+				finishScanOperation(scanOperation, pageGeneration)
 			}
 		},
-		fail: () => {},
+		fail: () => finishScanOperation(scanOperation, pageGeneration),
 	})
 }
 
 onLoad((query) => {
+	pageActive = true
+	pageLifecycleGeneration += 1
 	const rawQuery = (query as any) || {}
 	void loadHistoryPermission()
 	if (String(rawQuery.session_mode || '').trim() === 'instrument') {
@@ -617,7 +677,16 @@ onReachBottom(() => {
 })
 
 onUnload(() => {
-	disconnectAll()
+	pageActive = false
+	pageLifecycleGeneration += 1
+	scanOperationSequence += 1
+	activeScanOperation = 0
+	clearPageTasks()
+	if (scanLoadingVisible) {
+		scanLoadingVisible = false
+		uni.hideLoading()
+	}
+	void dispose()
 })
 </script>
 
