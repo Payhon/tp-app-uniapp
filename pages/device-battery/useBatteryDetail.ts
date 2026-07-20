@@ -72,6 +72,12 @@ type RealtimeFallbackContext = {
 	pollingGeneration: number
 }
 
+type PollingStartOptions = {
+	force?: boolean
+	intervalMs?: number
+	initialDelayMs?: number
+}
+
 type BmsDataLoadPhase = 'idle' | 'reading' | 'slow' | 'retrying' | 'failed'
 
 type MqttTransportLike = UniMqttSocketBmsTransport
@@ -456,6 +462,7 @@ export const useBatteryDetail = () => {
 
 	let pollTimer: number | null = null
 	let pollingActiveClient: BmsClient | null = null
+	let pollingIntervalMs = 0
 	let pollingGeneration = 0
 	let firstFrameSlowTimer: number | null = null
 	let cloudPollTimer: number | null = null
@@ -509,6 +516,7 @@ export const useBatteryDetail = () => {
 			pollTimer = null
 		}
 		pollingActiveClient = null
+		pollingIntervalMs = 0
 		pollingGeneration += 1
 	}
 
@@ -1219,8 +1227,10 @@ export const useBatteryDetail = () => {
 		return validateAndAttachWarmBleEntry(entry, reason, expectedSession)
 	}
 
-	const startPolling = (c: BmsClient, options?: { force?: boolean }) => {
-		if (!options?.force && pollingActiveClient === c) return
+	const startPolling = (c: BmsClient, options?: PollingStartOptions) => {
+		const intervalMs = Math.max(1_000, Number(options?.intervalMs || POLL_INTERVAL_MS))
+		const initialDelayMs = Math.max(0, Number(options?.initialDelayMs || 0))
+		if (!options?.force && pollingActiveClient === c && pollingIntervalMs === intervalMs) return
 		const expectedSession = captureSession()
 		if (!isSessionCurrent(expectedSession)) return
 		const realtimeConnType = connType.value
@@ -1228,6 +1238,7 @@ export const useBatteryDetail = () => {
 		if (pollingPaused.value) return
 		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 		pollingActiveClient = c
+		pollingIntervalMs = intervalMs
 		pollingGeneration += 1
 		const generation = pollingGeneration
 		const shouldContinuePolling = () =>
@@ -1328,15 +1339,19 @@ export const useBatteryDetail = () => {
 				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 				await run()
 				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
-				const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : POLL_INTERVAL_MS
+				const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : intervalMs
 				scheduleNext(nextDelay)
 			}, delayMs) as unknown as number
 		}
-		void run().finally(() => {
-			if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
-			const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : POLL_INTERVAL_MS
-			scheduleNext(nextDelay)
-		})
+		if (initialDelayMs > 0) {
+			scheduleNext(initialDelayMs)
+		} else {
+			void run().finally(() => {
+				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
+				const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : intervalMs
+				scheduleNext(nextDelay)
+			})
+		}
 	}
 
 	const pausePolling = () => {
@@ -1346,10 +1361,10 @@ export const useBatteryDetail = () => {
 		bmsDataLoading.value = false
 	}
 
-	const resumePolling = () => {
+	const resumePolling = (options?: PollingStartOptions) => {
 		pollingPaused.value = false
 		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
-		if (client.value) startPolling(client.value)
+		if (client.value) startPolling(client.value, options)
 		else syncBmsDataLoading()
 	}
 

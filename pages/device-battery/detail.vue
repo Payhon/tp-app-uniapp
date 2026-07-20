@@ -120,7 +120,7 @@
 				:otaChecking="otaCheckState.checking"
 				:otaNeedUpgrade="showOtaBadge"
 				:onPausePolling="pausePolling"
-				:onResumePolling="resumePolling"
+				:onResumePolling="applyCurrentPollingPolicy"
 				@ota-state-change="patchOtaCheckState"
 			/>
 			<history-tab
@@ -186,6 +186,7 @@ import { consumeDeviceDetailHandoff } from '@/common/device-provision/detail-han
 import { DEVICE_TYPE_BMS, isMeterMac } from '@/common/device-provision/device-prefix-shared'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { getWindowInfo } from '@/common/platform'
+import { resolveDetailPollingPolicy } from './detail-polling-policy'
 import { useBatteryDetail } from './useBatteryDetail'
 const { t } = useI18n()
 
@@ -500,28 +501,27 @@ const onDisconnectBluetooth = async () => {
 	})
 }
 
-const isRealtimeDataTab = (tab: number) => tab === 0 || tab === 1
-
-watch(
-	() => activeTab.value,
-	(tab) => {
-		if (tab === 2 || tab === 3) {
-			pausePolling()
-		} else {
-			resumePolling()
-		}
-	},
-	{ immediate: true }
-)
+const applyCurrentPollingPolicy = () => {
+	const policy = resolveDetailPollingPolicy({
+		tab: activeTab.value,
+		connType: connType.value,
+		hasClient: !!client.value,
+		connecting: connecting.value,
+	})
+	if (policy.mode === 'paused') {
+		pausePolling()
+		return
+	}
+	if (policy.mode === 'mqtt_keepalive') {
+		resumePolling({ intervalMs: policy.intervalMs, initialDelayMs: policy.initialDelayMs })
+		return
+	}
+	resumePolling()
+}
 
 watch(
 	() => [activeTab.value, connType.value, !!client.value, connecting.value] as const,
-	([tab, currentConnType, hasClient, isConnecting]) => {
-		if (!isRealtimeDataTab(tab)) return
-		if (isConnecting || !hasClient) return
-		if (currentConnType !== 'mqtt' && currentConnType !== 'bluetooth') return
-		resumePolling()
-	},
+	() => applyCurrentPollingPolicy(),
 	{ immediate: true }
 )
 
