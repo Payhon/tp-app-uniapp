@@ -402,13 +402,13 @@ import {
 } from '@/common/lib/bms-protocol/function-config'
 import { bootOtaUpgrade } from '@/common/lib/bms-protocol/boot-ota'
 import { getMqttBmsBootOtaRuntimeOptions } from '@/common/lib/bms-protocol/boot-ota-runtime-options'
+import { canAccessDeviceParam } from '@/common/lib/bms-protocol/param-permission'
 import {
 	BMS_PARAM,
 	PARAM_CATEGORIES,
 	PARAM_DEF_BY_KEY,
 	getFactoryPermissionKey,
 	getFunctionPermissionKey,
-	getParamPermissionKey,
 	listParamsByCategory,
 } from '@/common/lib/bms-protocol/param-registry'
 import { getWindowInfo } from '@/common/platform'
@@ -539,10 +539,6 @@ const loaded = reactive({
 })
 
 const applyPollingState = () => {
-	if (props.active) {
-		props.onPausePolling && props.onPausePolling()
-		return
-	}
 	props.onResumePolling && props.onResumePolling()
 }
 
@@ -679,12 +675,8 @@ const deviceParamPerm = reactive({
 })
 const deviceParamPermSet = computed(() => new Set(deviceParamPerm.keys))
 
-const canAccessParamKey = (actualKey: string) => {
-	if (deviceParamPerm.allowAll) return true
-	const permKey = getParamPermissionKey(actualKey)
-	if (!permKey) return true
-	return deviceParamPermSet.value.has(permKey)
-}
+const canAccessParamKey = (actualKey: string) =>
+	canAccessDeviceParam(deviceParamPerm.allowAll, deviceParamPermSet.value, actualKey)
 
 const canAccessPermissionKey = (permissionKey: string) => {
 	if (deviceParamPerm.allowAll) return true
