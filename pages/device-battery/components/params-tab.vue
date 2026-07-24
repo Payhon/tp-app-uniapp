@@ -1591,6 +1591,8 @@ type BootOtaRunOptions = {
 	bootPacketTimeoutMs?: number
 	finalizeTimeoutMs?: number
 	finalizeAssumeSuccessOnTimeout?: boolean
+	finalizeMaxAttempts?: number
+	finalizeDisableAlternateWriteRetry?: boolean
 	terminalPacketWriteErrorAsComplete?: boolean
 	finalizeDelayMs?: number
 	requireFinalPacketAck?: boolean
@@ -1623,8 +1625,10 @@ const getBleBootOtaRuntimeOptions = ({
 	if (isMeterUpgrade) {
 		return {
 			finalizeDelayMs: 2000,
-			finalizeTimeoutMs: shouldRelaxBleFinalize ? 12000 : undefined,
+			finalizeTimeoutMs: shouldRelaxBleFinalize ? 5000 : undefined,
 			finalizeAssumeSuccessOnTimeout: false,
+			finalizeMaxAttempts: isBluetooth ? 1 : undefined,
+			finalizeDisableAlternateWriteRetry: isBluetooth,
 			terminalPacketWriteErrorAsComplete: false,
 			requireFinalPacketAck: true,
 			finalizeBurstIntervalsMs: [300, 600, 900],
@@ -1642,8 +1646,10 @@ const getBleBootOtaRuntimeOptions = ({
 		return getMqttBmsBootOtaRuntimeOptions(logger)
 	}
 	return {
-		finalizeTimeoutMs: shouldRelaxBleFinalize ? 6000 : undefined,
+		finalizeTimeoutMs: shouldRelaxBleFinalize ? 5000 : undefined,
 		finalizeAssumeSuccessOnTimeout: false,
+		finalizeMaxAttempts: isBluetooth ? 1 : undefined,
+		finalizeDisableAlternateWriteRetry: isBluetooth,
 		terminalPacketWriteErrorAsComplete: false,
 		requireFinalPacketAck: true,
 		finalizeBurstIntervalsMs: shouldRelaxBleFinalize ? [300, 600, 900] : undefined,
@@ -1663,6 +1669,7 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 	const prevMinFrameIntervalMs =
 		transportAny && typeof transportAny.minFrameIntervalMs === 'number' ? transportAny.minFrameIntervalMs : undefined
 	const prevTransportLogger = transportAny && 'logger' in transportAny ? transportAny.logger : undefined
+	let exclusiveBootSessionStarted = false
 	if (options?.minFrameIntervalMs != null && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
 		const nextMinFrameIntervalMs = Math.max(0, options.minFrameIntervalMs)
 		transportAny.minFrameIntervalMs =
@@ -1675,7 +1682,10 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 		transportAny.logger = runLogger
 	}
 	const otaTransport = {
-		request: (frameBytes: Uint8Array, overrideOptions?: { timeoutMs?: number; suppressTimeoutLog?: boolean }) => {
+		request: (
+			frameBytes: Uint8Array,
+			overrideOptions?: { timeoutMs?: number; suppressTimeoutLog?: boolean; disableAlternateWriteRetry?: boolean }
+		) => {
 			const t = transportAny
 			if (typeof t?.request !== 'function') throw new Error('transport not ready')
 			const cmd = frameBytes[3] & 0xff
@@ -1695,6 +1705,7 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 				timeoutMs: overrideOptions?.timeoutMs ?? timeoutMs,
 				suppressTimeoutLog:
 					!!overrideOptions?.suppressTimeoutLog || (cmd === 0x54 && !!options?.finalizeAssumeSuccessOnTimeout),
+				disableAlternateWriteRetry: !!overrideOptions?.disableAlternateWriteRetry,
 			}
 			if (options?.forceWriteWithResponse && cmd === 0x53 && typeof t?.requestWithResponse === 'function') {
 				return t.requestWithResponse(frameBytes, requestOptions)
@@ -1708,6 +1719,10 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 		},
 	}
 	try {
+		if (props.connType === 'bluetooth' && typeof transportAny?.beginExclusiveBootSession === 'function') {
+			await transportAny.beginExclusiveBootSession({ drainTimeoutMs: 1200 })
+			exclusiveBootSessionStarted = true
+		}
 		runLogger.info('[boot] runtime options', {
 			connType: props.connType,
 			sourceAddress: `0x${(sourceAddress & 0xff).toString(16).padStart(2, '0').toUpperCase()}`,
@@ -1721,6 +1736,9 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			prepareTimeoutMs: options?.prepareTimeoutMs,
 			bootPacketTimeoutMs: options?.bootPacketTimeoutMs,
 			finalizeTimeoutMs: options?.finalizeTimeoutMs,
+			finalizeMaxAttempts: options?.finalizeMaxAttempts,
+			finalizeDisableAlternateWriteRetry: !!options?.finalizeDisableAlternateWriteRetry,
+			exclusiveBootSession: exclusiveBootSessionStarted,
 			minFrameIntervalMs: transportAny?.minFrameIntervalMs,
 			minFrameIntervalMode: options?.minFrameIntervalMode || 'max',
 			packetDelayMs: options?.packetDelayMs,
@@ -1747,6 +1765,8 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			finalizeDelayMs: options?.finalizeDelayMs,
 			finalizeTimeoutMs: options?.finalizeTimeoutMs,
 			finalizeAssumeSuccessOnTimeout: options?.finalizeAssumeSuccessOnTimeout,
+			finalizeMaxAttempts: options?.finalizeMaxAttempts,
+			finalizeDisableAlternateWriteRetry: options?.finalizeDisableAlternateWriteRetry,
 			terminalPacketWriteErrorAsComplete: options?.terminalPacketWriteErrorAsComplete,
 			requireFinalPacketAck: options?.requireFinalPacketAck,
 			finalizeBurstIntervalsMs: options?.finalizeBurstIntervalsMs,
@@ -1774,6 +1794,9 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			},
 		})
 	} finally {
+		if (exclusiveBootSessionStarted && typeof transportAny?.endExclusiveBootSession === 'function') {
+			transportAny.endExclusiveBootSession()
+		}
 		if (prevMinFrameIntervalMs != null && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
 			transportAny.minFrameIntervalMs = prevMinFrameIntervalMs
 		}
@@ -2006,6 +2029,8 @@ const startMeterOta = async () => {
 			finalizeDelayMs: meterRuntimeOptions.finalizeDelayMs,
 			finalizeTimeoutMs: meterRuntimeOptions.finalizeTimeoutMs,
 			finalizeAssumeSuccessOnTimeout: !!meterRuntimeOptions.finalizeAssumeSuccessOnTimeout,
+			finalizeMaxAttempts: meterRuntimeOptions.finalizeMaxAttempts,
+			finalizeDisableAlternateWriteRetry: !!meterRuntimeOptions.finalizeDisableAlternateWriteRetry,
 			forceWriteWithResponse: !!meterRuntimeOptions.forceWriteWithResponse,
 			terminalPacketWriteErrorAsComplete: !!meterRuntimeOptions.terminalPacketWriteErrorAsComplete,
 			requireFinalPacketAck: !!meterRuntimeOptions.requireFinalPacketAck,

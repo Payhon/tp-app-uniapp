@@ -228,6 +228,8 @@ export async function bootOtaUpgrade({
 	finalizeDelayMs,
 	finalizeTimeoutMs,
 	finalizeAssumeSuccessOnTimeout,
+	finalizeMaxAttempts,
+	finalizeDisableAlternateWriteRetry,
 	terminalPacketWriteErrorAsComplete,
 	requireFinalPacketAck,
 	finalizeBurstIntervalsMs,
@@ -254,6 +256,8 @@ export async function bootOtaUpgrade({
 	finalizeDelayMs?: number
 	finalizeTimeoutMs?: number
 	finalizeAssumeSuccessOnTimeout?: boolean
+	finalizeMaxAttempts?: number
+	finalizeDisableAlternateWriteRetry?: boolean
 	terminalPacketWriteErrorAsComplete?: boolean
 	requireFinalPacketAck?: boolean
 	finalizeBurstIntervalsMs?: number[]
@@ -560,7 +564,8 @@ export async function bootOtaUpgrade({
 			await sleep(beforeFinalizeDelayMs)
 		}
 		let finalizeOk = false
-		for (finalizeAttempt = 1; finalizeAttempt <= 3; finalizeAttempt += 1) {
+		const maxFinalizeAttempts = Math.max(1, Math.floor(finalizeMaxAttempts ?? 3))
+		for (finalizeAttempt = 1; finalizeAttempt <= maxFinalizeAttempts; finalizeAttempt += 1) {
 			if (finalizeAttempt > 1) await sleep(300)
 			let finishResp: ReturnType<typeof parseBootFrame> | null = null
 			const duplicateFinalizeTimers: ReturnType<typeof setTimeout>[] = []
@@ -596,6 +601,7 @@ export async function bootOtaUpgrade({
 					const respBytes = await requestWithResponse(finishFrame, {
 						timeoutMs: finalizeTimeoutMs,
 						suppressTimeoutLog: finalizeAssumeSuccessOnTimeout && lastRequested >= packetTotal,
+						disableAlternateWriteRetry: finalizeDisableAlternateWriteRetry,
 					})
 					logger?.debug && logger.debug('[boot] rx', { len: respBytes.length, hex: bytesToHex(respBytes) })
 					finishResp = parseBootFrame(respBytes)
@@ -608,6 +614,7 @@ export async function bootOtaUpgrade({
 					const respBytes = await transport.request(finishFrame, {
 						timeoutMs: finalizeTimeoutMs,
 						suppressTimeoutLog: finalizeAssumeSuccessOnTimeout && lastRequested >= packetTotal,
+						disableAlternateWriteRetry: finalizeDisableAlternateWriteRetry,
 					})
 					try {
 						logger?.debug && logger.debug('[boot] rx', { len: respBytes.length, hex: bytesToHex(respBytes) })
@@ -618,17 +625,6 @@ export async function bootOtaUpgrade({
 				const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
 				if (finalizeAssumeSuccessOnTimeout && msg.includes('ble request timeout') && lastRequested >= packetTotal) {
 					logger?.info && logger.info('[boot] finalize assume success after timeout', { finalizeAttempt })
-					finalizeOk = true
-					break
-				}
-				const isFinalizeDisconnect =
-					isBleTerminalWriteError(e) ||
-					msg.includes('no connection') ||
-					msg.includes('no device') ||
-					msg.includes('not connected') ||
-					msg.includes('device not found')
-				if (isFinalizeDisconnect && lastRequested >= packetTotal) {
-					logger?.info && logger.info('[boot] finalize assume success after disconnect', { finalizeAttempt })
 					finalizeOk = true
 					break
 				}

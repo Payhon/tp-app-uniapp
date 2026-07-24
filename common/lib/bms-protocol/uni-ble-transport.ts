@@ -1,7 +1,7 @@
 import { BmsProtocolError, parseFrame } from './frame'
 import { parseBootFrame } from './boot-frame'
 import { BMS_BLE_NOTIFY_UUID, BMS_BLE_SERVICE_UUID, BMS_BLE_WRITE_UUID } from './ble-uuids'
-import type { LoggerLike } from './types'
+import type { BmsRequestOptions, LoggerLike } from './types'
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 declare const wx: any
@@ -34,6 +34,11 @@ function isExpectedBootSourceAddress(expectedSourceAddress: number, parsedSource
 	// 仪表 OTA 通过 0xFC 透传，但不同 Bootloader 回包可能来自 0x01/0xFC/0xFD。
 	return expect === 0xfc && (actual === 0x01 || actual === 0xfd)
 }
+
+function isBootRequestFrame(frameBytes: Uint8Array | ArrayLike<number>): boolean {
+	return frameBytes.length >= 4 && (frameBytes[0] & 0xff) === 0x55 && (frameBytes[1] & 0xff) !== 0x7f
+}
+
 type PendingReq = {
 	resolve: (frameBytes: Uint8Array) => void
 	reject: (err: unknown) => void
@@ -428,6 +433,7 @@ export class UniBleBmsTransport {
 	private _iosWriteAckUnreliable: boolean
 	private _iosWriteTimeoutLogged: boolean
 	private _lastWriteTimeoutLogAt: number
+	private _bootSessionExclusive: boolean
 
 	constructor({
 		serviceUUID = BMS_BLE_SERVICE_UUID,
@@ -458,18 +464,19 @@ export class UniBleBmsTransport {
 		this._connected = false;
 		this._lastTxAt = 0;
 
-			this._pending = null; // { resolve, reject, expect, timer }
-			this._queue = Promise.resolve(new Uint8Array(0)); // 串行化 request，避免并发导致“回复帧串包”
-			this._rxLogCount = 0;
-			this._platform = '';
-			this._writeSupportsNoResponse = true;
-			this._writeSupportsResponse = true;
-			this._preferWriteWithResponse = false;
-			this._bleApiTimeoutMarker = { __bleApiTimeout: true };
-			this._iosWriteAckUnreliable = false;
-			this._iosWriteTimeoutLogged = false;
-			this._lastWriteTimeoutLogAt = 0;
-		}
+		this._pending = null; // { resolve, reject, expect, timer }
+		this._queue = Promise.resolve(new Uint8Array(0)); // 串行化 request，避免并发导致“回复帧串包”
+		this._rxLogCount = 0;
+		this._platform = '';
+		this._writeSupportsNoResponse = true;
+		this._writeSupportsResponse = true;
+		this._preferWriteWithResponse = false;
+		this._bleApiTimeoutMarker = { __bleApiTimeout: true };
+		this._iosWriteAckUnreliable = false;
+		this._iosWriteTimeoutLogged = false;
+		this._lastWriteTimeoutLogAt = 0;
+		this._bootSessionExclusive = false;
+	}
 
 	async init() {
 		// 初始化蓝牙模块（必须调用）
@@ -713,6 +720,7 @@ export class UniBleBmsTransport {
 				this._preferWriteWithResponse = false;
 				this._iosWriteAckUnreliable = false;
 				this._iosWriteTimeoutLogged = false;
+				this._bootSessionExclusive = false;
 				this._lastWriteTimeoutLogAt = 0;
 				}
 			}
@@ -800,10 +808,7 @@ export class UniBleBmsTransport {
 				if (expectBoot) {
 					const parsed = parseBootFrame(frameBytes);
 					if (parsed.targetAddress !== expect.targetAddress) return false;
-					if (parsed.command !== expect.functionCode) {
-						// Allow boot finalize (0x54) to accept data ACK (0x53)
-						if ((expect.functionCode & 0xff) !== 0x54 || (parsed.command & 0xff) !== 0x53) return false;
-					}
+					if (parsed.command !== expect.functionCode) return false;
 					return isExpectedBootSourceAddress(expect.sourceAddress, parsed.sourceAddress);
 				}
 				const parsed = parseFrame(frameBytes);
@@ -904,7 +909,7 @@ export class UniBleBmsTransport {
 			this._lastTxAt = Date.now();
 		}
 
-			async setMtu(mtu: number): Promise<number> {
+	async setMtu(mtu: number): Promise<number> {
 		if (!this.deviceId) throw new BmsProtocolError('deviceId is required for setMtu');
 		const api = (uni as Record<string, any>)?.setBLEMTU;
 		if (typeof api !== 'function') throw new BmsProtocolError('setBLEMTU not supported');
@@ -916,29 +921,89 @@ export class UniBleBmsTransport {
 		return actual;
 	}
 
+	async beginExclusiveBootSession({ drainTimeoutMs = 1200 }: { drainTimeoutMs?: number } = {}): Promise<void> {
+		this._bootSessionExclusive = true;
+		const pending = this._pending;
+		if (pending) {
+			clearTimeout(pending.timer);
+			this._pending = null;
+			this._collector.reset();
+			pending.reject(new BmsProtocolError('BLE request canceled for OTA exclusive session'));
+		}
+
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		const drained = await Promise.race([
+			this._queue.then(() => true, () => true),
+			new Promise<boolean>((resolve) => {
+				timer = setTimeout(() => resolve(false), Math.max(100, drainTimeoutMs));
+			}),
+		]);
+		if (timer) clearTimeout(timer);
+		if (!drained) {
+			this._bootSessionExclusive = false;
+			throw new BmsProtocolError('BLE request queue did not drain for OTA');
+		}
+		this._queue = Promise.resolve(new Uint8Array(0));
+		if (this.logger?.info) this.logger.info('[ble] OTA exclusive session ready');
+	}
+
+	endExclusiveBootSession(): void {
+		if (!this._bootSessionExclusive) return;
+		this._bootSessionExclusive = false;
+		if (this.logger?.info) this.logger.info('[ble] OTA exclusive session ended');
+	}
+
 	/**
 	 * 通讯层核心方法：发送请求帧，等待一帧有效回复。
 	 * - 为避免“串包”，内部默认强制串行
 	 */
-		request(
-			frameBytes: Uint8Array | ArrayLike<number>,
-			{ timeoutMs = this.requestTimeoutMs, suppressTimeoutLog = false }: { timeoutMs?: number; suppressTimeoutLog?: boolean } = {}
-		): Promise<Uint8Array> {
-			this._queue = this._queue
-				.catch(() => new Uint8Array(0))
-				.then(() => this._requestWithFallback(frameBytes, { timeoutMs, writeWithResponse: false, suppressTimeoutLog }));
-			return this._queue;
+	request(
+		frameBytes: Uint8Array | ArrayLike<number>,
+		{
+			timeoutMs = this.requestTimeoutMs,
+			suppressTimeoutLog = false,
+			disableAlternateWriteRetry = false,
+		}: BmsRequestOptions = {}
+	): Promise<Uint8Array> {
+		if (this._bootSessionExclusive && !isBootRequestFrame(frameBytes)) {
+			return Promise.reject(new BmsProtocolError('BLE transport is reserved for OTA'));
 		}
+		this._queue = this._queue
+			.catch(() => new Uint8Array(0))
+			.then(() =>
+				this._requestWithFallback(frameBytes, {
+					timeoutMs,
+					writeWithResponse: false,
+					suppressTimeoutLog,
+					disableAlternateWriteRetry,
+				})
+			);
+		return this._queue;
+	}
 
-		requestWithResponse(
-			frameBytes: Uint8Array | ArrayLike<number>,
-			{ timeoutMs = this.requestTimeoutMs, suppressTimeoutLog = false }: { timeoutMs?: number; suppressTimeoutLog?: boolean } = {}
-		): Promise<Uint8Array> {
-			this._queue = this._queue
-				.catch(() => new Uint8Array(0))
-				.then(() => this._requestWithFallback(frameBytes, { timeoutMs, writeWithResponse: true, suppressTimeoutLog }));
-			return this._queue;
+	requestWithResponse(
+		frameBytes: Uint8Array | ArrayLike<number>,
+		{
+			timeoutMs = this.requestTimeoutMs,
+			suppressTimeoutLog = false,
+			disableAlternateWriteRetry = false,
+		}: BmsRequestOptions = {}
+	): Promise<Uint8Array> {
+		if (this._bootSessionExclusive && !isBootRequestFrame(frameBytes)) {
+			return Promise.reject(new BmsProtocolError('BLE transport is reserved for OTA'));
 		}
+		this._queue = this._queue
+			.catch(() => new Uint8Array(0))
+			.then(() =>
+				this._requestWithFallback(frameBytes, {
+					timeoutMs,
+					writeWithResponse: true,
+					suppressTimeoutLog,
+					disableAlternateWriteRetry,
+				})
+			);
+		return this._queue;
+	}
 
 		async _primeNotifyValue(reason: string): Promise<void> {
 			if (!this.deviceId || !this.serviceId || !this.notifyCharId) return;
@@ -960,46 +1025,56 @@ export class UniBleBmsTransport {
 			}
 		}
 
-		async _requestWithFallback(
-			frameBytes: Uint8Array | ArrayLike<number>,
-			{
-				timeoutMs,
-				writeWithResponse,
-				suppressTimeoutLog,
-			}: { timeoutMs: number; writeWithResponse?: boolean; suppressTimeoutLog?: boolean }
-		): Promise<Uint8Array> {
+	async _requestWithFallback(
+		frameBytes: Uint8Array | ArrayLike<number>,
+		{
+			timeoutMs,
+			writeWithResponse,
+			suppressTimeoutLog,
+			disableAlternateWriteRetry,
+		}: {
+			timeoutMs: number
+			writeWithResponse?: boolean
+			suppressTimeoutLog?: boolean
+			disableAlternateWriteRetry?: boolean
+		}
+	): Promise<Uint8Array> {
+		if (this._bootSessionExclusive && !isBootRequestFrame(frameBytes)) {
+			throw new BmsProtocolError('BLE transport is reserved for OTA');
+		}
+		try {
+			return await this._requestSerial(frameBytes, { timeoutMs, writeWithResponse, suppressTimeoutLog });
+		} catch (e) {
+			const msg = String((e as any)?.message || (e as any)?.errMsg || e || '');
+			const canRetryWithAlternateWriteMode =
+				this._platform === 'ios' &&
+				!writeWithResponse &&
+				!suppressTimeoutLog &&
+				!disableAlternateWriteRetry &&
+				msg.includes('BLE request timeout') &&
+				this._writeSupportsResponse &&
+				this._writeSupportsNoResponse;
+			if (!canRetryWithAlternateWriteMode) throw e;
+			if (this.logger?.warn) {
+				this.logger.warn('[ble] request timeout, retry with alternate write mode', {
+					preferWriteWithResponse: this._preferWriteWithResponse,
+				});
+			}
+			const prev = this._preferWriteWithResponse;
+			this._preferWriteWithResponse = !prev;
 			try {
-				return await this._requestSerial(frameBytes, { timeoutMs, writeWithResponse, suppressTimeoutLog });
-			} catch (e) {
-				const msg = String((e as any)?.message || (e as any)?.errMsg || e || '');
-				const canRetryWithAlternateWriteMode =
-					this._platform === 'ios' &&
-					!writeWithResponse &&
-					!suppressTimeoutLog &&
-					msg.includes('BLE request timeout') &&
-					this._writeSupportsResponse &&
-					this._writeSupportsNoResponse;
-				if (!canRetryWithAlternateWriteMode) throw e;
-				if (this.logger?.warn) {
-					this.logger.warn('[ble] request timeout, retry with alternate write mode', {
-						preferWriteWithResponse: this._preferWriteWithResponse,
-					});
-				}
-				const prev = this._preferWriteWithResponse;
-				this._preferWriteWithResponse = !prev;
-				try {
-					await this._primeNotifyValue('timeout_retry');
-					await sleep(120);
-					return await this._requestSerial(frameBytes, {
-						timeoutMs,
-						writeWithResponse: false,
-						suppressTimeoutLog,
-					});
-				} finally {
-					this._preferWriteWithResponse = prev;
-				}
+				await this._primeNotifyValue('timeout_retry');
+				await sleep(120);
+				return await this._requestSerial(frameBytes, {
+					timeoutMs,
+					writeWithResponse: false,
+					suppressTimeoutLog,
+				});
+			} finally {
+				this._preferWriteWithResponse = prev;
 			}
 		}
+	}
 
 		async _requestSerial(
 			frameBytes: Uint8Array | ArrayLike<number>,
@@ -1034,6 +1109,9 @@ export class UniBleBmsTransport {
 		const now = Date.now();
 		const delta = now - this._lastTxAt;
 		if (delta < this.minFrameIntervalMs) await sleep(this.minFrameIntervalMs - delta);
+		if (this._bootSessionExclusive && !expectBoot) {
+			throw new BmsProtocolError('BLE transport is reserved for OTA');
+		}
 
 		const expect = expectBoot
 			? {
