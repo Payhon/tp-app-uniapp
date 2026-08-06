@@ -7,6 +7,7 @@ import {
 	disposeDetailDataSession,
 	markRealtimeStatusFailure,
 	markRealtimeStatusSuccess,
+	selectPreferredCloudStatusSnapshot,
 	shouldUseCompleteCloudSnapshot,
 } from './detail-data-arbiter'
 
@@ -28,6 +29,35 @@ const startDeviceSession = (deviceId: string) =>
 	assert(
 		decision.apply === false && decision.reason === 'realtime_advanced',
 		'late bootstrap must not overwrite realtime status'
+	)
+}
+
+{
+	const interactive = { energy: { socPct: 91 } }
+	const reported = { energy: { socPct: 42 } }
+	const selected = selectPreferredCloudStatusSnapshot({
+		interactiveSnapshot: interactive,
+		snapshot: reported,
+		snapshotTs: 3_000,
+		lastReportTs: 4_000,
+	})
+	assert(
+		selected?.source === 'interactive' && selected.snapshot === interactive,
+		'interactive snapshot must remain atomic and win even when ordinary current telemetry is newer'
+	)
+}
+
+{
+	const reported = { energy: { socPct: 42 } }
+	const selected = selectPreferredCloudStatusSnapshot({
+		interactiveSnapshot: null,
+		snapshot: reported,
+		snapshotTs: 4_000,
+		lastReportTs: 4_000,
+	})
+	assert(
+		selected?.source === 'reported' && selected.snapshot === reported,
+		'reported snapshot should remain the compatibility fallback when no interactive snapshot exists'
 	)
 }
 

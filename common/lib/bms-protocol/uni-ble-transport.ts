@@ -730,7 +730,13 @@ export class UniBleBmsTransport {
 			return this._iosWriteAckUnreliable ? 180 : 320;
 		}
 
-		_noteWriteApiTimeout(meta: { characteristicId: string; writeWithResponse: boolean; chunkLen: number; fallback?: boolean }) {
+		_noteWriteApiTimeout(meta: {
+			characteristicId: string
+			writeWithResponse: boolean
+			chunkLen: number
+			fallback?: boolean
+			softTimeoutMs?: number
+		}) {
 			if (this._platform === 'ios' && !this._iosWriteAckUnreliable) {
 				this._iosWriteAckUnreliable = true;
 				if (this.logger?.info) {
@@ -751,7 +757,7 @@ export class UniBleBmsTransport {
 						characteristicId: meta.characteristicId,
 						writeWithResponse: meta.writeWithResponse,
 						chunkLen: meta.chunkLen,
-						softTimeoutMs: this._getWriteApiSoftTimeoutMs(),
+						softTimeoutMs: meta.softTimeoutMs ?? this._getWriteApiSoftTimeoutMs(),
 					});
 				}
 				return;
@@ -766,7 +772,7 @@ export class UniBleBmsTransport {
 					writeWithResponse: meta.writeWithResponse,
 					chunkLen: meta.chunkLen,
 					fallback: !!meta.fallback,
-					softTimeoutMs: this._getWriteApiSoftTimeoutMs(),
+					softTimeoutMs: meta.softTimeoutMs ?? this._getWriteApiSoftTimeoutMs(),
 				});
 			}
 		}
@@ -835,12 +841,23 @@ export class UniBleBmsTransport {
 				chunkSize = this.writeChunkSize,
 				chunkIntervalMs = this.writeChunkIntervalMs,
 				writeWithResponse = false,
-			}: { chunkSize?: number; chunkIntervalMs?: number; writeWithResponse?: boolean } = {}
+				writeApiTimeoutMs,
+			}: { chunkSize?: number; chunkIntervalMs?: number; writeWithResponse?: boolean; writeApiTimeoutMs?: number } = {}
 		): Promise<void> {
 			if (!this._connected) throw new BmsProtocolError('BLE is not connected');
 			if (!this.deviceId || !this.serviceId || !this.writeCharId) throw new BmsProtocolError('BLE characteristic not ready');
 
-		const bytes = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
+			const bytes = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
+			const hasExplicitWriteApiTimeout = Number.isFinite(writeApiTimeoutMs) && Number(writeApiTimeoutMs) > 0;
+			const effectiveWriteApiTimeoutMs =
+				hasExplicitWriteApiTimeout
+					? Math.max(1, Number(writeApiTimeoutMs))
+					: this._getWriteApiSoftTimeoutMs();
+			const chunkCount = Math.max(1, Math.ceil(bytes.length / Math.max(1, chunkSize)));
+			const totalChunkIntervalMs = Math.max(0, chunkCount - 1) * Math.max(0, chunkIntervalMs);
+			const effectiveChunkWriteApiTimeoutMs = hasExplicitWriteApiTimeout
+				? Math.max(1, Math.floor(Math.max(1, effectiveWriteApiTimeoutMs - totalChunkIntervalMs) / chunkCount))
+				: effectiveWriteApiTimeoutMs;
 
 			for (let offset = 0; offset < bytes.length; offset += chunkSize) {
 				const chunk = bytes.slice(offset, Math.min(bytes.length, offset + chunkSize));
@@ -857,7 +874,7 @@ export class UniBleBmsTransport {
 						...(shouldWriteWithResponse ? {} : { writeType: 'writeNoResponse' }),
 						value: toArrayBuffer(chunk),
 					}, {
-						timeoutMs: this._getWriteApiSoftTimeoutMs(),
+						timeoutMs: effectiveChunkWriteApiTimeoutMs,
 						timeoutValue: this._bleApiTimeoutMarker,
 					});
 					if ((writeRes as { __bleApiTimeout?: true })?.__bleApiTimeout) {
@@ -865,6 +882,7 @@ export class UniBleBmsTransport {
 							characteristicId: this.writeCharId,
 							writeWithResponse: shouldWriteWithResponse,
 							chunkLen: chunk.length,
+							softTimeoutMs: effectiveChunkWriteApiTimeoutMs,
 						});
 					}
 				} catch (e: any) {
@@ -877,7 +895,7 @@ export class UniBleBmsTransport {
 							characteristicId: this.writeCharId,
 							value: toArrayBuffer(chunk),
 						}, {
-							timeoutMs: this._getWriteApiSoftTimeoutMs(),
+							timeoutMs: effectiveChunkWriteApiTimeoutMs,
 							timeoutValue: this._bleApiTimeoutMarker,
 						});
 						if ((writeRes as { __bleApiTimeout?: true })?.__bleApiTimeout) {
@@ -886,6 +904,7 @@ export class UniBleBmsTransport {
 								writeWithResponse: true,
 								chunkLen: chunk.length,
 								fallback: true,
+								softTimeoutMs: effectiveChunkWriteApiTimeoutMs,
 							});
 						}
 					} else {
@@ -961,6 +980,7 @@ export class UniBleBmsTransport {
 		frameBytes: Uint8Array | ArrayLike<number>,
 		{
 			timeoutMs = this.requestTimeoutMs,
+			writeApiTimeoutMs,
 			suppressTimeoutLog = false,
 			disableAlternateWriteRetry = false,
 		}: BmsRequestOptions = {}
@@ -969,11 +989,12 @@ export class UniBleBmsTransport {
 			return Promise.reject(new BmsProtocolError('BLE transport is reserved for OTA'));
 		}
 		this._queue = this._queue
-			.catch(() => new Uint8Array(0))
-			.then(() =>
-				this._requestWithFallback(frameBytes, {
-					timeoutMs,
-					writeWithResponse: false,
+				.catch(() => new Uint8Array(0))
+				.then(() =>
+					this._requestWithFallback(frameBytes, {
+						timeoutMs,
+						writeApiTimeoutMs,
+						writeWithResponse: false,
 					suppressTimeoutLog,
 					disableAlternateWriteRetry,
 				})
@@ -985,6 +1006,7 @@ export class UniBleBmsTransport {
 		frameBytes: Uint8Array | ArrayLike<number>,
 		{
 			timeoutMs = this.requestTimeoutMs,
+			writeApiTimeoutMs,
 			suppressTimeoutLog = false,
 			disableAlternateWriteRetry = false,
 		}: BmsRequestOptions = {}
@@ -993,11 +1015,12 @@ export class UniBleBmsTransport {
 			return Promise.reject(new BmsProtocolError('BLE transport is reserved for OTA'));
 		}
 		this._queue = this._queue
-			.catch(() => new Uint8Array(0))
-			.then(() =>
-				this._requestWithFallback(frameBytes, {
-					timeoutMs,
-					writeWithResponse: true,
+				.catch(() => new Uint8Array(0))
+				.then(() =>
+					this._requestWithFallback(frameBytes, {
+						timeoutMs,
+						writeApiTimeoutMs,
+						writeWithResponse: true,
 					suppressTimeoutLog,
 					disableAlternateWriteRetry,
 				})
@@ -1029,11 +1052,13 @@ export class UniBleBmsTransport {
 		frameBytes: Uint8Array | ArrayLike<number>,
 		{
 			timeoutMs,
+			writeApiTimeoutMs,
 			writeWithResponse,
 			suppressTimeoutLog,
 			disableAlternateWriteRetry,
 		}: {
 			timeoutMs: number
+			writeApiTimeoutMs?: number
 			writeWithResponse?: boolean
 			suppressTimeoutLog?: boolean
 			disableAlternateWriteRetry?: boolean
@@ -1043,7 +1068,12 @@ export class UniBleBmsTransport {
 			throw new BmsProtocolError('BLE transport is reserved for OTA');
 		}
 		try {
-			return await this._requestSerial(frameBytes, { timeoutMs, writeWithResponse, suppressTimeoutLog });
+			return await this._requestSerial(frameBytes, {
+				timeoutMs,
+				writeApiTimeoutMs,
+				writeWithResponse,
+				suppressTimeoutLog,
+			});
 		} catch (e) {
 			const msg = String((e as any)?.message || (e as any)?.errMsg || e || '');
 			const canRetryWithAlternateWriteMode =
@@ -1067,6 +1097,7 @@ export class UniBleBmsTransport {
 				await sleep(120);
 				return await this._requestSerial(frameBytes, {
 					timeoutMs,
+					writeApiTimeoutMs,
 					writeWithResponse: false,
 					suppressTimeoutLog,
 				});
@@ -1078,7 +1109,12 @@ export class UniBleBmsTransport {
 
 		async _requestSerial(
 			frameBytes: Uint8Array | ArrayLike<number>,
-			{ timeoutMs, writeWithResponse, suppressTimeoutLog }: { timeoutMs: number; writeWithResponse?: boolean; suppressTimeoutLog?: boolean }
+			{
+				timeoutMs,
+				writeApiTimeoutMs,
+				writeWithResponse,
+				suppressTimeoutLog,
+			}: { timeoutMs: number; writeApiTimeoutMs?: number; writeWithResponse?: boolean; suppressTimeoutLog?: boolean }
 		): Promise<Uint8Array> {
 		if (this._pending) {
 			const ageMs = Date.now() - (this._pending.createdAt || 0);
@@ -1144,7 +1180,7 @@ export class UniBleBmsTransport {
 
 		try {
 			if (this.logger?.debug) this.logger.debug(`[ble] tx frame len=${req.length} hex=${u8ToHex(req)}`);
-			await this._writeFrameBytes(req, { writeWithResponse: !!writeWithResponse });
+			await this._writeFrameBytes(req, { writeWithResponse: !!writeWithResponse, writeApiTimeoutMs });
 			this._lastTxAt = Date.now();
 
 			// 某些设备/运行时不会主动推送 notify，需要通过 read 触发 value change（特征值含 Read 属性时）

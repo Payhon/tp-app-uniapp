@@ -16,6 +16,7 @@ export type LoggerLike = {
 
 export type BmsRequestOptions = {
 	timeoutMs?: number
+	writeApiTimeoutMs?: number
 	suppressTimeoutLog?: boolean
 	disableAlternateWriteRetry?: boolean
 	expectedReadByteCount?: number

@@ -1,6 +1,14 @@
 import type { BmsRequestTransport, LoggerLike } from './types'
 import { decodeAscii } from './register-view'
 import { BOOT_FRAME, buildBootFrame, parseBootFrame } from './boot-frame'
+import {
+	clampBootPacketDelayMs,
+	MOBILE_BOOT_FINALIZE_DELAY_MS,
+	MOBILE_BOOT_PACKET_RETRY_DELAY_MS,
+	MOBILE_BOOT_POST_ACK_DELAY_BUDGET_MS,
+	MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS,
+	resolveBootPageBoundaryDelayMs,
+} from './boot-ota-runtime-options'
 
 export type BootVersionInfo = {
 	hardwareId: string | null
@@ -313,8 +321,8 @@ export async function bootOtaUpgrade({
 		packetSize = PACKET_SIZE_OPTIONS.find((n) => n <= maxPacketSize) || packetSize
 	}
 	logger?.info && logger.info('[boot] prepare ok', { totalSize, optionIdx, packetSize })
-	// Wait 1s after prepare response before first data packet
-	await sleep(1000)
+	// Hardware requires the first data packet within 700ms after the prepare ACK.
+	await sleep(MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS)
 
 	// Use data length = packetSize, payload = 2 bytes seq + data => payload length = packetSize + 2
 	const dataPacketSize = Math.max(1, packetSize)
@@ -349,7 +357,7 @@ export async function bootOtaUpgrade({
 	let finalizeAttempt = 0
 	let lastCrc = 0
 	let finalizeAlreadyOk = false
-	let currentPacketDelayMs = Math.max(0, packetDelayMs ?? 0)
+	let currentPacketDelayMs = clampBootPacketDelayMs(packetDelayMs)
 	let currentPageBoundaryDelayMs = Math.max(0, pageBoundaryDelayMs ?? 0)
 
 	while (true) {
@@ -381,13 +389,19 @@ export async function bootOtaUpgrade({
 				percent: Math.min(99, Math.floor((packetIndex / packetTotal) * 100)),
 			})
 			if (currentPageBoundaryDelayMs > 0 && packetIndex > 0 && start > 0 && start % 4096 === 0) {
+				const effectivePageBoundaryDelayMs = resolveBootPageBoundaryDelayMs(
+					currentPacketDelayMs,
+					currentPageBoundaryDelayMs
+				)
 				logger?.info &&
 					logger.info('[boot] page boundary delay', {
 						...packetSeqTrace(packetIndex),
 						offset: start,
-						delayMs: currentPageBoundaryDelayMs,
+						delayMs: effectivePageBoundaryDelayMs,
+						configuredDelayMs: currentPageBoundaryDelayMs,
+						postAckDelayBudgetMs: currentPacketDelayMs + effectivePageBoundaryDelayMs,
 					})
-				await sleep(currentPageBoundaryDelayMs)
+				if (effectivePageBoundaryDelayMs > 0) await sleep(effectivePageBoundaryDelayMs)
 			}
 
 			let resp: ReturnType<typeof parseBootFrame> | null = null
@@ -425,7 +439,9 @@ export async function bootOtaUpgrade({
 					}
 					packetRetry += 1
 					if (adaptiveSlowdownOnPacketTimeout) {
-						const nextPacketDelayMs = Math.max(currentPacketDelayMs, adaptivePacketDelayMs ?? 100)
+						const nextPacketDelayMs = clampBootPacketDelayMs(
+							Math.max(currentPacketDelayMs, adaptivePacketDelayMs ?? 100)
+						)
 						const nextPageBoundaryDelayMs = Math.max(currentPageBoundaryDelayMs, adaptivePageBoundaryDelayMs ?? 1500)
 						if (nextPacketDelayMs !== currentPacketDelayMs || nextPageBoundaryDelayMs !== currentPageBoundaryDelayMs) {
 							currentPacketDelayMs = nextPacketDelayMs
@@ -456,7 +472,7 @@ export async function bootOtaUpgrade({
 									...packetSeqTrace(packetIndex),
 									target: activeWriteTarget,
 								})
-							await sleep(220)
+							await sleep(MOBILE_BOOT_PACKET_RETRY_DELAY_MS)
 							continue
 						}
 						if (packetIndex === 0) {
@@ -464,7 +480,7 @@ export async function bootOtaUpgrade({
 						}
 						throw e
 					}
-					await sleep(220)
+					await sleep(MOBILE_BOOT_PACKET_RETRY_DELAY_MS)
 				}
 			}
 			if (terminalPacketAssumedComplete) break
@@ -524,6 +540,7 @@ export async function bootOtaUpgrade({
 					buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: preparePayload }),
 					{ logger }
 				)
+				await sleep(MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS)
 				packetIndex = Math.min(requested, packetTotal - 1)
 				continue
 			}
@@ -552,7 +569,10 @@ export async function bootOtaUpgrade({
 			payload: finishPayload,
 		})
 
-		const beforeFinalizeDelayMs = Math.max(0, finalizeDelayMs ?? 1000)
+		const beforeFinalizeDelayMs = Math.min(
+			MOBILE_BOOT_POST_ACK_DELAY_BUDGET_MS,
+			Math.max(0, finalizeDelayMs ?? MOBILE_BOOT_FINALIZE_DELAY_MS)
+		)
 		if (beforeFinalizeDelayMs > 0) {
 			logger?.info &&
 				logger.info('[boot] finalize delay before 0x54', {
@@ -647,7 +667,7 @@ export async function bootOtaUpgrade({
 			const finishStatus = finishResp.data[0] & 0xff
 			if (finishStatus !== 0) {
 				logger?.warn && logger.warn('[boot] finalize failed', { finalizeAttempt, status: finishStatus })
-				continue
+				throw new Error(`Boot finalize failed: status=${finishStatus}`)
 			}
 			logger?.info && logger.info('[boot] finalize ok', { crc32: lastCrc >>> 0 })
 			finalizeOk = true

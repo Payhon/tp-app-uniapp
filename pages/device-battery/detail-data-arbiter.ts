@@ -200,3 +200,36 @@ export const shouldUseCompleteCloudSnapshot = (input: {
 	const lastReportTs = normalizeReportTs(input.lastReportTs)
 	return snapshotTs > 0 && snapshotTs >= lastReportTs
 }
+
+export const selectPreferredCloudStatusSnapshot = (input: {
+	interactiveSnapshot: unknown
+	snapshot: unknown
+	snapshotTs: unknown
+	lastReportTs: unknown
+}): { snapshot: Record<string, unknown>; source: 'interactive' | 'reported' } | null => {
+	const interactiveSnapshot =
+		input.interactiveSnapshot &&
+		typeof input.interactiveSnapshot === 'object' &&
+		!Array.isArray(input.interactiveSnapshot)
+			? (input.interactiveSnapshot as Record<string, unknown>)
+			: null
+	if (interactiveSnapshot && Object.keys(interactiveSnapshot).length > 0) {
+		return { snapshot: interactiveSnapshot, source: 'interactive' }
+	}
+
+	const snapshot =
+		input.snapshot && typeof input.snapshot === 'object' && !Array.isArray(input.snapshot)
+			? (input.snapshot as Record<string, unknown>)
+			: null
+	if (
+		snapshot &&
+		shouldUseCompleteCloudSnapshot({
+			hasSnapshot: true,
+			snapshotTs: input.snapshotTs,
+			lastReportTs: input.lastReportTs,
+		})
+	) {
+		return { snapshot, source: 'reported' }
+	}
+	return null
+}

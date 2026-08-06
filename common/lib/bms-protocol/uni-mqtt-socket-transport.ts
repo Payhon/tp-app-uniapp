@@ -514,6 +514,7 @@ export class UniMqttSocketBmsTransport {
 	private _lastTxAt: number
 	private _lastResponseAt: number
 	private _heartbeatTimer: ReturnType<typeof setInterval> | null
+	private _sessionId: string
 
 	constructor(options: UniMqttSocketBmsTransportOptions) {
 		this.wsUrl = options.wsUrl
@@ -535,10 +536,15 @@ export class UniMqttSocketBmsTransport {
 		this._lastTxAt = 0
 		this._lastResponseAt = 0
 		this._heartbeatTimer = null
+		this._sessionId = ''
 	}
 
 	get connected() {
 		return this._connected
+	}
+
+	getSessionId(): string {
+		return this._sessionId
 	}
 
 	shouldRunSleepWakeupProbe(now = Date.now()): boolean {
@@ -608,6 +614,7 @@ export class UniMqttSocketBmsTransport {
 
 		socketTask.onClose(() => {
 			this._connected = false
+			this._sessionId = ''
 			this._stopHeartbeat()
 			if (!settled) {
 				failReady(new BmsProtocolError(this._bridgeError || 'WebSocket closed'))
@@ -622,6 +629,7 @@ export class UniMqttSocketBmsTransport {
 
 		socketTask.onError((e: any) => {
 			this._connected = false
+			this._sessionId = ''
 			this._stopHeartbeat()
 			const err = new BmsProtocolError('WebSocket error', e)
 			if (!settled) failReady(err)
@@ -647,6 +655,7 @@ export class UniMqttSocketBmsTransport {
 				}
 				const controlType = String(obj?.type || '').trim()
 				if (controlType === 'socket_ready') {
+					this._sessionId = String(obj?.session_id || '').trim()
 					finishReady()
 					return
 				}
@@ -708,6 +717,7 @@ export class UniMqttSocketBmsTransport {
 
 	async disconnect(): Promise<void> {
 		this._connected = false
+		this._sessionId = ''
 		this._stopHeartbeat()
 		if (this._pending) {
 			const p = this._pending

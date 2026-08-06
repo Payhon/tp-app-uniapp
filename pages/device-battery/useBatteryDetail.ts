@@ -6,6 +6,7 @@ import {
 	appBatteryConnectionStatus,
 	appBatteryCurrentTelemetry,
 	appBatteryReport,
+	appBatteryInteractiveSnapshot,
 	type AppBatteryDetail,
 	type AppBatteryConnectionStatusReq,
 	type AppBatteryCurrentTelemetry,
@@ -41,10 +42,14 @@ import {
 	isDetailDataSessionCurrent,
 	markRealtimeStatusFailure,
 	markRealtimeStatusSuccess,
-	shouldUseCompleteCloudSnapshot,
+	selectPreferredCloudStatusSnapshot,
 	type CloudTelemetryRequestKind,
 	type DetailDataSessionToken,
 } from './detail-data-arbiter'
+import {
+	INSTRUMENT_PASSTHROUGH_WAIT_TIMEOUT_MS,
+	shouldExpireInstrumentPassthroughWait,
+} from './instrument-passthrough-policy'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
 type DataSourceMode = 'realtime' | 'cloud_fallback' | 'offline'
@@ -92,7 +97,6 @@ const POLL_INTERVAL_MS = 2_000
 const CLOUD_POLL_INTERVAL_MS = 5_000
 const MQTT_STATUS_READ_TIMEOUT_MS = 5_000
 const INSTRUMENT_WARMUP_POLL_INTERVAL_MS = 1_200
-const INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD = 3
 const FIRST_FRAME_SLOW_HINT_MS = 9_000
 const FIRST_FRAME_AUTO_RECONNECT_FAILURES = 1
 const FIRST_FRAME_MAX_AUTO_RECONNECTS = 2
@@ -268,10 +272,6 @@ const socketMessageToText = (data: unknown): string => {
 	}
 }
 
-const isPlainObject = (v: unknown): v is Record<string, unknown> => {
-	return !!v && typeof v === 'object' && !Array.isArray(v)
-}
-
 const telemetryValue = (payload: AppBatteryCurrentTelemetry | null, keys: string[]) => {
 	const current = payload?.current || {}
 	for (const key of keys) {
@@ -328,15 +328,14 @@ const buildStatusFromCloudTelemetry = (
 	battery: AppBatteryDetail | null,
 	payload: AppBatteryCurrentTelemetry
 ): BmsStatus | null => {
-	if (
-		isPlainObject(payload.snapshot) &&
-		shouldUseCompleteCloudSnapshot({
-			hasSnapshot: true,
-			snapshotTs: payload.snapshot_ts,
-			lastReportTs: payload.last_report_ts,
-		})
-	) {
-		return payload.snapshot as unknown as BmsStatus
+	const preferredSnapshot = selectPreferredCloudStatusSnapshot({
+		interactiveSnapshot: payload.interactive_snapshot,
+		snapshot: payload.snapshot,
+		snapshotTs: payload.snapshot_ts,
+		lastReportTs: payload.last_report_ts,
+	})
+	if (preferredSnapshot) {
+		return preferredSnapshot.snapshot as unknown as BmsStatus
 	}
 
 	const current = payload.current || {}
@@ -465,6 +464,7 @@ export const useBatteryDetail = () => {
 	let pollingIntervalMs = 0
 	let pollingGeneration = 0
 	let firstFrameSlowTimer: number | null = null
+	let instrumentPassthroughWaitTimer: number | null = null
 	let cloudPollTimer: number | null = null
 	let mqttTransport: MqttTransportLike | null = null
 	let bleCacheKey: string | null = null
@@ -494,6 +494,13 @@ export const useBatteryDetail = () => {
 	let reportRetryStep = 0
 	let lastSnapshotReportAt = 0
 	let lastStateFingerprint = ''
+	let mqttInteractiveSnapshotPending: {
+		deviceId: string
+		sessionId: string
+		platform: string
+		snapshot: BmsStatus
+	} | null = null
+	let mqttInteractiveSnapshotPump: Promise<void> | null = null
 
 	const captureSession = () => captureDetailDataSession(dataArbiter)
 
@@ -510,11 +517,19 @@ export const useBatteryDetail = () => {
 		return captureSession()
 	}
 
+	const clearInstrumentPassthroughWaitTimer = () => {
+		if (instrumentPassthroughWaitTimer != null) {
+			clearTimeout(instrumentPassthroughWaitTimer)
+			instrumentPassthroughWaitTimer = null
+		}
+	}
+
 	const stopPolling = () => {
 		if (pollTimer != null) {
 			clearTimeout(pollTimer)
 			pollTimer = null
 		}
+		clearInstrumentPassthroughWaitTimer()
 		pollingActiveClient = null
 		pollingIntervalMs = 0
 		pollingGeneration += 1
@@ -529,6 +544,7 @@ export const useBatteryDetail = () => {
 
 	const resetFirstFrameState = () => {
 		clearFirstFrameSlowTimer()
+		clearInstrumentPassthroughWaitTimer()
 		firstFrameFailCount = 0
 		firstFrameAutoReconnectCount = 0
 		firstFrameRecovering = false
@@ -565,8 +581,7 @@ export const useBatteryDetail = () => {
 		bmsDataLoadAttempts.value = firstFrameFailCount
 		bmsDataLoadLastError.value = formatErr(err)
 		if (isInstrumentSession()) {
-			bmsDataLoadPhase.value =
-				instrumentStatusFailCount >= INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD ? 'failed' : 'slow'
+			bmsDataLoadPhase.value = 'slow'
 			return
 		}
 		if (
@@ -619,11 +634,125 @@ export const useBatteryDetail = () => {
 		}
 	}
 
+	const resetMqttInteractiveSnapshotReportState = () => {
+		mqttInteractiveSnapshotPending = null
+	}
+
+	const flushMqttInteractiveSnapshot = () => {
+		if (mqttInteractiveSnapshotPump) return
+		mqttInteractiveSnapshotPump = (async () => {
+			while (mqttInteractiveSnapshotPending) {
+				const pending = mqttInteractiveSnapshotPending
+				mqttInteractiveSnapshotPending = null
+				try {
+					const rsp = await appBatteryInteractiveSnapshot({
+						device_id: pending.deviceId,
+						session_id: pending.sessionId,
+						platform: pending.platform,
+						snapshot: pending.snapshot as unknown as Record<string, unknown>,
+					})
+					if (!rsp || (rsp as any).code !== 200 || !(rsp as any)?.data?.accepted) {
+						throw new Error((rsp as any)?.message || 'interactive snapshot report rejected')
+					}
+				} catch (e) {
+					log('mqtt interactive snapshot report failed', {
+						deviceId: pending.deviceId,
+						session_id: pending.sessionId,
+						err: formatErr(e),
+					})
+				}
+			}
+		})().finally(() => {
+			mqttInteractiveSnapshotPump = null
+			if (mqttInteractiveSnapshotPending) flushMqttInteractiveSnapshot()
+		})
+	}
+
+	const queueMqttInteractiveSnapshot = (
+		s: BmsStatus,
+		sourceClient: BmsClient,
+		expectedSession: DetailDataSessionToken
+	) => {
+		if (!isSessionCurrent(expectedSession) || isInstrumentSession()) return
+		if (connType.value !== 'mqtt' || deviceId.value !== expectedSession.deviceId) return
+		const sourceTransport = sourceClient.getTransport()
+		if (!mqttTransport || sourceTransport !== mqttTransport) return
+		const sessionId = mqttTransport.getSessionId()
+		if (!sessionId) return
+		mqttInteractiveSnapshotPending = {
+			deviceId: expectedSession.deviceId,
+			sessionId,
+			platform: getReportPlatform(),
+			snapshot: s,
+		}
+		flushMqttInteractiveSnapshot()
+	}
+
 	const canFlushReportQueue = () => {
 		return connType.value === 'bluetooth' && !!deviceId.value
 	}
 
 	const isInstrumentSession = () => sessionMode.value === 'instrument'
+
+	const beginInstrumentPassthroughWait = (
+		sourceClient: BmsClient,
+		expectedSession: DetailDataSessionToken,
+		generation: number
+	) => {
+		if (instrumentPassthroughWaitTimer != null) return
+		if (
+			!isInstrumentSession() ||
+			connType.value !== 'bluetooth' ||
+			status.value ||
+			instrumentPassthroughUnavailable.value
+		) {
+			return
+		}
+
+		const startedAt = Date.now()
+		const checkDeadline = () => {
+			instrumentPassthroughWaitTimer = null
+			const elapsedMs = Date.now() - startedAt
+			if (elapsedMs < INSTRUMENT_PASSTHROUGH_WAIT_TIMEOUT_MS) {
+				instrumentPassthroughWaitTimer = setTimeout(
+					checkDeadline,
+					INSTRUMENT_PASSTHROUGH_WAIT_TIMEOUT_MS - elapsedMs
+				) as unknown as number
+				return
+			}
+			if (
+				!isSessionCurrent(expectedSession) ||
+				client.value !== sourceClient ||
+				pollingGeneration !== generation ||
+				!shouldExpireInstrumentPassthroughWait({
+					elapsedMs,
+					sessionMode: sessionMode.value,
+					connType: connType.value,
+					hasStatus: !!status.value,
+					alreadyUnavailable: instrumentPassthroughUnavailable.value,
+				})
+			) {
+				return
+			}
+
+			instrumentPassthroughUnavailable.value = true
+			status.value = null
+			bmsDataLoadPhase.value = 'failed'
+			bmsDataLoadLastError.value = `instrument BMS status wait timeout after ${INSTRUMENT_PASSTHROUGH_WAIT_TIMEOUT_MS}ms`
+			clearFirstFrameSlowTimer()
+			stopPolling()
+			syncBmsDataLoading()
+			log('instrument passthrough wait deadline reached', {
+				elapsedMs,
+				failCount: instrumentStatusFailCount,
+			})
+		}
+
+		instrumentPassthroughWaitTimer = setTimeout(
+			checkDeadline,
+			INSTRUMENT_PASSTHROUGH_WAIT_TIMEOUT_MS
+		) as unknown as number
+	}
 
 	const hasCurrentBleTarget = (mac: unknown) => {
 		const normalizedMac = normalizeMac(String(mac || ''))
@@ -904,6 +1033,8 @@ export const useBatteryDetail = () => {
 				is_online: payload.is_online,
 				keys: payload.current ? Object.keys(payload.current).length : 0,
 				has_snapshot: !!payload.snapshot,
+				has_interactive_snapshot: !!payload.interactive_snapshot,
+				interactive_snapshot_ts: payload.interactive_snapshot_ts || 0,
 				conn_type: connType.value,
 				preserved_realtime_conn: requestKind === 'fallback' || (requestKind === 'bootstrap' && realtimeClientActive),
 			})
@@ -1253,6 +1384,7 @@ export const useBatteryDetail = () => {
 			if (!shouldContinuePolling()) return
 			syncBmsDataLoading()
 			beginFirstFrameWait()
+			beginInstrumentPassthroughWait(c, expectedSession, generation)
 			try {
 				const nextStatus = await c.readAllStatus({
 					shouldContinue: shouldContinuePolling,
@@ -1272,7 +1404,11 @@ export const useBatteryDetail = () => {
 				instrumentStatusFailCount = 0
 				instrumentPassthroughUnavailable.value = false
 				if (status.value) {
-					tryReportStatus(status.value)
+					if (realtimeConnType === 'mqtt') {
+						queueMqttInteractiveSnapshot(status.value, c, expectedSession)
+					} else {
+						tryReportStatus(status.value)
+					}
 				}
 				try {
 					const now = Date.now()
@@ -1287,16 +1423,6 @@ export const useBatteryDetail = () => {
 				if (!shouldContinuePolling()) return
 				if (isInstrumentSession() && connType.value === 'bluetooth' && isInstrumentNoPassthroughError(e)) {
 					instrumentStatusFailCount += 1
-					if (instrumentStatusFailCount >= INSTRUMENT_NO_PASSTHROUGH_FAILURE_THRESHOLD) {
-						instrumentPassthroughUnavailable.value = true
-						status.value = null
-						bmsDataLoading.value = false
-						log('instrument passthrough unavailable, stop status polling', {
-							failCount: instrumentStatusFailCount,
-							err: formatErr(e),
-						})
-						return
-					}
 				}
 				if (pollErrLogged < 3) {
 					pollErrLogged += 1
@@ -1393,6 +1519,7 @@ export const useBatteryDetail = () => {
 		}
 		realtimeOccupied.value = false
 		clearReportRetryTimer()
+		resetMqttInteractiveSnapshotReportState()
 		if (bleCacheKey) {
 			releaseBleClient(bleCacheKey)
 			bleCacheKey = null

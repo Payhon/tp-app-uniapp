@@ -45,8 +45,10 @@ export type AppBatteryCurrentTelemetry = {
 	is_online: number
 	last_report_ts?: number
 	snapshot_ts?: number
+	interactive_snapshot_ts?: number
 	current?: Record<string, AppBatteryCurrentTelemetryValue>
 	snapshot?: Record<string, unknown> | null
+	interactive_snapshot?: Record<string, unknown> | null
 	[key: string]: unknown
 }
 
@@ -106,6 +108,19 @@ export type AppBatteryReportResp = {
 	accepted: boolean
 	ignored_reason?: string
 	[key: string]: unknown
+}
+
+export type AppBatteryInteractiveSnapshotReq = {
+	device_id: string
+	session_id: string
+	platform?: string
+	snapshot: Record<string, unknown>
+}
+
+export type AppBatteryInteractiveSnapshotResp = {
+	device_id: string
+	ts: number
+	accepted: boolean
 }
 
 export type AppBatteryConnectionStatusReq = {
@@ -193,6 +208,14 @@ export const getAppBatteryMeterOtaPackages = () => {
 
 export const appBatteryReport = (payload: AppBatteryReportReq) => {
 	return apiRequest<AppBatteryReportResp>(`/api/v1/app/battery/report`, payload, 'POST')
+}
+
+export const appBatteryInteractiveSnapshot = (payload: AppBatteryInteractiveSnapshotReq) => {
+	return apiRequest<AppBatteryInteractiveSnapshotResp>(
+		`/api/v1/app/battery/interactive-snapshot`,
+		payload,
+		'POST'
+	)
 }
 
 export const appBatteryConnectionStatus = (payload: AppBatteryConnectionStatusReq) => {

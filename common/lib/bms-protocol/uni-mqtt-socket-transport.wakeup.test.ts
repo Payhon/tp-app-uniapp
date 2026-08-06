@@ -142,13 +142,19 @@ async function assertSocketTransportKeepsValidFrameWithTrailingBytes(): Promise<
 		})
 		const connectPromise = transport.connect()
 		handlers.open && handlers.open()
-		handlers.message && handlers.message({ data: JSON.stringify({ type: 'socket_ready' }) })
+		handlers.message &&
+			handlers.message({ data: JSON.stringify({ type: 'socket_ready', session_id: 'session-device-id' }) })
 		await connectPromise
+		assert(
+			transport.getSessionId() === 'session-device-id',
+			'socket transport should expose the authenticated owner session id'
+		)
 		const client = new BmsClient({ transport })
 		const regs = await client.readRegisters(0x0408, 9, { timeoutMs: 1000 })
 		assert(regs.length === 9, 'socket transport should return registers from a valid frame with trailing bytes')
 		assert(regs[0] === 0x1414 && regs[8] === 0x3214, 'socket transport should preserve 0x0408 response registers')
 		await transport.disconnect()
+		assert(transport.getSessionId() === '', 'disconnect should clear the owner session id')
 	} finally {
 		;(globalThis as any).uni = prevUni
 	}
