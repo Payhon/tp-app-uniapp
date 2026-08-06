@@ -6,8 +6,21 @@
 					<image class="section__icon" src="/static/image/device/icon-mono@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.singleCell') }}</text>
 				</view>
-				<view v-if="loading.single" class="section-loading"></view>
-				<u-icon v-else :name="opened.single ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				<view class="section__right">
+					<view
+						v-if="opened.single"
+						class="section__refresh"
+						hover-class="section__refresh--hover"
+						role="button"
+						:aria-label="$t('deviceDetail.params.refresh')"
+						@tap.stop="refreshSection('single')"
+					>
+						<view v-if="loading.single" class="section-loading"></view>
+						<u-icon v-else name="reload" size="18" color="#8E95A2"></u-icon>
+					</view>
+					<view v-else-if="loading.single" class="section-loading"></view>
+					<u-icon :name="opened.single ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				</view>
 			</view>
 			<view v-if="hasSingleItems && opened.single" class="list">
 				<view v-for="item in singleItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -26,8 +39,21 @@
 					<image class="section__icon" src="/static/image/device/icon-voltage@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.voltage') }}</text>
 				</view>
-				<view v-if="loading.voltage" class="section-loading"></view>
-				<u-icon v-else :name="opened.voltage ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				<view class="section__right">
+					<view
+						v-if="opened.voltage"
+						class="section__refresh"
+						hover-class="section__refresh--hover"
+						role="button"
+						:aria-label="$t('deviceDetail.params.refresh')"
+						@tap.stop="refreshSection('voltage')"
+					>
+						<view v-if="loading.voltage" class="section-loading"></view>
+						<u-icon v-else name="reload" size="18" color="#8E95A2"></u-icon>
+					</view>
+					<view v-else-if="loading.voltage" class="section-loading"></view>
+					<u-icon :name="opened.voltage ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				</view>
 			</view>
 			<view v-if="hasVoltageItems && opened.voltage" class="list">
 				<view v-for="item in voltageItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -46,8 +72,21 @@
 					<image class="section__icon" src="/static/image/device/icon-currency@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.current') }}</text>
 				</view>
-				<view v-if="loading.current" class="section-loading"></view>
-				<u-icon v-else :name="opened.current ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				<view class="section__right">
+					<view
+						v-if="opened.current"
+						class="section__refresh"
+						hover-class="section__refresh--hover"
+						role="button"
+						:aria-label="$t('deviceDetail.params.refresh')"
+						@tap.stop="refreshSection('current')"
+					>
+						<view v-if="loading.current" class="section-loading"></view>
+						<u-icon v-else name="reload" size="18" color="#8E95A2"></u-icon>
+					</view>
+					<view v-else-if="loading.current" class="section-loading"></view>
+					<u-icon :name="opened.current ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				</view>
 			</view>
 			<view v-if="hasCurrentItems && opened.current" class="list">
 				<view v-for="item in currentItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -66,8 +105,21 @@
 					<image class="section__icon" src="/static/image/device/icon-temperature@2x.png" mode="aspectFit" />
 					<text class="section__title">{{ $t('deviceDetail.params.temperature') }}</text>
 				</view>
-				<view v-if="loading.temperature" class="section-loading"></view>
-				<u-icon v-else :name="opened.temperature ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				<view class="section__right">
+					<view
+						v-if="opened.temperature"
+						class="section__refresh"
+						hover-class="section__refresh--hover"
+						role="button"
+						:aria-label="$t('deviceDetail.params.refresh')"
+						@tap.stop="refreshSection('temperature')"
+					>
+						<view v-if="loading.temperature" class="section-loading"></view>
+						<u-icon v-else name="reload" size="18" color="#8E95A2"></u-icon>
+					</view>
+					<view v-else-if="loading.temperature" class="section-loading"></view>
+					<u-icon :name="opened.temperature ? 'arrow-up' : 'arrow-down'" size="16" color="#C0C4CC"></u-icon>
+				</view>
 			</view>
 			<view v-if="hasTemperatureItems && opened.temperature" class="list">
 				<view v-for="item in temperatureItems" :key="item.key" class="item" hover-class="item--hover" @tap="openEdit(item)">
@@ -125,8 +177,41 @@
 					<u-icon name="arrow-right" size="16" color="#C0C4CC"></u-icon>
 				</view>
 				<text class="meter-upgrade__desc">{{ meterPackageDescription }}</text>
-				<u-button type="primary" :customStyle="meterUpgradeButtonStyle" @click="startMeterOta">
+				<u-button type="primary" :customStyle="meterUpgradeButtonStyle" :disabled="otaState.running" @click="startMeterOta">
 					{{ $t('deviceDetail.params.meterUpgradeStart') }}
+				</u-button>
+			</view>
+
+			<view v-if="showMeterBmsUpgradeCard" class="divider"></view>
+
+			<view v-if="showMeterBmsUpgradeCard" class="meter-upgrade meter-bms-upgrade">
+				<view class="meter-upgrade__head">
+					<view class="action__left">
+						<image class="action__icon" src="/static/image/device/icon-ota@2x.png" mode="aspectFit" />
+						<text class="action__title">{{ $t('deviceDetail.params.meterBmsUpgradeTitle') }}</text>
+					</view>
+				</view>
+				<view class="meter-bms-upgrade__identity">
+					<view class="meter-bms-upgrade__identity-row">
+						<text class="meter-bms-upgrade__identity-label">{{ $t('deviceDetail.params.meterBmsModel') }}</text>
+						<text class="meter-bms-upgrade__identity-value">{{ meterBmsModelText || '--' }}</text>
+					</view>
+					<view class="meter-bms-upgrade__identity-row">
+						<text class="meter-bms-upgrade__identity-label">{{ $t('deviceDetail.params.meterBmsCurrentVersion') }}</text>
+						<text class="meter-bms-upgrade__identity-value">{{ meterBmsVersionText || '--' }}</text>
+					</view>
+				</view>
+				<text class="meter-upgrade__desc">
+					{{ meterBmsUpgradeEnabled ? $t('deviceDetail.params.meterBmsUpgradeDesc') : $t('deviceDetail.params.meterBmsNotDetected') }}
+				</text>
+				<u-button
+					type="primary"
+					:customStyle="meterUpgradeButtonStyle"
+					:disabled="!meterBmsUpgradeEnabled || otaState.running"
+					:loading="otaState.running && activeOtaKind === 'meter-bms-ota'"
+					@click="startMeterBmsOta"
+				>
+					{{ $t('deviceDetail.params.meterBmsUpgradeStart') }}
 				</u-button>
 			</view>
 
@@ -401,7 +486,15 @@ import {
 	type FunctionConfigFlagKey,
 } from '@/common/lib/bms-protocol/function-config'
 import { bootOtaUpgrade } from '@/common/lib/bms-protocol/boot-ota'
-import { getMqttBmsBootOtaRuntimeOptions } from '@/common/lib/bms-protocol/boot-ota-runtime-options'
+import {
+	BLE_BOOT_FINALIZE_BURST_INTERVALS_MS,
+	BLE_BOOT_FINALIZE_TIMEOUT_MS,
+	getMqttBmsBootOtaRuntimeOptions,
+	MOBILE_BOOT_FINALIZE_DELAY_MS,
+	MOBILE_BOOT_FINALIZE_TIMEOUT_MS,
+	MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+	MOBILE_BOOT_WRITE_API_SOFT_TIMEOUT_MS,
+} from '@/common/lib/bms-protocol/boot-ota-runtime-options'
 import { canAccessDeviceParam } from '@/common/lib/bms-protocol/param-permission'
 import {
 	BMS_PARAM,
@@ -421,6 +514,12 @@ import {
 	type OtaDebugLogLevel,
 	type OtaDebugLogScope,
 } from '../ota-debug-log'
+import {
+	buildMeterBmsOtaCheckPayload,
+	resolveMeterBmsOtaAvailability,
+	type MeterBmsOtaSessionMode,
+} from '../meter-bms-ota-policy'
+import { applyValidParamValues, hasAnyValidParamValue, shouldUseParamSectionCache } from '../param-refresh-policy'
 
 type ParamItem = {
 	key: string
@@ -498,6 +597,7 @@ const props = defineProps<{
 	status: BmsStatus | null
 	client: BmsClient | null
 	connType: 'bluetooth' | 'mqtt' | 'offline'
+	sessionMode?: MeterBmsOtaSessionMode
 	active?: boolean
 	realtimeOccupied?: boolean
 	allowOta?: boolean
@@ -608,12 +708,47 @@ const toggle = async (k: BasicSectionKey) => {
 	}
 }
 
+const refreshSection = async (k: BasicSectionKey) => {
+	if (!opened[k] || loading[k]) return
+	if (!guardRealtimeConnection()) return
+	const client = props.client
+	if (!client) return
+	loading[k] = true
+	applyPollingState()
+	try {
+		await prepareMqttSleepWakeup(client)
+		if (props.client !== client) return
+		const ok = await loadSection(k, true)
+		if (ok === false) throw new Error(`refresh ${k} returned no values`)
+	} catch (e) {
+		console.error('[params] refresh section failed', k, e)
+		uni.showToast({ title: t('deviceDetail.toast.refreshFailed') as string, icon: 'none' })
+	} finally {
+		loading[k] = false
+		applyPollingState()
+	}
+}
+
 const fwVersionText = computed(() => String(props.battery?.fw_version || props.status?.meta?.softwareVersion || '-'))
 const meterMac = computed(() => String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim())
 const isMeterDevice = computed(() => isMeterMac(meterMac.value))
 const allowOtaEnabled = computed(() => props.allowOta !== false && !isMeterDevice.value)
 const showOtaBadge = computed(() => allowOtaEnabled.value && !!props.otaNeedUpgrade)
 const showMeterUpgradeCard = computed(() => props.connType === 'bluetooth' && isMeterDevice.value)
+const meterBmsOtaAvailability = computed(() =>
+	resolveMeterBmsOtaAvailability({
+		connType: props.connType,
+		sessionMode: props.sessionMode || 'cloud',
+		isMeterDevice: isMeterDevice.value,
+		hasClient: !!props.client,
+		hardwareModel: props.status?.identity?.hardwareModel,
+		softwareVersion: props.status?.meta?.softwareVersion,
+	})
+)
+const showMeterBmsUpgradeCard = computed(() => meterBmsOtaAvailability.value.visible)
+const meterBmsUpgradeEnabled = computed(() => meterBmsOtaAvailability.value.enabled)
+const meterBmsModelText = computed(() => meterBmsOtaAvailability.value.model)
+const meterBmsVersionText = computed(() => meterBmsOtaAvailability.value.version)
 const showMeterOtaDebugLog = computed(() => showMeterUpgradeCard.value && developerStore.enabled)
 const showOtaDebugButton = computed(() => developerStore.enabled && otaState.show)
 const otaTargetVersionText = computed(() => {
@@ -1018,6 +1153,8 @@ const editPopup = reactive({
 	inputType: 'digit' as 'digit' | 'text',
 })
 
+type ActiveOtaKind = 'bms-ota' | 'meter-ota' | 'meter-bms-ota' | ''
+const activeOtaKind = ref<ActiveOtaKind>('')
 const otaState = reactive({
 	show: false,
 	progress: 0,
@@ -1404,6 +1541,20 @@ const updateOtaStage = (stage: string, progress: number) => {
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> =>
+	new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(message)), Math.max(1, timeoutMs))
+		promise.then(
+			(value) => {
+				clearTimeout(timer)
+				resolve(value)
+			},
+			(error) => {
+				clearTimeout(timer)
+				reject(error)
+			}
+		)
+	})
 const getRuntimePlatform = () => {
 	try {
 		const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
@@ -1446,6 +1597,7 @@ const getOtaDebugHeader = (kind = 'bms-ota') => ({
 	kind,
 	platform: getRuntimePlatform(),
 	connType: props.connType,
+	sessionMode: props.sessionMode || 'cloud',
 	deviceId: String(props.battery?.device_id || '').trim(),
 	itemUuid: String(props.battery?.item_uuid || '').trim(),
 	bleMac: String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim(),
@@ -1620,18 +1772,20 @@ const getBleBootOtaRuntimeOptions = ({
 	const isBluetooth = props.connType === 'bluetooth'
 	const isMqtt = props.connType === 'mqtt'
 	const isAndroid = runtimePlatform === 'android'
-	const isIos = runtimePlatform === 'ios'
-	const shouldRelaxBleFinalize = isBluetooth && (isAndroid || isIos)
 	if (isMeterUpgrade) {
 		return {
-			finalizeDelayMs: 2000,
-			finalizeTimeoutMs: shouldRelaxBleFinalize ? 5000 : undefined,
+			queryTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+			enterBootTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+			prepareTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+			bootPacketTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+			finalizeDelayMs: MOBILE_BOOT_FINALIZE_DELAY_MS,
+			finalizeTimeoutMs: BLE_BOOT_FINALIZE_TIMEOUT_MS,
 			finalizeAssumeSuccessOnTimeout: false,
-			finalizeMaxAttempts: isBluetooth ? 1 : undefined,
-			finalizeDisableAlternateWriteRetry: isBluetooth,
+			finalizeMaxAttempts: 1,
+			finalizeDisableAlternateWriteRetry: true,
 			terminalPacketWriteErrorAsComplete: false,
 			requireFinalPacketAck: true,
-			finalizeBurstIntervalsMs: [300, 600, 900],
+			finalizeBurstIntervalsMs: [...BLE_BOOT_FINALIZE_BURST_INTERVALS_MS],
 			forceWriteWithResponse: isAndroid,
 			minFrameIntervalMs: isAndroid ? 100 : undefined,
 			packetDelayMs: 0,
@@ -1646,13 +1800,18 @@ const getBleBootOtaRuntimeOptions = ({
 		return getMqttBmsBootOtaRuntimeOptions(logger)
 	}
 	return {
-		finalizeTimeoutMs: shouldRelaxBleFinalize ? 5000 : undefined,
+		queryTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+		enterBootTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+		prepareTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+		bootPacketTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+		finalizeDelayMs: MOBILE_BOOT_FINALIZE_DELAY_MS,
+		finalizeTimeoutMs: isBluetooth ? BLE_BOOT_FINALIZE_TIMEOUT_MS : MOBILE_BOOT_FINALIZE_TIMEOUT_MS,
 		finalizeAssumeSuccessOnTimeout: false,
-		finalizeMaxAttempts: isBluetooth ? 1 : undefined,
-		finalizeDisableAlternateWriteRetry: isBluetooth,
+		finalizeMaxAttempts: 1,
+		finalizeDisableAlternateWriteRetry: true,
 		terminalPacketWriteErrorAsComplete: false,
 		requireFinalPacketAck: true,
-		finalizeBurstIntervalsMs: shouldRelaxBleFinalize ? [300, 600, 900] : undefined,
+		finalizeBurstIntervalsMs: isBluetooth ? [...BLE_BOOT_FINALIZE_BURST_INTERVALS_MS] : undefined,
 		forceWriteWithResponse: isMeterUpgrade && isAndroid,
 		minFrameIntervalMs: isMeterUpgrade && isAndroid ? 220 : undefined,
 		packetDelayMs: isMeterUpgrade && isAndroid ? 100 : undefined,
@@ -1684,28 +1843,42 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 	const otaTransport = {
 		request: (
 			frameBytes: Uint8Array,
-			overrideOptions?: { timeoutMs?: number; suppressTimeoutLog?: boolean; disableAlternateWriteRetry?: boolean }
+			overrideOptions?: {
+				timeoutMs?: number
+				writeApiTimeoutMs?: number
+				suppressTimeoutLog?: boolean
+				disableAlternateWriteRetry?: boolean
+			}
 		) => {
 			const t = transportAny
 			if (typeof t?.request !== 'function') throw new Error('transport not ready')
 			const cmd = frameBytes[3] & 0xff
-			const timeoutMs =
+			const configuredTimeoutMs =
 				cmd === 0x50
-					? options?.queryTimeoutMs ?? 3000
+					? options?.queryTimeoutMs ?? MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS
 					: cmd === 0x51
-						? options?.enterBootTimeoutMs ?? 12000
+						? options?.enterBootTimeoutMs ?? MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS
 						: cmd === 0x52
-							? options?.prepareTimeoutMs ?? 12000
+							? options?.prepareTimeoutMs ?? MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS
 							: cmd === 0x53
-								? options?.bootPacketTimeoutMs ?? 12000
+								? options?.bootPacketTimeoutMs ?? MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS
 								: cmd === 0x54
-									? options?.finalizeTimeoutMs ?? 12000
-									: 12000
+									? options?.finalizeTimeoutMs ?? MOBILE_BOOT_FINALIZE_TIMEOUT_MS
+									: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS
+			const isNonFinalizeBootCommand = cmd >= 0x50 && cmd <= 0x53
+			const finalizeTimeoutLimitMs =
+				props.connType === 'bluetooth' ? BLE_BOOT_FINALIZE_TIMEOUT_MS : MOBILE_BOOT_FINALIZE_TIMEOUT_MS
+			const timeoutMs = isNonFinalizeBootCommand
+				? Math.min(configuredTimeoutMs, MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS)
+				: Math.min(overrideOptions?.timeoutMs ?? configuredTimeoutMs, finalizeTimeoutLimitMs)
 			const requestOptions = {
-				timeoutMs: overrideOptions?.timeoutMs ?? timeoutMs,
+				timeoutMs,
+				writeApiTimeoutMs:
+					overrideOptions?.writeApiTimeoutMs ??
+					(isNonFinalizeBootCommand && props.connType === 'bluetooth' ? MOBILE_BOOT_WRITE_API_SOFT_TIMEOUT_MS : undefined),
 				suppressTimeoutLog:
 					!!overrideOptions?.suppressTimeoutLog || (cmd === 0x54 && !!options?.finalizeAssumeSuccessOnTimeout),
-				disableAlternateWriteRetry: !!overrideOptions?.disableAlternateWriteRetry,
+				disableAlternateWriteRetry: isNonFinalizeBootCommand || !!overrideOptions?.disableAlternateWriteRetry,
 			}
 			if (options?.forceWriteWithResponse && cmd === 0x53 && typeof t?.requestWithResponse === 'function') {
 				return t.requestWithResponse(frameBytes, requestOptions)
@@ -1806,24 +1979,34 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 	}
 }
 
-const startBmsOta = async () => {
+const startBmsOta = async ({ throughMeter = false }: { throughMeter?: boolean } = {}) => {
 	const BOOT_TARGET_BMS = 0x01
-	const BOOT_TARGET_METER = 0xfc
-	if (props.allowOta === false) {
+	if (otaState.running) {
+		uni.showToast({ title: t('deviceDetail.toast.otaRunning') as string, icon: 'none' })
+		return
+	}
+	if (throughMeter && (!showMeterBmsUpgradeCard.value || !meterBmsUpgradeEnabled.value)) {
+		uni.showToast({ title: t('deviceDetail.toast.meterBmsNotDetected') as string, icon: 'none' })
+		return
+	}
+	if (!throughMeter && props.allowOta === false) {
 		uni.showToast({ title: t('deviceDetail.toast.openFailed') as string, icon: 'none' })
 		return
 	}
 	if (!guardRealtimeConnection()) return
 
+	activeOtaKind.value = throughMeter ? 'meter-bms-ota' : 'bms-ota'
 	otaState.show = true
 	otaState.running = true
 	otaDebugOverlayVisible.value = false
 	updateOtaStage('checking', 0)
+	const debugKind = throughMeter ? 'meter-bms-ota' : props.connType === 'mqtt' ? 'bms-4g-ota' : 'bms-ota'
 	if (developerStore.enabled) {
-		resetOtaDebugLog(getOtaDebugHeader(props.connType === 'mqtt' ? 'bms-4g-ota' : 'bms-ota'))
+		resetOtaDebugLog(getOtaDebugHeader(debugKind))
 		appendCurrentOtaDebug('info', 'bms-ota', 'bms ota start', {
+			throughMeter,
 			connType: props.connType,
-			fwVersion: fwVersionText.value,
+			fwVersion: throughMeter ? meterBmsVersionText.value : fwVersionText.value,
 			needUpgrade: !!props.otaNeedUpgrade,
 			targetVersion: String(props.otaInfo?.targetVersion || '').trim(),
 		})
@@ -1834,8 +2017,27 @@ const startBmsOta = async () => {
 		await delay(120)
 		const modelName = String(props.status?.identity?.hardwareModel || props.battery?.battery_model_name || '').trim()
 		const versionText = String(props.status?.meta?.softwareVersion || props.battery?.fw_version || '').trim()
+		let instrumentItemUuid = ''
+		if (throughMeter) {
+			appendCurrentOtaDebug('info', 'bms-ota', 'meter passthrough BMS UUID read start', {
+				model: modelName,
+				version: versionText,
+			})
+			try {
+				instrumentItemUuid = await withTimeout(props.client!.readUuid(), 5000, 'meter_bms_uuid_read_timeout')
+				appendCurrentOtaDebug('info', 'bms-ota', 'meter passthrough BMS UUID read done', {
+					itemUuid: instrumentItemUuid,
+				})
+			} catch (e) {
+				appendCurrentOtaDebug('warn', 'bms-ota', 'meter passthrough BMS UUID read failed, fallback to model', {
+					error: formatDebugError(e),
+					model: modelName,
+					version: versionText,
+				})
+			}
+		}
 		let data: Record<string, unknown> = {}
-		const sharedOta = props.otaInfo || null
+		const sharedOta = throughMeter ? null : props.otaInfo || null
 		const canUseSharedNoUpgrade = !!sharedOta?.checked && !props.otaNeedUpgrade
 		const canUseSharedUpgrade = !!props.otaNeedUpgrade && !!sharedOta?.firmwareUrl
 
@@ -1851,26 +2053,44 @@ const startBmsOta = async () => {
 				firmware_url: sharedOta?.firmwareUrl || '',
 			}
 		} else {
-			syncOtaState({
-				checking: true,
-				errorMessage: '',
+			if (!throughMeter) {
+				syncOtaState({
+					checking: true,
+					errorMessage: '',
+				})
+			}
+			const directDeviceId = String(props.battery?.device_id || '').trim()
+			const directItemUuid = String(props.battery?.item_uuid || '').trim()
+			const instrumentPayload = buildMeterBmsOtaCheckPayload({
+				itemUuid: instrumentItemUuid,
+				model: modelName,
+				version: versionText,
 			})
-			const deviceId = String(props.battery?.device_id || '').trim()
-			const rsp = await appBatteryOtaCheck({
-				device_id: deviceId || undefined,
-				model: modelName || undefined,
-				version: versionText || undefined,
-				battery_model_id: String(props.battery?.battery_model_id || '').trim() || undefined,
-				batch_number: String(props.battery?.batch_number || '').trim() || undefined,
-				item_uuid: String(props.battery?.item_uuid || '').trim() || undefined,
+			const otaCheckPayload = throughMeter
+				? instrumentPayload
+				: {
+						device_id: directDeviceId || undefined,
+						model: modelName || undefined,
+						version: versionText || undefined,
+						battery_model_id: String(props.battery?.battery_model_id || '').trim() || undefined,
+						batch_number: String(props.battery?.batch_number || '').trim() || undefined,
+						item_uuid: directItemUuid || undefined,
+					}
+			appendCurrentOtaDebug('info', 'bms-ota', 'bms ota package check', {
+				throughMeter,
+				model: otaCheckPayload.model,
+				version: otaCheckPayload.version,
+				itemUuid: otaCheckPayload.item_uuid || '',
 			})
+			const rsp = await appBatteryOtaCheck(otaCheckPayload)
 			if (!rsp || rsp.code !== 200) throw new Error('ota check failed')
 			data = (rsp.data || {}) as Record<string, unknown>
-			applyOtaCheckResult(data, versionText)
+			if (!throughMeter) applyOtaCheckResult(data, versionText)
 		}
 
 		if (!data.need_upgrade) {
 			appendCurrentOtaDebug('info', 'bms-ota', 'bms ota already latest', {
+				throughMeter,
 				version: versionText,
 			})
 			otaState.show = false
@@ -1879,7 +2099,8 @@ const startBmsOta = async () => {
 		}
 
 		const targetVersionText = String(data.target_version || data.version || '').trim()
-		let confirmText = (t('deviceDetail.params.otaConfirm', { v: targetVersionText || '-' }) as string) || ''
+		const confirmKey = throughMeter ? 'deviceDetail.params.meterBmsUpgradeConfirm' : 'deviceDetail.params.otaConfirm'
+		let confirmText = (t(confirmKey, { v: targetVersionText || '-' }) as string) || ''
 		if (confirmText.includes('{v}')) {
 			confirmText = confirmText.replace(/\{v\}/g, targetVersionText || '-')
 		}
@@ -1906,30 +2127,29 @@ const startBmsOta = async () => {
 		})
 		updateOtaStage('prepare', 10)
 
-		const macRaw = String(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '').trim()
-		const isGaugeDevice = isMeterMac(macRaw)
-		const otaTargetAddress = isGaugeDevice ? BOOT_TARGET_METER : BOOT_TARGET_BMS
 		appendCurrentOtaDebug('info', 'boot', 'boot ota start', {
-			targetAddress: `0x${otaTargetAddress.toString(16).padStart(2, '0').toUpperCase()}`,
-			isGaugeDevice,
+			targetAddress: '0x01',
+			throughMeter,
 			firmwareSize: firmware.length,
 		})
-		await runBootOtaUpgrade(firmware, otaTargetAddress, getBleBootOtaRuntimeOptions({ isMeterUpgrade: isGaugeDevice }))
+		await runBootOtaUpgrade(firmware, BOOT_TARGET_BMS, getBleBootOtaRuntimeOptions({ isMeterUpgrade: false }))
 
 		updateOtaStage('success', 100)
 		appendCurrentOtaDebug('info', 'bms-ota', 'bms ota success', {
 			progress: otaState.progress,
 			message: otaState.message,
 		})
-		syncOtaState({
-			checking: false,
-			checked: false,
-			needUpgrade: false,
-			targetVersion: '',
-			firmwareUrl: '',
-			lastCheckedVersion: '',
-			errorMessage: '',
-		})
+		if (!throughMeter) {
+			syncOtaState({
+				checking: false,
+				checked: false,
+				needUpgrade: false,
+				targetVersion: '',
+				firmwareUrl: '',
+				lastCheckedVersion: '',
+				errorMessage: '',
+			})
+		}
 		uni.showToast({ title: t('deviceDetail.toast.otaSuccess') as string, icon: 'none' })
 	} catch (e) {
 		appendCurrentOtaDebug('error', 'bms-ota', 'bms ota failed', {
@@ -1937,10 +2157,12 @@ const startBmsOta = async () => {
 			progress: otaState.progress,
 			message: otaState.message,
 		})
-		syncOtaState({
-			checking: false,
-			errorMessage: e instanceof Error ? e.message : String(e || ''),
-		})
+		if (!throughMeter) {
+			syncOtaState({
+				checking: false,
+				errorMessage: e instanceof Error ? e.message : String(e || ''),
+			})
+		}
 		updateOtaStage('failed', otaState.progress || 0)
 		const errMessage = (e as Error)?.message || String(e || '')
 		if (errMessage === 'boot_packet0_no_ack' || errMessage === 'boot_firmware_hardware_mismatch') {
@@ -1955,7 +2177,11 @@ const startBmsOta = async () => {
 			const incompleteText = t('deviceDetail.toast.otaTransferIncomplete') as string
 			otaState.message = incompleteText
 			uni.showToast({ title: incompleteText, icon: 'none' })
-		} else if (errMessage === 'Boot finalize timeout' || errMessage.startsWith('Boot finalize failed')) {
+		} else if (errMessage.startsWith('Boot finalize failed')) {
+			const rejectedText = t('deviceDetail.toast.otaFinalizeRejected') as string
+			otaState.message = rejectedText
+			uni.showToast({ title: rejectedText, icon: 'none' })
+		} else if (errMessage === 'Boot finalize timeout') {
 			const finalizeText = t('deviceDetail.toast.otaFinalizeNoAck') as string
 			otaState.message = finalizeText
 			uni.showToast({ title: finalizeText, icon: 'none' })
@@ -1968,12 +2194,19 @@ const startBmsOta = async () => {
 		}
 	} finally {
 		otaState.running = false
+		activeOtaKind.value = ''
 		applyPollingState()
 	}
 }
 
+const startMeterBmsOta = () => startBmsOta({ throughMeter: true })
+
 const startMeterOta = async () => {
 	const BOOT_TARGET_METER = 0xfc
+	if (otaState.running) {
+		uni.showToast({ title: t('deviceDetail.toast.otaRunning') as string, icon: 'none' })
+		return
+	}
 	if (developerStore.enabled) {
 		otaDebugOverlayVisible.value = false
 		resetOtaDebugLog(getMeterOtaDebugHeader())
@@ -1995,6 +2228,8 @@ const startMeterOta = async () => {
 	}
 
 	try {
+		otaState.running = true
+		activeOtaKind.value = 'meter-ota'
 		appendMeterOtaDebug('info', 'meter-ota', 'meter ota confirm start', getMeterOtaDebugHeader())
 		const confirmTemplate = (t('deviceDetail.params.meterUpgradeConfirm') as string) || ''
 		const confirmText = confirmTemplate.replace('{name}', selectedMeterPackage.value.name)
@@ -2005,7 +2240,6 @@ const startMeterOta = async () => {
 		}
 
 		otaState.show = true
-		otaState.running = true
 		updateOtaStage('downloading', 5)
 		props.onPausePolling && props.onPausePolling()
 		await delay(120)
@@ -2025,7 +2259,7 @@ const startMeterOta = async () => {
 			queryTargetAddress: '0x00',
 			skipEnterBoot: true,
 			prepareBaudRate: 9600,
-			bootPacketTimeoutMs: 45000,
+			bootPacketTimeoutMs: meterRuntimeOptions.bootPacketTimeoutMs,
 			finalizeDelayMs: meterRuntimeOptions.finalizeDelayMs,
 			finalizeTimeoutMs: meterRuntimeOptions.finalizeTimeoutMs,
 			finalizeAssumeSuccessOnTimeout: !!meterRuntimeOptions.finalizeAssumeSuccessOnTimeout,
@@ -2048,7 +2282,6 @@ const startMeterOta = async () => {
 			queryTargetAddress: 0x00,
 			skipEnterBoot: true,
 			prepareBaudRate: 9600,
-			bootPacketTimeoutMs: 45000,
 		})
 		updateOtaStage('success', 100)
 		appendMeterOtaDebug('info', 'meter-ota', 'meter ota success', {
@@ -2076,7 +2309,11 @@ const startMeterOta = async () => {
 			const incompleteText = t('deviceDetail.toast.otaTransferIncomplete') as string
 			otaState.message = incompleteText
 			uni.showToast({ title: incompleteText, icon: 'none' })
-		} else if (errMessage === 'Boot finalize timeout' || errMessage.startsWith('Boot finalize failed')) {
+		} else if (errMessage.startsWith('Boot finalize failed')) {
+			const rejectedText = t('deviceDetail.toast.otaFinalizeRejected') as string
+			otaState.message = rejectedText
+			uni.showToast({ title: rejectedText, icon: 'none' })
+		} else if (errMessage === 'Boot finalize timeout') {
 			const finalizeText = t('deviceDetail.toast.otaFinalizeNoAck') as string
 			otaState.message = finalizeText
 			uni.showToast({ title: finalizeText, icon: 'none' })
@@ -2089,6 +2326,7 @@ const startMeterOta = async () => {
 		}
 	} finally {
 		otaState.running = false
+		activeOtaKind.value = ''
 		applyPollingState()
 	}
 }
@@ -2140,9 +2378,7 @@ const loadKeys = async (keys: string[]) => {
 	const readOptions = props.connType === 'mqtt' ? { timeoutMs: MQTT_PARAM_READ_TIMEOUT_MS } : {}
 	const readOnce = () => c.readParamsByKeys(allowedKeys, readOptions)
 	let values = await readOnce()
-	const hasAnyValue = () =>
-		allowedKeys.some((k) => Object.prototype.hasOwnProperty.call(values, k) && values[k] != null)
-	if (props.connType === 'mqtt' && !hasAnyValue()) {
+	if (props.connType === 'mqtt' && !hasAnyValidParamValue(values, allowedKeys)) {
 		console.warn('[params] mqtt read returned no values, retry once', {
 			keys: allowedKeys,
 			connType: props.connType,
@@ -2151,11 +2387,9 @@ const loadKeys = async (keys: string[]) => {
 		if (props.client !== c) return false
 		values = await readOnce()
 	}
-	for (const k of allowedKeys) {
-		paramValues[k] = Object.prototype.hasOwnProperty.call(values, k) ? values[k] : null
-	}
-	if (props.connType === 'mqtt' && !hasAnyValue()) {
-		console.warn('[params] mqtt read failed after retry', {
+	if (props.client !== c) return false
+	if (!applyValidParamValues(paramValues, values, allowedKeys)) {
+		console.warn('[params] read returned no valid values', {
 			keys: allowedKeys,
 			connType: props.connType,
 		})
@@ -2174,20 +2408,20 @@ watch(
 	{ immediate: true }
 )
 
-const loadKeysCached = async (section: keyof typeof loaded, keys: string[]) => {
-	if (loaded[section]) return
+const loadKeysCached = async (section: keyof typeof loaded, keys: string[], force = false) => {
+	if (shouldUseParamSectionCache(loaded[section], force)) return true
 	const ok = await loadKeys(keys)
 	if (ok) loaded[section] = true
 	return ok
 }
 
-const loadSection = (k: keyof typeof opened) => {
+const loadSection = (k: keyof typeof opened, force = false) => {
 	if (props.realtimeOccupied) return false
 	if (!props.client || props.connType === 'offline') return false
-	if (k === 'single') return loadKeysCached('single', SINGLE_KEYS)
-	if (k === 'voltage') return loadKeysCached('voltage', VOLTAGE_KEYS)
-	if (k === 'current') return loadKeysCached('current', CURRENT_KEYS)
-	if (k === 'temperature') return loadKeysCached('temperature', TEMP_KEYS.map((x) => x.actualKey))
+	if (k === 'single') return loadKeysCached('single', SINGLE_KEYS, force)
+	if (k === 'voltage') return loadKeysCached('voltage', VOLTAGE_KEYS, force)
+	if (k === 'current') return loadKeysCached('current', CURRENT_KEYS, force)
+	if (k === 'temperature') return loadKeysCached('temperature', TEMP_KEYS.map((x) => x.actualKey), force)
 	return false
 }
 </script>
@@ -2254,6 +2488,39 @@ const loadSection = (k: keyof typeof opened) => {
 	font-size: 24rpx;
 	line-height: 1.6;
 	color: #8e95a2;
+}
+
+.meter-bms-upgrade__identity {
+	margin-top: 20rpx;
+	padding: 18rpx 20rpx;
+	border-radius: 18rpx;
+	background: #f7f8fa;
+	display: flex;
+	flex-direction: column;
+	gap: 14rpx;
+}
+
+.meter-bms-upgrade__identity-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 20rpx;
+}
+
+.meter-bms-upgrade__identity-label {
+	font-size: 24rpx;
+	color: #8e95a2;
+}
+
+.meter-bms-upgrade__identity-value {
+	min-width: 0;
+	font-size: 26rpx;
+	font-weight: 600;
+	color: #333333;
+	text-align: right;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .meter-debug {
@@ -2351,6 +2618,29 @@ const loadSection = (k: keyof typeof opened) => {
 	display: flex;
 	align-items: center;
 	gap: 12rpx;
+}
+
+.section__right {
+	display: flex;
+	align-items: center;
+	gap: 8rpx;
+	flex-shrink: 0;
+}
+
+.section__refresh {
+	width: 88rpx;
+	height: 88rpx;
+	margin-top: -22rpx;
+	margin-bottom: -22rpx;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 16rpx;
+	box-sizing: border-box;
+}
+
+.section__refresh--hover {
+	background: rgba(11, 59, 255, 0.06);
 }
 
 .action__title-wrap {

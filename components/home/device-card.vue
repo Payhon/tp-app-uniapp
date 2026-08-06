@@ -1,6 +1,6 @@
 <template>
 	<view class="card" hover-class="card--hover" @tap="onTap" @longpress="onLongPress">
-		<view class="status" :class="`status--${statusClass}`">
+		<view v-if="showStatus" class="status" :class="`status--${statusClass}`">
 			<image class="status__icon" :src="statusIcon" mode="aspectFit" />
 			<text class="status__text">{{ statusText }}</text>
 		</view>
@@ -9,7 +9,7 @@
 		</view>
 
 		<view class="card__top">
-			<view class="card__title-wrap">
+			<view class="card__title-wrap" :class="{ 'card__title-wrap--with-status': showStatus }">
 				<text class="card__title u-line-1">{{ device.name }}</text>
 				<text class="card__sub u-line-1">{{ device.identifierText }}</text>
 			</view>
@@ -31,6 +31,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { shouldShowHomeDeviceStatus } from '@/common/home-device-status'
 import type { HomeDeviceCardModel } from '@/types/home'
 
 const props = defineProps<{
@@ -56,6 +57,7 @@ const isFourGDevice = computed(() => {
 })
 const isFourGOnline = computed(() => Boolean(props.device.isOnline))
 const useFourGStatus = computed(() => props.device.connectType !== 'bluetooth' && isFourGDevice.value)
+const showStatus = computed(() => shouldShowHomeDeviceStatus(props.device))
 
 const statusText = computed(() => {
 	if (props.device.connectType === 'bluetooth') return t('home.status.bluetooth') as string
@@ -109,6 +111,9 @@ const barWidth = computed(() => `${Math.max(0, Math.min(100, Number(props.device
 .card__title-wrap {
 	flex: 1;
 	min-width: 0;
+}
+
+.card__title-wrap--with-status {
 	padding-right: 170rpx; // avoid overlap with status corner tag
 }
 
