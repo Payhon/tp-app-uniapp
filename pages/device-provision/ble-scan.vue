@@ -83,6 +83,12 @@ import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/
 import { DEVICE_TYPE_METER, resolveDeviceTypeByMac, type SupportedDeviceType } from '@/common/device-provision/device-prefix-shared'
 import { formatUniError } from '@/common/device-provision/error'
 import { BMS_BLE_SERVICE_UUID } from '@/common/lib/bms-protocol/ble-uuids'
+import { cancelHomeAutoConnectAttempts } from '@/common/ble/ble-client-cache'
+import { acquireBleDiscoveryLease, type BleDiscoveryLease } from '@/common/ble/ble-discovery-coordinator'
+import {
+	BLE_SCAN_TOO_FREQUENT_RETRY_DELAY_MS,
+	classifyBleScanError,
+} from '@/common/ble/ble-scan-error-policy'
 import { useBoundDevicesStore } from '@/store/bound-devices'
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -146,6 +152,8 @@ let scanQueue: Promise<void> = Promise.resolve()
 let scanSessionId = 0
 let pageVisible = false
 let blockedByLoginGuard = false
+let scanLease: BleDiscoveryLease | null = null
+let stopScanPromise: Promise<void> | null = null
 
 const SCAN_STOP_SETTLE_MS = 180
 const ADAPTER_READY_WAIT_MS = 1200
@@ -343,10 +351,22 @@ function getBluetoothAdapterStateSafe(): Promise<{ available?: boolean; discover
 	const getter = (uni as any).getBluetoothAdapterState
 	if (typeof getter !== 'function') return Promise.resolve(null)
 	return new Promise((resolve) => {
-		getter({
-			success: (res: { available?: boolean; discovering?: boolean }) => resolve(res),
-			fail: () => resolve(null),
-		})
+		let settled = false
+		const finish = (state: { available?: boolean; discovering?: boolean } | null) => {
+			if (settled) return
+			settled = true
+			clearTimeout(timer)
+			resolve(state)
+		}
+		const timer = setTimeout(() => finish(null), STOP_DISCOVERY_TIMEOUT_MS)
+		try {
+			getter({
+				success: (res: { available?: boolean; discovering?: boolean }) => finish(res),
+				fail: () => finish(null),
+			})
+		} catch (e) {
+			finish(null)
+		}
 	})
 }
 
@@ -359,7 +379,9 @@ async function ensureBluetoothAdapterReady(sessionId: number) {
 	}
 	if (!isScanSessionActive(sessionId)) return
 	if (state?.available === false) {
-		throw new Error(t('pages.deviceProvision.bluetoothAdapterUnavailable') as string)
+		const error = new Error(t('pages.deviceProvision.bluetoothAdapterUnavailable') as string)
+		;(error as any).errCode = 10001
+		throw error
 	}
 	if (state?.discovering) {
 		await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
@@ -389,7 +411,8 @@ function bindDeviceFoundListener() {
 
 async function stopDiscovery({ settleMs = 0 }: { settleMs?: number } = {}) {
 	const state = await getBluetoothAdapterStateSafe()
-	if (state?.discovering) {
+	// 状态读取失败时仍尝试停止；不能因为 state=null 遗留原生 discovery。
+	if (state?.discovering !== false) {
 		await callBleApiWithTimeout<void>({
 			label: 'stopBluetoothDevicesDiscovery',
 			timeoutMs: STOP_DISCOVERY_TIMEOUT_MS,
@@ -548,14 +571,24 @@ const onDeviceFound = (res: { devices?: FoundDevice[] }) => {
 async function startScan() {
 	return runScanSerial(async () => {
 		const sessionId = ++scanSessionId
+		let lease: BleDiscoveryLease | null = null
+		let keepLeaseForActiveScan = false
+		let nativeDiscoveryStarted = false
 		starting.value = true
 		errorMsg.value = ''
 		clearScanTimeoutTimer()
 		try {
 			if (!isScanSessionActive(sessionId)) return
 			console.log('[ble-scan] startScan', { sessionId })
+			// 用户主动扫描优先于首页遗留的自动连接任务，避免等待连接/扫描超时后才能取得 discovery 租约。
+			cancelHomeAutoConnectAttempts('manual BLE scan started')
+			lease = await acquireBleDiscoveryLease(`ble-scan-page:${sessionId}`)
+			if (!isScanSessionActive(sessionId)) {
+				lease.release()
+				return
+			}
+			scanLease = lease
 
-			const getErrCode = (e: any) => e?.errCode ?? e?.code
 			const getErrMsg = (e: any) => String(e?.errMsg ?? e?.message ?? '')
 
 			const openBluetoothAdapterOnce = () =>
@@ -596,7 +629,46 @@ async function startScan() {
 						// #endif
 					},
 				})
+				nativeDiscoveryStarted = true
 				console.log('[ble-scan] discovery started', { sessionId, withServiceFilter, serviceUUID: BMS_BLE_SERVICE_UUID })
+			}
+
+			const startDiscoveryWithPermissionRecovery = async ({ withServiceFilter }: { withServiceFilter: boolean }) => {
+				try {
+					await startDiscovery({ withServiceFilter })
+				} catch (e) {
+					if (classifyBleScanError(e) !== 'location_or_permission') throw e
+					// #ifdef MP-WEIXIN
+					await new Promise((resolve, reject) => {
+						;(wx as any).authorize({
+							scope: 'scope.userLocation',
+							success: resolve,
+							fail: reject,
+						})
+					})
+					if (!isScanSessionActive(sessionId)) return
+					await startDiscovery({ withServiceFilter })
+					// #endif
+					// #ifndef MP-WEIXIN
+					throw e
+					// #endif
+				}
+			}
+
+			const startDiscoveryWithRecovery = async ({ withServiceFilter }: { withServiceFilter: boolean }) => {
+				try {
+					await startDiscoveryWithPermissionRecovery({ withServiceFilter })
+				} catch (e) {
+					if (classifyBleScanError(e) !== 'scan_too_frequent') throw e
+					console.warn('[ble-scan] discovery throttled, stop stale discovery and retry once', {
+						sessionId,
+						delayMs: BLE_SCAN_TOO_FREQUENT_RETRY_DELAY_MS,
+					})
+					await stopDiscovery({ settleMs: BLE_SCAN_TOO_FREQUENT_RETRY_DELAY_MS })
+					nativeDiscoveryStarted = false
+					if (!isScanSessionActive(sessionId)) return
+					await startDiscoveryWithPermissionRecovery({ withServiceFilter })
+				}
 			}
 
 			try {
@@ -627,46 +699,18 @@ async function startScan() {
 
 			bindDeviceFoundListener()
 			await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
+			nativeDiscoveryStarted = false
 			if (!isScanSessionActive(sessionId)) return
 
 			debugLogFoundCount.value = 0
 			debugLogFilteredCount.value = 0
 			debugSeenDeviceIds.clear()
 			clearFallbackTimer()
-			isScanning.value = true
-			armScanTimeout(sessionId)
-			try {
-				await startDiscovery({ withServiceFilter: true })
-			} catch (e) {
-				// 微信小程序：部分 Android 机型扫描蓝牙需要开启定位服务/授权定位权限
-				const code = getErrCode(e)
-				const msg = getErrMsg(e).toLowerCase()
-				const maybeLocation = msg.includes('location') || msg.includes('permission') || code === 10012
-				if (maybeLocation) {
-					// #ifdef MP-WEIXIN
-					try {
-						await new Promise((resolve, reject) => {
-							;(wx as any).authorize({
-								scope: 'scope.userLocation',
-								success: resolve,
-								fail: reject,
-							})
-						})
-						if (!isScanSessionActive(sessionId)) return
-						await startDiscovery({ withServiceFilter: true })
-					} catch (e2) {
-						throw e2
-					}
-					// #endif
-					// #ifndef MP-WEIXIN
-					throw e
-					// #endif
-				} else {
-					throw e
-				}
-			}
-
+			await startDiscoveryWithRecovery({ withServiceFilter: true })
 			if (!isScanSessionActive(sessionId)) return
+			isScanning.value = true
+			keepLeaseForActiveScan = true
+			armScanTimeout(sessionId)
 
 			// 部分设备首次扫描拿不到完整 serviceData，短时间内没有“可展示设备”时自动降级重启一次。
 			fallbackTimer = setTimeout(() => {
@@ -680,10 +724,22 @@ async function startScan() {
 							visibleCount: visibleDevices.value.length,
 						})
 						await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
+						nativeDiscoveryStarted = false
 						if (!isScanSessionActive(sessionId)) return
-						await startDiscovery({ withServiceFilter: false })
+						await startDiscoveryWithRecovery({ withServiceFilter: false })
 					} catch (e) {
 						console.warn('[ble-scan] fallback discovery failed', e)
+						if (!isScanSessionActive(sessionId)) return
+						clearScanTimeoutTimer()
+						offDeviceFoundListener()
+						isScanning.value = false
+						const errorKind = classifyBleScanError(e)
+						const msg = errorKind === 'scan_too_frequent'
+							? (t('pages.deviceProvision.scanTooFrequent') as string)
+							: formatUniError(e)
+						errorMsg.value = format(t('pages.deviceProvision.bleInitFailed') as string, { error: msg })
+						if (scanLease?.id === lease?.id) scanLease = null
+						lease?.release()
 					}
 				})
 			}, 1500)
@@ -692,16 +748,16 @@ async function startScan() {
 			if (scanSessionId !== sessionId) return
 			clearScanTimeoutTimer()
 			isScanning.value = false
-			const msg = formatUniError(e)
+			const errorKind = classifyBleScanError(e)
+			const msg = errorKind === 'scan_too_frequent'
+				? (t('pages.deviceProvision.scanTooFrequent') as string)
+				: formatUniError(e)
 			// NOTE: 某些平台/运行时在 script 内对 i18n 插值支持不稳定，这里用本地 format 做兜底
 			errorMsg.value = format(t('pages.deviceProvision.bleInitFailed') as string, { error: msg })
 
 			// 微信小程序：引导用户开启系统蓝牙
 			// errCode 10001 常见于 “Bluetooth not enabled/available”
-			const anyErr = e as any
-			const code = anyErr?.errCode ?? anyErr?.code
-			const errMsg = String(anyErr?.errMsg ?? '')
-			if (code === 10001 || errMsg.toLowerCase().includes('bluetooth')) {
+			if (errorKind === 'bluetooth_unavailable') {
 				// 尽量不打断用户：仅在可用时提供跳转入口
 				const openBtSetting = (uni as any).openSystemBluetoothSetting
 				if (typeof openBtSetting === 'function') {
@@ -717,6 +773,15 @@ async function startScan() {
 				}
 			}
 		} finally {
+			if (!keepLeaseForActiveScan && lease) {
+				if (nativeDiscoveryStarted) {
+					try {
+						await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
+					} catch (stopError) {}
+				}
+				if (scanLease?.id === lease.id) scanLease = null
+				lease.release()
+			}
 			if (scanSessionId === sessionId) {
 				starting.value = false
 			}
@@ -724,26 +789,32 @@ async function startScan() {
 	})
 }
 
-async function stopScan({ closeAdapter = false }: { closeAdapter?: boolean } = {}) {
+async function stopScan() {
+	if (stopScanPromise) return stopScanPromise
 	++scanSessionId
 	clearFallbackTimer()
 	clearScanTimeoutTimer()
 	offDeviceFoundListener()
 	starting.value = false
 	isScanning.value = false
-	return runScanSerial(async () => {
+	const lease = scanLease
+	stopScanPromise = runScanSerial(async () => {
 		try {
-			await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
-			if (closeAdapter) {
-				try {
-					uni.closeBluetoothAdapter()
-				} catch (e) {}
+			if (lease && scanLease?.id === lease.id) {
+				await stopDiscovery({ settleMs: SCAN_STOP_SETTLE_MS })
 			}
 		} finally {
+			if (lease && scanLease?.id === lease.id) scanLease = null
+			lease?.release()
 			starting.value = false
 			isScanning.value = false
 		}
 	})
+	try {
+		await stopScanPromise
+	} finally {
+		stopScanPromise = null
+	}
 }
 
 async function toggleScan() {
@@ -810,8 +881,6 @@ onShow(() => {
 			return
 		}
 
-		// 默认进入即开始扫描
-		await startScan()
 	})()
 })
 
@@ -824,7 +893,7 @@ onHide(() => {
 onUnload(() => {
 	blockedByLoginGuard = false
 	pageVisible = false
-	void stopScan({ closeAdapter: true })
+	void stopScan()
 })
 </script>
 

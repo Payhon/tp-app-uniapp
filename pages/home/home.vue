@@ -146,7 +146,15 @@ import {
 } from '@/common/device-view-mode'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { useInjected } from '@/common/composables/useInjected'
-import { canBleAutoConnect, connectBleClient, disconnectBleClient, getBleClientEntry, releaseBleClient, retainBleClient } from '@/common/ble/ble-client-cache'
+import {
+	canBleAutoConnect,
+	connectBleClient,
+	disconnectBleClient,
+	getBleClientEntry,
+	invalidateBleConnectAttempts,
+	releaseBleClient,
+	retainBleClient,
+} from '@/common/ble/ble-client-cache'
 import { useBoundDevicesStore } from '@/store/bound-devices'
 import { useUserStore } from '@/store/user'
 import { useWarrantyReminderStore } from '@/store/warranty-reminder'
@@ -227,6 +235,7 @@ const STORAGE_BT_AUTO_CONNECT = 'bluetoothAutoConnect'
 const BLE_MAX_READ_REGS = 60
 const homeBleKeys = new Set<string>()
 let autoConnectToken = 0
+let homePageVisible = false
 
 const isOrgUser = computed(() => isOrgUserLike(userStore.userInfo))
 const hasMore = computed(() => deviceCards.value.length < total.value)
@@ -390,19 +399,20 @@ const applyCardFallbackConnectType = (deviceId: string) => {
 }
 
 const autoConnectBleDevices = async () => {
+	if (!homePageVisible) return
 	if (!isBluetoothAutoConnectEnabled()) return
 	const token = ++autoConnectToken
 	const list = deviceCards.value
 	if (!Array.isArray(list) || !list.length) return
 
 	for (const item of list) {
-		if (token !== autoConnectToken) return
+		if (!homePageVisible || token !== autoConnectToken) return
 		if (!item?.id) continue
 		const decision = canBleAutoConnect(item?.bmsCommType, item?.bleMac)
 		if (!decision.ok || !decision.mac) continue
-		const entry = await connectBleClient({ mac: decision.mac, maxReadRegisters: BLE_MAX_READ_REGS })
+		const entry = await connectBleClient({ mac: decision.mac, maxReadRegisters: BLE_MAX_READ_REGS, source: 'home_auto' })
 		if (!entry) continue
-		if (token !== autoConnectToken) return
+		if (!homePageVisible || token !== autoConnectToken) return
 		if (!homeBleKeys.has(entry.key)) {
 			retainBleClient(entry.key)
 			homeBleKeys.add(entry.key)
@@ -467,7 +477,7 @@ const load = async (reset = true) => {
 		page.value = nextPage + 1
 
 		applyBleCacheStatus()
-		void autoConnectBleDevices()
+		if (homePageVisible) void autoConnectBleDevices()
 
 		const trackingMode = resolveAddTrackingViewMode(userStore.userInfo)
 		if ((isOrgUser.value && currentViewMode.value === trackingMode) || (!isOrgUser.value && trackingMode === 'self_bound')) {
@@ -714,6 +724,7 @@ const setMpTabSelected = () => {
 }
 
 onShow(() => {
+	homePageVisible = true
 	uni.setStorageSync('__last_tab_url__', '/pages/home/home')
 	refreshLoginState()
 	void warrantyReminderStore.refresh()
@@ -723,7 +734,9 @@ onShow(() => {
 })
 
 onHide(() => {
+	homePageVisible = false
 	stopAutoConnect()
+	invalidateBleConnectAttempts('home hidden')
 	releaseHomeBleClients()
 })
 

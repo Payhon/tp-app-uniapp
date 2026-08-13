@@ -255,6 +255,7 @@ export default {
       scanning: "正在扫描附近设备...",
       scanStopped: "已停止扫描",
       scanTimeout: "扫描已超时，请点击开始扫描重试",
+      scanTooFrequent: "扫描操作过于频繁，请稍后重试",
       discoveredCount: "已发现 {count} 台设备",
       enableBluetoothTip: "请先在系统设置中打开蓝牙后重试",
       bluetoothAdapterUnavailable: "蓝牙适配器不可用",

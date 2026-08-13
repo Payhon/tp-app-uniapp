@@ -2,6 +2,7 @@ import { BmsProtocolError, parseFrame } from './frame'
 import { parseBootFrame } from './boot-frame'
 import { BMS_BLE_NOTIFY_UUID, BMS_BLE_SERVICE_UUID, BMS_BLE_WRITE_UUID } from './ble-uuids'
 import type { BmsRequestOptions, LoggerLike } from './types'
+import { acquireBleDiscoveryLease } from '@/common/ble/ble-discovery-coordinator'
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 declare const wx: any
@@ -434,6 +435,7 @@ export class UniBleBmsTransport {
 	private _iosWriteTimeoutLogged: boolean
 	private _lastWriteTimeoutLogAt: number
 	private _bootSessionExclusive: boolean
+	private _cancelPendingConnect: (() => void) | null
 
 	constructor({
 		serviceUUID = BMS_BLE_SERVICE_UUID,
@@ -476,6 +478,7 @@ export class UniBleBmsTransport {
 		this._iosWriteTimeoutLogged = false;
 		this._lastWriteTimeoutLogAt = 0;
 		this._bootSessionExclusive = false;
+		this._cancelPendingConnect = null;
 	}
 
 	async init() {
@@ -512,10 +515,13 @@ export class UniBleBmsTransport {
 		} catch (e) {
 			// ignore
 		}
+		const lease = await acquireBleDiscoveryLease('uni-ble-transport:destroy');
 		try {
 			await uniAsyncBestEffort('closeBluetoothAdapter', {});
 		} catch (e) {
 			// ignore
+		} finally {
+			lease.release();
 		}
 	}
 
@@ -532,20 +538,30 @@ export class UniBleBmsTransport {
 			services?: string[]
 			allowDuplicatesKey?: boolean
 		} = {}): Promise<Array<{ deviceId: string; name: string; localName?: string; RSSI?: number }>> {
-			await this.init();
-			await uniAsync('startBluetoothDevicesDiscovery', {
-				services: services ? services.map(normalizeUuid) : undefined,
-				allowDuplicatesKey,
-			});
-			await sleep(durationMs);
-			await uniAsyncBestEffort('stopBluetoothDevicesDiscovery', {});
-			const res = await uniAsync<{ devices?: UniBleDeviceInfo[] }>('getBluetoothDevices', {});
-			return (res.devices || []).map((d: UniBleDeviceInfo) => ({
-				deviceId: d.deviceId,
-				name: d.name || '',
-				localName: d.localName,
-				RSSI: d.RSSI,
-			}));
+			const lease = await acquireBleDiscoveryLease('uni-ble-transport:discover');
+			let discoveryStarted = false;
+			try {
+				await this.init();
+				await uniAsync('startBluetoothDevicesDiscovery', {
+					services: services ? services.map(normalizeUuid) : undefined,
+					allowDuplicatesKey,
+				});
+				discoveryStarted = true;
+				await sleep(durationMs);
+				const res = await uniAsync<{ devices?: UniBleDeviceInfo[] }>('getBluetoothDevices', {});
+				return (res.devices || []).map((d: UniBleDeviceInfo) => ({
+					deviceId: d.deviceId,
+					name: d.name || '',
+					localName: d.localName,
+					RSSI: d.RSSI,
+				}));
+			} finally {
+				try {
+					if (discoveryStarted) await uniAsyncBestEffort('stopBluetoothDevicesDiscovery', {});
+				} finally {
+					lease.release();
+				}
+			}
 		}
 
 	/**
@@ -555,7 +571,35 @@ export class UniBleBmsTransport {
 		 */
 	async connect({ deviceId }: { deviceId: string }) {
 		if (!deviceId) throw new BmsProtocolError('deviceId is required for BLE connect');
-		await this.init();
+		this._cancelPendingConnect?.();
+		let connectCancelled = false;
+		let rejectPendingConnect!: (error: unknown) => void;
+		const pendingConnectCancelled = new Promise<never>((_, reject) => {
+			rejectPendingConnect = reject;
+		});
+		const cancelPendingConnect = () => {
+			if (connectCancelled) return;
+			connectCancelled = true;
+			rejectPendingConnect(new BmsProtocolError('BLE connect cancelled'));
+		};
+		const throwIfConnectCancelled = () => {
+			if (connectCancelled) throw new BmsProtocolError('BLE connect cancelled');
+		};
+		const waitForConnect = <T>(promise: Promise<T>): Promise<T> =>
+			Promise.race([promise, pendingConnectCancelled]);
+		this._cancelPendingConnect = cancelPendingConnect;
+
+		let discoveryLease: Awaited<ReturnType<typeof acquireBleDiscoveryLease>> | null = null;
+		const discoveryLeasePromise = acquireBleDiscoveryLease(`uni-ble-transport:connect:${deviceId}`);
+		try {
+			try {
+				discoveryLease = await waitForConnect(discoveryLeasePromise);
+			} catch (e) {
+				// 租约队列本身不可取消；若稍后仍完成交接，必须立即归还，不能阻塞手动扫描。
+				void discoveryLeasePromise.then((lateLease) => lateLease.release(), () => undefined);
+				throw e;
+			}
+		await waitForConnect(this.init());
 		this.deviceId = deviceId;
 		const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any);
 		const platform = String((sys as any)?.platform || '').toLowerCase();
@@ -568,14 +612,17 @@ export class UniBleBmsTransport {
 
 		// 连接前停止扫描（部分平台扫描中会影响连接/发现服务）
 		try {
-			await uniAsyncBestEffort('stopBluetoothDevicesDiscovery', {});
-		} catch (e) {}
+			await waitForConnect(uniAsyncBestEffort('stopBluetoothDevicesDiscovery', {}));
+		} catch (e) {
+			throwIfConnectCancelled();
+		}
+		await waitForConnect(sleep(120));
 
 		if (this.logger?.info) {
 			this.logger.info('[ble] connect()', { deviceId, serviceUUID: this.serviceUUID, writeCharUUID: this.writeCharUUID, notifyCharUUID: this.notifyCharUUID, platform });
 		}
 		try {
-			await uniAsyncHardTimeout('createBLEConnection', { deviceId }, { timeoutMs: isIOS ? 9000 : 6500 });
+			await waitForConnect(uniAsyncHardTimeout('createBLEConnection', { deviceId }, { timeoutMs: isIOS ? 9000 : 6500 }));
 		} catch (e) {
 			this.deviceId = null;
 			this._connected = false;
@@ -588,7 +635,7 @@ export class UniBleBmsTransport {
 
 		if (isIOS) {
 			// iOS 端 createBLEConnection 成功后，服务树准备可能明显滞后，先留一点缓冲。
-			await sleep(220);
+			await waitForConnect(sleep(220));
 		}
 
 		// 获取服务（部分平台刚连上时会返回空或目标服务尚未可见，做重试）
@@ -597,7 +644,7 @@ export class UniBleBmsTransport {
 		let lastServiceError: unknown = null;
 		for (let i = 0; i < serviceRetryCount; i += 1) {
 			try {
-				const srvRes = await uniAsync<{ services?: UniBleService[] }>('getBLEDeviceServices', { deviceId });
+				const srvRes = await waitForConnect(uniAsync<{ services?: UniBleService[] }>('getBLEDeviceServices', { deviceId }));
 				services = srvRes.services || [];
 				service = services.find((s: UniBleService) => normalizeUuid(s.uuid) === this.serviceUUID) || null;
 				if (service) break;
@@ -612,7 +659,7 @@ export class UniBleBmsTransport {
 				lastServiceError = e;
 				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceServices failed, retry...', { attempt: i + 1, error: e });
 			}
-			await sleep(serviceRetryDelayMs);
+			await waitForConnect(sleep(serviceRetryDelayMs));
 		}
 		if (!service) {
 			if (!services.length && lastServiceError) throw lastServiceError;
@@ -626,10 +673,10 @@ export class UniBleBmsTransport {
 		let lastCharError: unknown = null;
 		for (let i = 0; i < charRetryCount; i += 1) {
 			try {
-				const chRes = await uniAsync<{ characteristics?: UniBleCharacteristic[] }>('getBLEDeviceCharacteristics', {
+				const chRes = await waitForConnect(uniAsync<{ characteristics?: UniBleCharacteristic[] }>('getBLEDeviceCharacteristics', {
 					deviceId,
 					serviceId: this.serviceId,
-				});
+				}));
 				chars = chRes.characteristics || [];
 				if (chars.length) break;
 				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceCharacteristics empty, retry...', { attempt: i + 1, serviceId: this.serviceId });
@@ -637,7 +684,7 @@ export class UniBleBmsTransport {
 				lastCharError = e;
 				if (this.logger?.debug) this.logger.debug('[ble] getBLEDeviceCharacteristics failed, retry...', { attempt: i + 1, serviceId: this.serviceId, error: e });
 			}
-			await sleep(charRetryDelayMs);
+			await waitForConnect(sleep(charRetryDelayMs));
 		}
 		if (!chars.length) {
 			if (lastCharError) throw lastCharError;
@@ -671,12 +718,12 @@ export class UniBleBmsTransport {
 		this.notifyCharId = notifyChar.uuid;
 
 		// 打开 notify
-		await uniAsync('notifyBLECharacteristicValueChange', {
+		await waitForConnect(uniAsync('notifyBLECharacteristicValueChange', {
 			deviceId,
 			serviceId: this.serviceId,
 			characteristicId: this.notifyCharId,
 			state: true,
-		});
+		}));
 
 		// 注册 notify 回调
 		const key = mkNotifyKey(deviceId, this.serviceId, this.notifyCharId);
@@ -688,13 +735,20 @@ export class UniBleBmsTransport {
 				this.logger.info('[ble] post-connect warmup', { deviceId, platform, warmupMs: postConnectWarmupMs });
 			}
 			// 部分设备在打开 notify 后需要短暂准备时间，iOS App 端首包前需要更长稳定窗口
-			await sleep(postConnectWarmupMs);
-			await this._primeNotifyValue('connect_ready');
+			await waitForConnect(sleep(postConnectWarmupMs));
+			await waitForConnect(this._primeNotifyValue('connect_ready'));
 
 			this.logger && this.logger.info && this.logger.info('[ble] connected:', { deviceId, serviceId: this.serviceId });
+			} finally {
+				discoveryLease?.release();
+				if (this._cancelPendingConnect === cancelPendingConnect) this._cancelPendingConnect = null;
+			}
 		}
 
 	async disconnect() {
+		const cancelPendingConnect = this._cancelPendingConnect;
+		this._cancelPendingConnect = null;
+		cancelPendingConnect?.();
 		if (!this.deviceId) return;
 		const deviceId = this.deviceId;
 		try {

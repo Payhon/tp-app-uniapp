@@ -1,6 +1,7 @@
 import { BmsClient } from '@/common/lib/bms-protocol/client'
 import { createUniBleBmsTransport, type UniBleBmsTransport } from '@/common/lib/bms-protocol/uni-ble-transport'
 import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/device-provision/ble'
+import { acquireBleDiscoveryLease } from './ble-discovery-coordinator'
 import { getRememberedBleDeviceId, rememberBleDeviceId } from './ble-device-id-memory'
 
 type FoundBleDevice = {
@@ -35,6 +36,7 @@ export type AdoptBleClientConnectionOptions = {
 
 const cache = new Map<string, BleClientEntry>()
 const inFlight = new Map<string, Promise<BleClientEntry | null>>()
+const homeAutoConnectTransports = new Set<UniBleBmsTransport>()
 
 const IDLE_DISCONNECT_MS = 30_000
 const CONNECT_LOCK_WAIT_TIMEOUT_MS = 8_000
@@ -114,6 +116,8 @@ const toHexPreview = (data: unknown, maxBytes = 32): string => {
 
 const discoverWithAdv = async ({ durationMs }: { durationMs: number }): Promise<FoundBleDevice[]> => {
 	const found = new Map<string, FoundBleDevice>()
+	const lease = await acquireBleDiscoveryLease('ble-client-cache:discover')
+	let discoveryStarted = false
 
 	const onFound = (res: { devices?: FoundBleDevice[] }) => {
 		const list = (res && res.devices) || []
@@ -123,11 +127,10 @@ const discoverWithAdv = async ({ durationMs }: { durationMs: number }): Promise<
 		}
 	}
 
-	const offFn = (uni as any).offBluetoothDeviceFound
-	if (typeof offFn === 'function') offFn(onFound)
-	uni.onBluetoothDeviceFound(onFound as any)
-
 	try {
+		const offFn = (uni as any).offBluetoothDeviceFound
+		if (typeof offFn === 'function') offFn(onFound)
+		uni.onBluetoothDeviceFound(onFound as any)
 		await new Promise((resolve, reject) => {
 			uni.startBluetoothDevicesDiscovery({
 				allowDuplicatesKey: true,
@@ -135,15 +138,21 @@ const discoverWithAdv = async ({ durationMs }: { durationMs: number }): Promise<
 				fail: reject,
 			})
 		})
+		discoveryStarted = true
 		await new Promise((r) => setTimeout(r, durationMs))
 	} finally {
 		try {
-			await new Promise((resolve) => uni.stopBluetoothDevicesDiscovery({ complete: resolve }))
-		} catch (e) {}
-		try {
-			const cleanupOffFn = (uni as any).offBluetoothDeviceFound
-			if (typeof cleanupOffFn === 'function') cleanupOffFn(onFound)
-		} catch (e) {}
+			if (discoveryStarted) {
+				await new Promise((resolve) => uni.stopBluetoothDevicesDiscovery({ complete: resolve }))
+			}
+		} catch (e) {
+		} finally {
+			try {
+				const cleanupOffFn = (uni as any).offBluetoothDeviceFound
+				if (typeof cleanupOffFn === 'function') cleanupOffFn(onFound)
+			} catch (e) {}
+			lease.release()
+		}
 	}
 	return Array.from(found.values())
 }
@@ -158,6 +167,8 @@ const discoverWithAdvAbortable = async ({
 	mac: string
 }): Promise<FoundBleDevice[]> => {
 	const found = new Map<string, FoundBleDevice>()
+	const lease = await acquireBleDiscoveryLease(`ble-client-cache:auto-connect:${mac}`)
+	let discoveryStarted = false
 
 	const onFound = (res: { devices?: FoundBleDevice[] }) => {
 		const list = (res && res.devices) || []
@@ -167,11 +178,10 @@ const discoverWithAdvAbortable = async ({
 		}
 	}
 
-	const offFn = (uni as any).offBluetoothDeviceFound
-	if (typeof offFn === 'function') offFn(onFound)
-	uni.onBluetoothDeviceFound(onFound as any)
-
 	try {
+		const offFn = (uni as any).offBluetoothDeviceFound
+		if (typeof offFn === 'function') offFn(onFound)
+		uni.onBluetoothDeviceFound(onFound as any)
 		assertConnectActive(epoch, mac)
 		await new Promise((resolve, reject) => {
 			uni.startBluetoothDevicesDiscovery({
@@ -180,6 +190,7 @@ const discoverWithAdvAbortable = async ({
 				fail: reject,
 			})
 		})
+		discoveryStarted = true
 		const stepMs = 250
 		let elapsed = 0
 		while (elapsed < durationMs) {
@@ -191,12 +202,17 @@ const discoverWithAdvAbortable = async ({
 		assertConnectActive(epoch, mac)
 	} finally {
 		try {
-			await new Promise((resolve) => uni.stopBluetoothDevicesDiscovery({ complete: resolve }))
-		} catch (e) {}
-		try {
-			const cleanupOffFn = (uni as any).offBluetoothDeviceFound
-			if (typeof cleanupOffFn === 'function') cleanupOffFn(onFound)
-		} catch (e) {}
+			if (discoveryStarted) {
+				await new Promise((resolve) => uni.stopBluetoothDevicesDiscovery({ complete: resolve }))
+			}
+		} catch (e) {
+		} finally {
+			try {
+				const cleanupOffFn = (uni as any).offBluetoothDeviceFound
+				if (typeof cleanupOffFn === 'function') cleanupOffFn(onFound)
+			} catch (e) {}
+			lease.release()
+		}
 	}
 	return Array.from(found.values())
 }
@@ -407,6 +423,14 @@ export const invalidateBleConnectAttempts = (reason = 'manual') => {
 	log('invalidate connect attempts', { reason, epoch: connectEpoch })
 }
 
+export const cancelHomeAutoConnectAttempts = (reason = 'manual scan') => {
+	invalidateBleConnectAttempts(reason)
+	log('cancel home auto-connect transports', { reason, count: homeAutoConnectTransports.size })
+	for (const transport of Array.from(homeAutoConnectTransports)) {
+		void transport.disconnect().catch(() => undefined)
+	}
+}
+
 const touchEntry = (entry: BleClientEntry) => {
 	entry.lastUsedAt = Date.now()
 	if (entry.cleanupTimer != null) {
@@ -500,6 +524,7 @@ type ConnectBleOptions = {
 	force?: boolean
 	probe?: boolean
 	preferredDeviceId?: string
+	source?: 'home_auto' | 'interactive'
 }
 
 const closeEntry = async (entry: BleClientEntry) => {
@@ -558,6 +583,7 @@ export const connectBleClient = async ({
 	force = false,
 	probe = false,
 	preferredDeviceId,
+	source = 'interactive',
 }: ConnectBleOptions): Promise<BleClientEntry | null> => {
 	const key = normalizeBleMac(mac)
 	if (!key) return null
@@ -606,6 +632,7 @@ export const connectBleClient = async ({
 	const task = runSerial(async () => {
 		log('connect start', { mac: key })
 		const transport = createUniBleBmsTransport({})
+		if (source === 'home_auto') homeAutoConnectTransports.add(transport)
 		try {
 			assertConnectActive(epoch, key)
 			const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
@@ -718,6 +745,8 @@ export const connectBleClient = async ({
 				await transport.disconnect()
 			} catch (e2) {}
 			return null
+		} finally {
+			if (source === 'home_auto') homeAutoConnectTransports.delete(transport)
 		}
 	})
 

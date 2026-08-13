@@ -257,6 +257,7 @@ export default {
       scanning: "Scanning nearby devices...",
       scanStopped: "Scan stopped",
       scanTimeout: "Scan timed out. Tap Start Scan to try again.",
+      scanTooFrequent: "Scanning too frequently. Please try again shortly.",
       discoveredCount: "{count} device(s) found",
       enableBluetoothTip:
         "Please enable Bluetooth in system settings and try again",
