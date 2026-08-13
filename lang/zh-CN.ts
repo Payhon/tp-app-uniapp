@@ -33,6 +33,9 @@ export default {
       later: "暂不更新",
       updateNow: "立即更新",
       startDownload: "开始下载...",
+      miniProgramReady: "新版本已准备完成，点击确定后将自动更新并重启小程序。",
+      miniProgramFailedTitle: "更新下载失败",
+      miniProgramFailedContent: "新版本下载失败，请检查网络后重新进入小程序重试。",
     },
   },
   appUpgrade: {

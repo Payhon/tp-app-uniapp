@@ -33,6 +33,9 @@ export default {
       later: "Later",
       updateNow: "Update now",
       startDownload: "Starting download...",
+      miniProgramReady: "A new version is ready. Tap Confirm to update and restart the Mini Program.",
+      miniProgramFailedTitle: "Update Download Failed",
+      miniProgramFailedContent: "The new version could not be downloaded. Check your network and reopen the Mini Program to retry.",
     },
   },
   appUpgrade: {

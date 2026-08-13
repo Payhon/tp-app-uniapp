@@ -2,6 +2,13 @@
 import api from '@/API/'
 import { syncCurrentUniLocale } from '@/lang'
 import { useWarrantyReminderStore } from '@/store/warranty-reminder'
+// #ifdef MP-WEIXIN
+import {
+	notifyWxMiniappAppHide,
+	notifyWxMiniappAppShow,
+	startWxMiniappUpdateCheck,
+} from '@/common/wx-miniapp-update'
+// #endif
 // #ifdef APP-PLUS
 import { showAddDeviceActionSheet } from '@/common/composables/useAddDeviceActionSheet'
 // #endif
@@ -45,6 +52,13 @@ const navigateToDetail = (data: unknown) => {
 
 export default {
 	onLaunch() {
+		// #ifdef MP-WEIXIN
+		// 微信小程序新版本由微信下载；下载完成后提示用户确认并自动应用重启。
+		try {
+			startWxMiniappUpdateCheck()
+		} catch (e) {}
+		// #endif
+
 		try {
 			syncCurrentUniLocale()
 		} catch (e) {}
@@ -71,6 +85,13 @@ export default {
 	},
 
 	onShow() {
+		// #ifdef MP-WEIXIN
+		try {
+			startWxMiniappUpdateCheck()
+			notifyWxMiniappAppShow()
+		} catch (e) {}
+		// #endif
+
 		try {
 			void useWarrantyReminderStore().refresh()
 		} catch (e) {}
@@ -108,7 +129,11 @@ export default {
 	},
 
 	onHide() {
-		// no-op
+		// #ifdef MP-WEIXIN
+		try {
+			notifyWxMiniappAppHide()
+		} catch (e) {}
+		// #endif
 	},
 
 	// #ifdef APP-PLUS
