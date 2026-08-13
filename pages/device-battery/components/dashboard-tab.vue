@@ -140,6 +140,7 @@ import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import DashboardGauge from '@/components/dashboard-gauge/dashboard-gauge.vue'
+import { toSocDisplayInteger } from '@/common/soc-display'
 import type { AppBatteryDetail } from '@/service/app-battery'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 
@@ -178,9 +179,9 @@ const formatMac = (raw: unknown) => {
 
 const socPct = computed(() => {
 	const v = props.status?.energy?.socPct
-	if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.min(100, Math.round(v)))
+	if (typeof v === 'number' && Number.isFinite(v)) return toSocDisplayInteger(v)
 	const b = props.battery?.soc
-	if (typeof b === 'number' && Number.isFinite(b)) return Math.max(0, Math.min(100, Math.round(b)))
+	if (typeof b === 'number' && Number.isFinite(b)) return toSocDisplayInteger(b)
 	return 0
 })
 

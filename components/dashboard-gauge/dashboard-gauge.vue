@@ -36,6 +36,7 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, onMounted, ref, watch } from 'vue'
 import i18n from '@/lang'
+import { toSocDisplayInteger } from '@/common/soc-display'
 
 type Pt = { x: number; y: number }
 
@@ -65,7 +66,7 @@ const canvasId = `gauge-${Math.random().toString(16).slice(2)}`
 const cssW = ref(0)
 const cssH = ref(0)
 
-const socText = computed(() => String(Math.round(props.soc || 0)))
+const socText = computed(() => String(toSocDisplayInteger(props.soc || 0)))
 const totalVoltageLabelText = computed(() => props.totalVoltageLabel || t('components.dashboardGauge.totalVoltageLabel'))
 
 type CubicSegment = {
