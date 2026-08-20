@@ -188,6 +188,7 @@ import { DEVICE_TYPE_BMS, isMeterMac } from '@/common/device-provision/device-pr
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { getWindowInfo } from '@/common/platform'
 import { resolveDetailPollingPolicy } from './detail-polling-policy'
+import { resolveMeterScanHandoffUi, shouldCollapseMeterScanPanel } from './meter-scan-handoff-policy'
 import { useBatteryDetail } from './useBatteryDetail'
 const { t } = useI18n()
 
@@ -301,18 +302,27 @@ const isFourGConnPill = computed(() => !connecting.value && connType.value !== '
 const isFourGOnline = computed(() => Number(battery.value?.is_online || 0) === 1)
 const isMeterDevice = computed(() => isMeterMac(currentBleMac.value))
 const meterHasBmsStatus = computed(() => sessionMode.value === 'instrument' && !!status.value)
-const showMeterScanHandoff = computed(
-	() => sessionMode.value === 'instrument' && allowScanHandoff.value && !meterHasBmsStatus.value
+const meterScanHandoffUi = computed(() =>
+	resolveMeterScanHandoffUi({
+		sessionMode: sessionMode.value,
+		allowScanHandoff: allowScanHandoff.value,
+		connType: connType.value,
+		connecting: connecting.value,
+		hasBmsStatus: meterHasBmsStatus.value,
+		bmsDataLoading: bmsDataLoading.value,
+		instrumentPassthroughUnavailable: instrumentPassthroughUnavailable.value,
+		panelVisible: meterPanelVisible.value,
+		activeTab: activeTab.value,
+	})
 )
-const showMeterPanelReady = computed(
-	() =>
-		showMeterScanHandoff.value &&
-		connType.value === 'bluetooth' &&
-		!connecting.value &&
-		(!bmsDataLoading.value || instrumentPassthroughUnavailable.value)
-)
-const showMeterFloatingPanel = computed(() => showMeterPanelReady.value && meterPanelVisible.value && activeTab.value === 0)
-const showMeterPanelTrigger = computed(() => showMeterPanelReady.value && !meterPanelVisible.value)
+const showMeterFloatingPanel = computed(() => meterScanHandoffUi.value.showPanel)
+const showMeterPanelTrigger = computed(() => meterScanHandoffUi.value.showTrigger)
+
+watch(meterHasBmsStatus, (hasBmsStatus, previousHasBmsStatus) => {
+	if (shouldCollapseMeterScanPanel({ hasBmsStatus, previousHasBmsStatus })) {
+		meterPanelVisible.value = false
+	}
+})
 const otaCheckState = reactive<DeviceOtaCheckState>({
 	checking: false,
 	checked: false,
