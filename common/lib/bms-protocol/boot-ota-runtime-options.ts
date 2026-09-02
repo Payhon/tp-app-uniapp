@@ -22,7 +22,7 @@ export type MqttBmsBootOtaRuntimeOptions<TLogger = unknown> = {
 	logger?: TLogger
 }
 
-export const MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS = 450
+export const MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS = 600
 export const MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS = 300
 export const MOBILE_BOOT_PACKET_RETRY_DELAY_MS = 220
 export const MOBILE_BOOT_POST_ACK_DELAY_BUDGET_MS = 600

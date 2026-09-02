@@ -19,10 +19,11 @@ function assert(condition: unknown, message: string): void {
 
 const options = getMqttBmsBootOtaRuntimeOptions()
 
-assert(options.queryTimeoutMs === MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS, 'query ACK timeout must be 450ms')
-assert(options.enterBootTimeoutMs === MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS, 'enter ACK timeout must be 450ms')
-assert(options.prepareTimeoutMs === MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS, 'prepare ACK timeout must be 450ms')
-assert(options.bootPacketTimeoutMs === MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS, 'packet ACK timeout must be 450ms')
+assert(MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS === 600, 'shared BLE/MQTT non-finalize ACK timeout must be 600ms')
+assert(options.queryTimeoutMs === MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS, 'query ACK timeout must be 600ms')
+assert(options.enterBootTimeoutMs === MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS, 'enter ACK timeout must be 600ms')
+assert(options.prepareTimeoutMs === MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS, 'prepare ACK timeout must be 600ms')
+assert(options.bootPacketTimeoutMs === MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS, 'packet ACK timeout must be 600ms')
 assert(options.finalizeDelayMs === MOBILE_BOOT_FINALIZE_DELAY_MS, '0x54 must be sent 300ms after the final 0x53 ACK')
 assert(options.finalizeTimeoutMs === MOBILE_BOOT_FINALIZE_TIMEOUT_MS, '0x54 ACK timeout must be 5000ms')
 assert(options.finalizeMaxAttempts === 1, '0x54 must use a single response window')
@@ -40,8 +41,8 @@ assert(
 )
 assert(MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS === 300, '0x52 ACK to first 0x53 delay must be 300ms')
 assert(
-	MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS + MOBILE_BOOT_PACKET_RETRY_DELAY_MS < 700,
-	'non-finalize timeout plus retry delay must remain below 700ms'
+	MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS + MOBILE_BOOT_PACKET_RETRY_DELAY_MS === 820,
+	'non-finalize timeout plus packet retry delay must be 820ms'
 )
 assert(
 	resolveBootPageBoundaryDelayMs(100, 1500) + 100 === MOBILE_BOOT_POST_ACK_DELAY_BUDGET_MS,
