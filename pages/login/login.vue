@@ -1,6 +1,13 @@
 <template>
 	<view class="auth-page">
 		<image class="page-bg" :src="$img('bg@2x.png')" mode="aspectFill" />
+		<!-- #ifdef MP-WEIXIN -->
+		<view class="login-nav">
+			<view class="login-back-btn" hover-class="login-back-btn--hover" @tap="exitWxmpLogin">
+				<uni-icons type="left" size="20" color="#0f172a" />
+			</view>
+		</view>
+		<!-- #endif -->
 		<view class="brand">
 			<image v-if="loginLogoUrl" class="brand-logo" :src="loginLogoUrl" mode="heightFix" @tap="onBrandLogoTap" />
 		</view>
@@ -166,6 +173,30 @@ const getInitialAgreementChecked = (): boolean => {
 }
 
 const agree = ref<boolean>(getInitialAgreementChecked())
+
+const goHomeAsGuest = () => {
+	uni.switchTab({
+		url: '/pages/home/home',
+		fail: () => uni.reLaunch({ url: '/pages/home/home' })
+	})
+}
+
+const exitWxmpLogin = () => {
+	let pageDepth = 0
+	try {
+		pageDepth = getCurrentPages().length
+	} catch (e) {}
+
+	if (pageDepth > 1) {
+		uni.navigateBack({
+			delta: 1,
+			fail: goHomeAsGuest
+		})
+		return
+	}
+
+	goHomeAsGuest()
+}
 
 const isDeveloperMode = computed<boolean>(() => developerStore.enabled)
 
@@ -500,11 +531,35 @@ page {
 	z-index: 0;
 }
 
+.login-nav,
 .brand,
 .auth-card,
 .other {
 	position: relative;
 	z-index: 1;
+}
+
+.login-nav {
+	width: 100%;
+	max-width: 686rpx;
+	display: flex;
+	justify-content: flex-start;
+	margin-top: 10rpx;
+}
+
+.login-back-btn {
+	width: 68rpx;
+	height: 68rpx;
+	border-radius: 34rpx;
+	background: rgba(255, 255, 255, 0.9);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-shadow: 0 10rpx 35rpx rgba(15, 23, 42, 0.1);
+}
+
+.login-back-btn--hover {
+	opacity: 0.72;
 }
 
 .brand {
