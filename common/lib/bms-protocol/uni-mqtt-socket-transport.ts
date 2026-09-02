@@ -478,6 +478,7 @@ export type UniMqttSocketBmsTransportOptions = {
 	sleepWakeupIdleMs?: number
 	sleepWakeupResendDelayMs?: number
 	logger?: LoggerLike
+	onExpectedResponse?: (frame: Uint8Array) => void
 }
 
 // 基于后端 WebSocket 桥接的“MQTT透传”Transport（payload 为 JSON {hex}，由后端完成 MQTT publish/subscribe）
@@ -491,6 +492,7 @@ export class UniMqttSocketBmsTransport {
 	sleepWakeupIdleMs: number
 	sleepWakeupResendDelayMs: number
 	logger: LoggerLike
+	onExpectedResponse?: (frame: Uint8Array) => void
 
 	// NOTE: 为兼容非HBuilderX/CI的TS环境，这里不强依赖 UniApp.SocketTask 类型
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -526,6 +528,7 @@ export class UniMqttSocketBmsTransport {
 		this.sleepWakeupIdleMs = options.sleepWakeupIdleMs ?? DEFAULT_SOCKET_SLEEP_WAKEUP_IDLE_MS
 		this.sleepWakeupResendDelayMs = options.sleepWakeupResendDelayMs ?? DEFAULT_SLEEP_WAKEUP_RESEND_DELAY_MS
 		this.logger = options.logger ?? console
+		this.onExpectedResponse = options.onExpectedResponse
 
 		this._socketTask = null
 		this._connected = false
@@ -909,6 +912,11 @@ export class UniMqttSocketBmsTransport {
 		this._lastResponseAt = Date.now()
 		this._clearPendingTimers(this._pending)
 		this._pending = null
+		try {
+			this.onExpectedResponse?.(frameBytes)
+		} catch (e) {
+			this.logger?.debug && this.logger.debug('[socket] expected response callback failed:', e)
+		}
 		resolve(frameBytes)
 	}
 

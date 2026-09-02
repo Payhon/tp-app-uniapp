@@ -1,4 +1,8 @@
-import { DETAIL_MQTT_KEEPALIVE_INTERVAL_MS, resolveDetailPollingPolicy } from './detail-polling-policy'
+import {
+	DETAIL_MQTT_HISTORY_KEEPALIVE_INTERVAL_MS,
+	DETAIL_MQTT_PARAMS_KEEPALIVE_INTERVAL_MS,
+	resolveDetailPollingPolicy,
+} from './detail-polling-policy'
 
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message)
@@ -19,9 +23,12 @@ const paramsPolicy = resolveDetailPollingPolicy({
 	connecting: false,
 })
 assert(paramsPolicy.mode === 'mqtt_keepalive', 'MQTT params page should keep low-frequency polling active')
-assert(paramsPolicy.intervalMs === 30_000, 'MQTT params polling interval should be 30 seconds')
-assert(paramsPolicy.initialDelayMs === 30_000, 'first MQTT params keepalive poll should be delayed by 30 seconds')
-assert(DETAIL_MQTT_KEEPALIVE_INTERVAL_MS < 180_000, 'MQTT keepalive interval should remain below the device sleep threshold')
+assert(paramsPolicy.intervalMs === 10_000, 'MQTT params polling interval should be 10 seconds')
+assert(paramsPolicy.initialDelayMs === 10_000, 'first MQTT params keepalive poll should be delayed by 10 seconds')
+assert(
+	DETAIL_MQTT_PARAMS_KEEPALIVE_INTERVAL_MS < 15_000,
+	'MQTT params keepalive interval should remain below the confirmed 15 second sleep threshold'
+)
 
 const bleParamsPolicy = resolveDetailPollingPolicy({
 	tab: 2,
@@ -40,6 +47,10 @@ const historyPolicy = resolveDetailPollingPolicy({
 assert(historyPolicy.mode === 'mqtt_keepalive', 'MQTT history page should keep low-frequency polling active')
 assert(historyPolicy.intervalMs === 30_000, 'MQTT history polling interval should be 30 seconds')
 assert(historyPolicy.initialDelayMs === 30_000, 'first MQTT history keepalive poll should be delayed by 30 seconds')
+assert(
+	DETAIL_MQTT_HISTORY_KEEPALIVE_INTERVAL_MS === 30_000,
+	'history keepalive should preserve the existing 30 second interval'
+)
 
 const bleHistoryPolicy = resolveDetailPollingPolicy({
 	tab: 3,

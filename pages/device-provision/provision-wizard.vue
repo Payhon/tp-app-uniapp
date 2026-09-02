@@ -63,6 +63,11 @@ import { createUniBleBmsTransport } from '@/common/lib/bms-protocol/uni-ble-tran
 import { adoptBleClientConnection } from '@/common/ble/ble-client-cache'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { saveDeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
+import {
+	normalizeDeviceDetailDiscoveryEntrySource,
+	normalizeDeviceDetailEntrySource,
+	type DeviceDetailEntrySource,
+} from '@/common/device-provision/detail-entry-source'
 import { formatUniError } from '@/common/device-provision/error'
 import { getDeviceProvisionConfig, getDeviceProvisionInfo, postDeviceProvisionBind } from '@/service/deviceProvision'
 
@@ -80,6 +85,7 @@ const deviceId = ref('')
 const qrMac = ref<string | null>(null)
 const advMac = ref<string | null>(null)
 const rawDeviceIdParam = ref('')
+const entrySource = ref<DeviceDetailEntrySource>('default')
 
 const running = ref(false)
 const done = ref(false)
@@ -165,8 +171,9 @@ function goDeviceDetail(deviceId: string) {
 		return
 	}
 	setTimeout(() => {
+		const entrySourceQuery = entrySource.value === 'default' ? '' : `&entry_source=${entrySource.value}`
 		uni.redirectTo({
-			url: `/pages/device-battery/detail?device_id=${encodeURIComponent(nextId)}`,
+			url: `/pages/device-battery/detail?device_id=${encodeURIComponent(nextId)}${entrySourceQuery}`,
 		})
 	}, 180)
 }
@@ -303,6 +310,7 @@ async function runProvision() {
 					deviceName: boundDeviceName,
 					itemUuid: uuid,
 					bmsCommType: commType,
+					entrySource: normalizeDeviceDetailDiscoveryEntrySource(entrySource.value),
 					source: 'provision_success',
 					createdAt: Date.now(),
 				})
@@ -341,6 +349,7 @@ onLoad((option) => {
 	deviceId.value = safeDecodeURIComponent(rawDeviceIdParam.value)
 	qrMac.value = opt.qrMac ? normalizeMac(opt.qrMac) : null
 	advMac.value = opt.advMac ? normalizeMac(opt.advMac) : null
+	entrySource.value = normalizeDeviceDetailEntrySource(opt.entry_source)
 })
 
 onShow(() => {

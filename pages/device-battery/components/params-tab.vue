@@ -609,6 +609,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
 	(e: 'ota-state-change', patch: Partial<DeviceOtaCheckState>): void
+	(e: 'ota-running-change', running: boolean): void
 }>()
 
 const { t, te } = useI18n()
@@ -1161,6 +1162,12 @@ const otaState = reactive({
 	message: '',
 	running: false,
 })
+
+watch(
+	() => otaState.running,
+	(running) => emit('ota-running-change', running),
+	{ immediate: true, flush: 'sync' }
+)
 
 const advancedPopup = reactive({
 	show: false,

@@ -39,6 +39,8 @@ const inFlight = new Map<string, Promise<BleClientEntry | null>>()
 const homeAutoConnectTransports = new Set<UniBleBmsTransport>()
 
 const IDLE_DISCONNECT_MS = 30_000
+const DISCOVERY_ENTRY_DISCONNECT_TIMEOUT_MS = 1_200
+const DISCOVERY_ENTRY_DISCONNECT_SETTLE_MS = 250
 const CONNECT_LOCK_WAIT_TIMEOUT_MS = 8_000
 const CANCELLED_CONNECT_LOCK_WAIT_TIMEOUT_MS = 1_200
 let connectEpoch = 0
@@ -479,6 +481,51 @@ export const releaseBleClient = (mac: unknown) => {
 	if (!entry) return
 	entry.refCount = Math.max(0, entry.refCount - 1)
 	if (entry.refCount === 0) scheduleCleanup(entry)
+}
+
+export const releaseBleClientAndDisconnectIfIdle = async (mac: unknown): Promise<boolean> => {
+	const key = normalizeBleMac(mac)
+	if (!key) return false
+	const entry = cache.get(key)
+	if (!entry) return false
+
+	entry.refCount = Math.max(0, entry.refCount - 1)
+	if (entry.refCount > 0) {
+		log('release keeps shared connection', { mac: key, deviceId: entry.deviceId, refCount: entry.refCount })
+		return false
+	}
+	if (entry.cleanupTimer != null) {
+		clearTimeout(entry.cleanupTimer)
+		entry.cleanupTimer = null
+	}
+	if (cache.get(key) === entry) cache.delete(key)
+
+	const lease = await acquireBleDiscoveryLease(`ble-client-cache:release-disconnect:${key}`)
+	try {
+		let disconnectTimeoutTimer: ReturnType<typeof setTimeout> | null = null
+		const result = await Promise.race([
+			entry.transport.disconnect().then(
+				() => 'disconnected' as const,
+				() => 'failed' as const
+			),
+			new Promise<'timeout'>((resolve) => {
+				disconnectTimeoutTimer = setTimeout(() => resolve('timeout'), DISCOVERY_ENTRY_DISCONNECT_TIMEOUT_MS)
+			}),
+		])
+		if (disconnectTimeoutTimer != null) clearTimeout(disconnectTimeoutTimer)
+		log(result === 'disconnected' ? 'discovery-entry disconnect' : 'discovery-entry disconnect incomplete', {
+			mac: key,
+			deviceId: entry.deviceId,
+			result,
+		})
+		await new Promise((resolve) => setTimeout(resolve, DISCOVERY_ENTRY_DISCONNECT_SETTLE_MS))
+		return result === 'disconnected'
+	} catch (e) {
+		log('discovery-entry disconnect failed', { mac: key, deviceId: entry.deviceId })
+		return false
+	} finally {
+		lease.release()
+	}
 }
 
 export const disconnectBleClient = async (mac: unknown): Promise<boolean> => {

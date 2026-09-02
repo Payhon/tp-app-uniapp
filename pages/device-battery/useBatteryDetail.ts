@@ -25,6 +25,7 @@ import {
 	getBleClientEntry,
 	invalidateBleConnectAttempts,
 	releaseBleClient,
+	releaseBleClientAndDisconnectIfIdle,
 	retainBleClient,
 	type BleClientEntry,
 } from '@/common/ble/ble-client-cache'
@@ -48,8 +49,17 @@ import {
 } from './detail-data-arbiter'
 import {
 	INSTRUMENT_PASSTHROUGH_WAIT_TIMEOUT_MS,
+	resolveInstrumentPollDelay,
 	shouldExpireInstrumentPassthroughWait,
 } from './instrument-passthrough-policy'
+import {
+	createScanFourGOnlineState,
+	getScanFourGOnlineOverrideExpiresAt,
+	isScanFourGOnlineOverrideActive,
+	markScanFourGValidResponse,
+	shouldStartScanFourGOnlineGrace,
+	startScanFourGOnlineGrace,
+} from './scan-four-g-online-policy'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
 type DataSourceMode = 'realtime' | 'cloud_fallback' | 'offline'
@@ -70,6 +80,13 @@ type ConnectAutoOptions = {
 type LoadByIdOptions = {
 	handoff?: DeviceDetailHandoff | null
 	preferWarmBle?: boolean
+	scanEntry?: boolean
+}
+
+type DisconnectAllOptions = {
+	preserveFirstFrameState?: boolean
+	preserveStatus?: boolean
+	disconnectBleIfIdle?: boolean
 }
 
 type RealtimeFallbackContext = {
@@ -96,7 +113,6 @@ const RELAY_RECONNECT_DELAY_MS = 3_000
 const POLL_INTERVAL_MS = 2_000
 const CLOUD_POLL_INTERVAL_MS = 5_000
 const MQTT_STATUS_READ_TIMEOUT_MS = 5_000
-const INSTRUMENT_WARMUP_POLL_INTERVAL_MS = 1_200
 const FIRST_FRAME_SLOW_HINT_MS = 9_000
 const FIRST_FRAME_AUTO_RECONNECT_FAILURES = 1
 const FIRST_FRAME_MAX_AUTO_RECONNECTS = 2
@@ -456,6 +472,7 @@ export const useBatteryDetail = () => {
 	const bmsDataLoadPhase = ref<BmsDataLoadPhase>('idle')
 	const bmsDataLoadAttempts = ref(0)
 	const bmsDataLoadLastError = ref('')
+	const scanFourGOnlineOverride = ref(false)
 	const pollingPaused = ref(false)
 	const sessionMode = ref<DeviceDetailSessionMode>('cloud')
 
@@ -464,6 +481,7 @@ export const useBatteryDetail = () => {
 	let pollingIntervalMs = 0
 	let pollingGeneration = 0
 	let firstFrameSlowTimer: number | null = null
+	let scanFourGOnlineTimer: number | null = null
 	let instrumentPassthroughWaitTimer: number | null = null
 	let cloudPollTimer: number | null = null
 	let mqttTransport: MqttTransportLike | null = null
@@ -475,6 +493,7 @@ export const useBatteryDetail = () => {
 	let requestFirstFrameReconnect: ((sourceClient: BmsClient, reason: string, err?: unknown) => void) | null = null
 	let instrumentStatusFailCount = 0
 	let instrumentPreferredDeviceId = ''
+	// 首帧等待超时的 UI 标志，不代表蓝牙断开，也不阻止继续查询。
 	const instrumentPassthroughUnavailable = ref(false)
 	let lastStatusLogAt = 0
 	let relaySocketTask: any = null
@@ -487,6 +506,7 @@ export const useBatteryDetail = () => {
 	let detailRequestSequence = 0
 	let latestDetailRequestSequence = 0
 	let connectAttemptSequence = 0
+	let scanFourGOnlineState = createScanFourGOnlineState()
 
 	let reportQueue: AppBatteryReportReq[] = []
 	let reportFlushing = false
@@ -507,8 +527,93 @@ export const useBatteryDetail = () => {
 	const isSessionCurrent = (token: DetailDataSessionToken) =>
 		!componentDisposed && isDetailDataSessionCurrent(dataArbiter, token)
 
+	const scanFourGSessionKey = (token: DetailDataSessionToken) =>
+		`${token.generation}:${token.sessionKey}:${token.deviceId}`
+
+	const clearScanFourGOnlineTimer = () => {
+		if (scanFourGOnlineTimer != null) {
+			clearTimeout(scanFourGOnlineTimer)
+			scanFourGOnlineTimer = null
+		}
+	}
+
+	const resetScanFourGOnlineState = () => {
+		clearScanFourGOnlineTimer()
+		scanFourGOnlineState = createScanFourGOnlineState()
+		scanFourGOnlineOverride.value = false
+	}
+
+	const syncScanFourGOnlineOverride = (expectedSession: DetailDataSessionToken) => {
+		clearScanFourGOnlineTimer()
+		if (!isSessionCurrent(expectedSession)) {
+			scanFourGOnlineOverride.value = false
+			return
+		}
+		const expectedKey = scanFourGSessionKey(expectedSession)
+		if (scanFourGOnlineState.sessionKey !== expectedKey) {
+			scanFourGOnlineOverride.value = false
+			return
+		}
+		const now = Date.now()
+		scanFourGOnlineOverride.value = isScanFourGOnlineOverrideActive(scanFourGOnlineState, now)
+		const expiresAt = getScanFourGOnlineOverrideExpiresAt(scanFourGOnlineState)
+		if (!scanFourGOnlineOverride.value || expiresAt <= now) return
+		scanFourGOnlineTimer = setTimeout(() => {
+			scanFourGOnlineTimer = null
+			if (!isSessionCurrent(expectedSession) || scanFourGOnlineState.sessionKey !== expectedKey) return
+			scanFourGOnlineOverride.value = isScanFourGOnlineOverrideActive(scanFourGOnlineState, Date.now())
+		}, Math.max(1, expiresAt - now)) as unknown as number
+	}
+
+	const beginScanFourGOnlineGrace = (expectedSession: DetailDataSessionToken) => {
+		if (!isSessionCurrent(expectedSession)) return
+		scanFourGOnlineState = startScanFourGOnlineGrace({
+			sessionKey: scanFourGSessionKey(expectedSession),
+			nowMs: Date.now(),
+		})
+		syncScanFourGOnlineOverride(expectedSession)
+		log('scan 4g online grace started', {
+			deviceId: expectedSession.deviceId,
+		})
+	}
+
+	const ensureScanFourGOnlineGrace = (scanEntry: boolean, expectedSession: DetailDataSessionToken) => {
+		if (!isSessionCurrent(expectedSession)) return false
+		if (
+			!shouldStartScanFourGOnlineGrace({
+				scanEntry,
+				isFourGDevice: isCloudCapableBattery(),
+			})
+		) {
+			return false
+		}
+		const expectedKey = scanFourGSessionKey(expectedSession)
+		if (scanFourGOnlineState.enabled && scanFourGOnlineState.sessionKey === expectedKey) return false
+		beginScanFourGOnlineGrace(expectedSession)
+		return true
+	}
+
+	const confirmScanFourGOnlineInteraction = (expectedSession: DetailDataSessionToken) => {
+		if (!isSessionCurrent(expectedSession)) return
+		const expectedKey = scanFourGSessionKey(expectedSession)
+		const firstValidResponse = scanFourGOnlineState.lastValidResponseAtMs <= 0
+		const nextState = markScanFourGValidResponse(scanFourGOnlineState, {
+			sessionKey: expectedKey,
+			nowMs: Date.now(),
+		})
+		if (nextState === scanFourGOnlineState) return
+		scanFourGOnlineState = nextState
+		syncScanFourGOnlineOverride(expectedSession)
+		if (firstValidResponse) {
+			log('scan 4g online interaction confirmed', {
+				deviceId: expectedSession.deviceId,
+			})
+		}
+	}
+
 	const startSession = (sessionKey: string, nextDeviceId: string): DetailDataSessionToken | null => {
 		if (componentDisposed) return null
+		resetScanFourGOnlineState()
 		dataArbiter = beginDetailDataSession(dataArbiter, { sessionKey, deviceId: nextDeviceId })
 		if (dataArbiter.disposed) return null
 		latestDetailRequestSequence = ++detailRequestSequence
@@ -555,6 +660,7 @@ export const useBatteryDetail = () => {
 
 	const beginFirstFrameWait = () => {
 		if (status.value) return
+		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 		if (connType.value !== 'bluetooth' && connType.value !== 'mqtt') return
 		if (bmsDataLoadPhase.value !== 'retrying' && bmsDataLoadPhase.value !== 'failed') {
 			bmsDataLoadPhase.value = 'reading'
@@ -737,10 +843,10 @@ export const useBatteryDetail = () => {
 
 			instrumentPassthroughUnavailable.value = true
 			status.value = null
-			bmsDataLoadPhase.value = 'failed'
+			bmsDataLoadPhase.value = 'slow'
 			bmsDataLoadLastError.value = `instrument BMS status wait timeout after ${INSTRUMENT_PASSTHROUGH_WAIT_TIMEOUT_MS}ms`
 			clearFirstFrameSlowTimer()
-			stopPolling()
+			// 仅结束首帧遮罩；继续串行查询，同会话的完整迟到响应仍可更新。
 			syncBmsDataLoading()
 			log('instrument passthrough wait deadline reached', {
 				elapsedMs,
@@ -1367,7 +1473,6 @@ export const useBatteryDetail = () => {
 		const realtimeConnType = connType.value
 		stopPolling()
 		if (pollingPaused.value) return
-		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 		pollingActiveClient = c
 		pollingIntervalMs = intervalMs
 		pollingGeneration += 1
@@ -1456,26 +1561,27 @@ export const useBatteryDetail = () => {
 				syncBmsDataLoading()
 			}
 		}
+		const nextPollDelay = () => isInstrumentSession()
+			? resolveInstrumentPollDelay({
+				hasStatus: !!status.value,
+				waitExpired: instrumentPassthroughUnavailable.value,
+				normalIntervalMs: intervalMs,
+			})
+			: intervalMs
 		const scheduleNext = (delayMs: number) => {
 			if (!shouldContinuePolling()) return
-			if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 			pollTimer = setTimeout(async () => {
 				pollTimer = null
 				if (!shouldContinuePolling()) return
-				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 				await run()
-				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
-				const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : intervalMs
-				scheduleNext(nextDelay)
+				scheduleNext(nextPollDelay())
 			}, delayMs) as unknown as number
 		}
 		if (initialDelayMs > 0) {
 			scheduleNext(initialDelayMs)
 		} else {
 			void run().finally(() => {
-				if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
-				const nextDelay = isInstrumentSession() && !status.value ? INSTRUMENT_WARMUP_POLL_INTERVAL_MS : intervalMs
-				scheduleNext(nextDelay)
+				scheduleNext(nextPollDelay())
 			})
 		}
 	}
@@ -1489,12 +1595,20 @@ export const useBatteryDetail = () => {
 
 	const resumePolling = (options?: PollingStartOptions) => {
 		pollingPaused.value = false
-		if (isInstrumentSession() && instrumentPassthroughUnavailable.value) return
 		if (client.value) startPolling(client.value, options)
 		else syncBmsDataLoading()
 	}
 
-	const disconnectAll = async (options?: { preserveFirstFrameState?: boolean; preserveStatus?: boolean }) => {
+	const prepareInstrumentBmsSwitch = () => {
+		if (!isInstrumentSession() || connType.value !== 'bluetooth') return
+		pausePolling()
+		status.value = null
+		resetFirstFrameState()
+		instrumentStatusFailCount = 0
+		instrumentPassthroughUnavailable.value = false
+	}
+
+	const disconnectAll = async (options?: DisconnectAllOptions) => {
 		invalidateBleConnectAttempts('device-detail disconnectAll')
 		const wasBluetooth = connType.value === 'bluetooth'
 		if (wasBluetooth && !isInstrumentSession()) {
@@ -1520,8 +1634,13 @@ export const useBatteryDetail = () => {
 		realtimeOccupied.value = false
 		clearReportRetryTimer()
 		resetMqttInteractiveSnapshotReportState()
+		let bleDisconnectTask: Promise<boolean> | null = null
 		if (bleCacheKey) {
-			releaseBleClient(bleCacheKey)
+			if (options?.disconnectBleIfIdle) {
+				bleDisconnectTask = releaseBleClientAndDisconnectIfIdle(bleCacheKey)
+			} else {
+				releaseBleClient(bleCacheKey)
+			}
 			bleCacheKey = null
 		}
 		const transportToDisconnect = mqttTransport
@@ -1529,6 +1648,7 @@ export const useBatteryDetail = () => {
 		try {
 			await transportToDisconnect?.disconnect()
 		} catch (e) {}
+		if (bleDisconnectTask) await bleDisconnectTask
 		log('disconnectAll done')
 	}
 
@@ -1587,6 +1707,10 @@ export const useBatteryDetail = () => {
 				token,
 				platform: getReportPlatform(),
 				logger: console as any,
+				onExpectedResponse: () => {
+					if (!isSessionCurrent(expectedSession) || mqttTransport !== nextTransport) return
+					confirmScanFourGOnlineInteraction(expectedSession)
+				},
 			})
 			await nextTransport.connect()
 			if (!isSessionCurrent(expectedSession)) {
@@ -1803,6 +1927,7 @@ export const useBatteryDetail = () => {
 				item_uuid: handoff.itemUuid || null,
 				comm_chip_id: null,
 			} as AppBatteryDetail
+			ensureScanFourGOnlineGrace(!!options?.scanEntry, expectedSession)
 			const warmEntry = getBleClientEntry(handoff.bleMac)
 			if (warmEntry && (await validateAndAttachWarmBleEntry(warmEntry, 'handoff', expectedSession))) {
 				if (!isSessionCurrent(expectedSession)) return
@@ -1812,12 +1937,16 @@ export const useBatteryDetail = () => {
 				log('load battery detail warm ble missing, reconnect', { deviceId: nextId, ble_mac: handoff.bleMac })
 				void connectAuto({ preserveCurrentBle: false, probe: true })
 			}
-			void refreshCloudBatteryDetail(nextId, expectedSession)
+			void refreshCloudBatteryDetail(nextId, expectedSession).then((ok) => {
+				if (ok) ensureScanFourGOnlineGrace(!!options?.scanEntry, expectedSession)
+			})
 			return
 		}
 		const ok = await refreshCloudBatteryDetail(nextId, expectedSession)
 		if (!ok || !isSessionCurrent(expectedSession)) return
-		if (isCloudCapableBattery()) {
+		const cloudCapable = isCloudCapableBattery()
+		ensureScanFourGOnlineGrace(!!options?.scanEntry, expectedSession)
+		if (cloudCapable) {
 			void refreshCloudTelemetry({ bootstrapOnly: true, sessionToken: expectedSession })
 			void connectAuto({ preserveCurrentBle: false, preserveStatus: true })
 			return
@@ -1867,7 +1996,7 @@ export const useBatteryDetail = () => {
 			device_id: instrumentPreferredDeviceId || null,
 			device_name: battery.value.device_name ?? null,
 		})
-		void connectAuto()
+		await connectAuto()
 	}
 
 	const retryBmsDataRead = () => {
@@ -1925,7 +2054,7 @@ export const useBatteryDetail = () => {
 		}
 	}
 
-	const dispose = async () => {
+	const dispose = async (options?: { disconnectBleIfIdle?: boolean }) => {
 		if (componentDisposed) return
 		componentDisposed = true
 		dataArbiter = disposeDetailDataSession(dataArbiter)
@@ -1933,7 +2062,8 @@ export const useBatteryDetail = () => {
 		connectAttemptSequence += 1
 		connecting.value = false
 		firstFrameRecovering = false
-		await disconnectAll()
+		resetScanFourGOnlineState()
+		await disconnectAll({ disconnectBleIfIdle: options?.disconnectBleIfIdle })
 	}
 
 	return {
@@ -1949,12 +2079,14 @@ export const useBatteryDetail = () => {
 		bmsDataLoadPhase,
 		bmsDataLoadAttempts,
 		bmsDataLoadLastError,
+		scanFourGOnlineOverride,
 		instrumentPassthroughUnavailable,
 		sessionMode,
 		pausePolling,
 		resumePolling,
 		loadById,
 		loadInstrumentSession,
+		prepareInstrumentBmsSwitch,
 		disconnectAll,
 		disconnectBluetooth,
 		retryBmsDataRead,

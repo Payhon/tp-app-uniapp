@@ -60,7 +60,7 @@ function findBoundDeviceByScanCode(parsed, devices) {
  * @returns {string}
  */
 function buildBoundDetailUrl(deviceId) {
-  return `/pages/device-battery/detail?device_id=${encodeURIComponent(String(deviceId || ''))}`
+  return `/pages/device-battery/detail?device_id=${encodeURIComponent(String(deviceId || ''))}&entry_source=scan`
 }
 
 /**
@@ -68,7 +68,7 @@ function buildBoundDetailUrl(deviceId) {
  * @returns {string}
  */
 function buildInstrumentSessionUrl(mac) {
-  return `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(String(mac || ''))}&allow_scan_handoff=1`
+  return `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(String(mac || ''))}&allow_scan_handoff=1&entry_source=scan`
 }
 
 /**
@@ -76,7 +76,7 @@ function buildInstrumentSessionUrl(mac) {
  * @returns {string}
  */
 function buildBmsProvisionUrl(mac) {
-  return `/pages/device-provision/ble-scan?mode=qr&mac=${encodeURIComponent(String(mac || ''))}`
+  return `/pages/device-provision/ble-scan?mode=qr&mac=${encodeURIComponent(String(mac || ''))}&entry_source=scan`
 }
 
 /**
@@ -84,7 +84,7 @@ function buildBmsProvisionUrl(mac) {
  * @returns {string}
  */
 function buildUuidBindUrl(uuid) {
-  return `/pages/device-provision/uuid-bind?uuid=${encodeURIComponent(String(uuid || ''))}`
+  return `/pages/device-provision/uuid-bind?uuid=${encodeURIComponent(String(uuid || ''))}&entry_source=scan`
 }
 
 /**

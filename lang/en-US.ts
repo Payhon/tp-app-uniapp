@@ -1055,6 +1055,12 @@ export default {
       params: "Settings",
       history: "History",
     },
+    identifier: {
+      uuid: "UUID",
+      copy: "Copy",
+      uuidCopied: "UUID copied",
+      uuidCopyFailed: "Failed to copy UUID",
+    },
     conn: {
       bluetooth: "Bluetooth",
       mqtt: "MQTT",
@@ -1189,12 +1195,14 @@ export default {
     meter: {
       deviceName: "Meter Device",
       sessionTitle: "Temporary Meter Session",
+      waitingBms: "Meter connected, waiting for BMS data",
       sessionHint:
         "Connected to the meter over BLE. If this is a wired meter, check the meter-to-BMS connection and BMS power. You can still scan a BMS QR code to switch the target.",
       scanBindBms: "Scan BMS QR",
       onlyBmsMacTip: "Please scan a BMS QR code",
       bindTargetSuccess: "Meter target updated",
-      bindTargetPending: "Meter is switching target and reconnecting",
+      bindTargetPending: "Update unconfirmed; reconnecting to read data",
+      reconnectFailed: "Meter reconnection failed. Please reconnect.",
       bindTargetFailed: "Failed to update meter target",
     },
     params: {

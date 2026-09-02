@@ -81,18 +81,18 @@ function resolveScanRoute(
 		const matched = boundDevicesStore.findByBleMac(parsed.value)
 		const matchedDeviceId = String(matched?.device_id || '').trim()
 		if (matchedDeviceId) {
-			return { action: 'bound_detail', url: `/pages/device-battery/detail?device_id=${encodeURIComponent(matchedDeviceId)}` }
+			return { action: 'bound_detail', url: `/pages/device-battery/detail?device_id=${encodeURIComponent(matchedDeviceId)}&entry_source=scan` }
 		}
 		if (parsed.deviceType === DEVICE_TYPE_METER) {
 			return {
 				action: 'meter_session',
-				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(parsed.value)}&allow_scan_handoff=1`,
+				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(parsed.value)}&allow_scan_handoff=1&entry_source=scan`,
 			}
 		}
 		if (parsed.deviceType === DEVICE_TYPE_BMS) {
 			return {
 				action: 'bms_provision',
-				url: `/pages/device-provision/ble-scan?mode=qr&mac=${encodeURIComponent(parsed.value)}`,
+				url: `/pages/device-provision/ble-scan?mode=qr&mac=${encodeURIComponent(parsed.value)}&entry_source=scan`,
 			}
 		}
 		return { action: 'unsupported' as const }
@@ -101,9 +101,9 @@ function resolveScanRoute(
 	const matched = boundDevicesStore.findByItemUuid(parsed.value)
 	const matchedDeviceId = String(matched?.device_id || '').trim()
 	if (matchedDeviceId) {
-		return { action: 'bound_detail', url: `/pages/device-battery/detail?device_id=${encodeURIComponent(matchedDeviceId)}` }
+		return { action: 'bound_detail', url: `/pages/device-battery/detail?device_id=${encodeURIComponent(matchedDeviceId)}&entry_source=scan` }
 	}
-	return { action: 'uuid_bind', url: `/pages/device-provision/uuid-bind?uuid=${encodeURIComponent(parsed.value)}` }
+	return { action: 'uuid_bind', url: `/pages/device-provision/uuid-bind?uuid=${encodeURIComponent(parsed.value)}&entry_source=scan` }
 }
 
 export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOptions = {}) {
@@ -130,10 +130,10 @@ export function showAddDeviceActionSheet(options: ShowAddDeviceActionSheetOption
 		success: (res: { tapIndex: number }) => {
 			const idx = Number(res.tapIndex)
 			if (idx === 0) {
-				suppressActionSheet(guard, 1200)
-				switchToBaseTab(baseTabUrl, () => {
-					uni.navigateTo({ url: '/pages/device-provision/ble-scan' })
-				})
+					suppressActionSheet(guard, 1200)
+					switchToBaseTab(baseTabUrl, () => {
+						uni.navigateTo({ url: '/pages/device-provision/ble-scan?auto_start=1&entry_source=ble_search' })
+					})
 				return
 			}
 			if (idx === 1) {

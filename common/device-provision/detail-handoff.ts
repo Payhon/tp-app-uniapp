@@ -1,4 +1,8 @@
 import { normalizeHex, normalizeMac } from './ble'
+import {
+	normalizeDeviceDetailDiscoveryEntrySource,
+	type DeviceDetailDiscoveryEntrySource,
+} from './detail-entry-source'
 
 export type DeviceDetailHandoffSource = 'provision_success'
 
@@ -8,6 +12,7 @@ export type DeviceDetailHandoff = {
 	deviceName?: string
 	itemUuid?: string
 	bmsCommType?: number | null
+	entrySource?: DeviceDetailDiscoveryEntrySource
 	source: DeviceDetailHandoffSource
 	createdAt: number
 }
@@ -27,6 +32,7 @@ const normalizePayload = (payload: Partial<DeviceDetailHandoff> | null | undefin
 		deviceName: String(payload.deviceName || '').trim() || undefined,
 		itemUuid: itemUuid || undefined,
 		bmsCommType: payload.bmsCommType == null ? null : Number(payload.bmsCommType),
+		entrySource: normalizeDeviceDetailDiscoveryEntrySource(payload.entrySource),
 		source: payload.source === 'provision_success' ? 'provision_success' : 'provision_success',
 		createdAt: Number(payload.createdAt || Date.now()),
 	}

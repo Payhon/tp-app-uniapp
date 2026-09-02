@@ -38,6 +38,10 @@ import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useI18n } from 'vue-i18n'
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
+import {
+	normalizeDeviceDetailEntrySource,
+	type DeviceDetailEntrySource,
+} from '@/common/device-provision/detail-entry-source'
 import { extractApiErrorMessage } from '@/common/api-error'
 import { normalizeHex } from '@/common/device-provision/ble'
 import { navigateToWarrantyProfileForCompletion, shouldGuideWarrantyProfileAfterNewBinding } from '@/common/warranty-profile-reminder'
@@ -49,6 +53,7 @@ const pageHeight = ref<string | number>(0)
 const marginTopHeight = ref<string | number>(0)
 
 const uuid = ref('')
+const entrySource = ref<DeviceDetailEntrySource>('default')
 const running = ref(false)
 const done = ref(false)
 const status = ref<'idle' | 'checking' | 'binding' | 'success' | 'error'>('idle')
@@ -76,7 +81,7 @@ function goDeviceDetail(deviceId: string) {
 	}
 	setTimeout(() => {
 		uni.redirectTo({
-			url: `/pages/device-battery/detail?device_id=${encodeURIComponent(nextId)}`,
+			url: `/pages/device-battery/detail?device_id=${encodeURIComponent(nextId)}${entrySource.value === 'default' ? '' : `&entry_source=${entrySource.value}`}`,
 		})
 	}, 180)
 }
@@ -172,6 +177,7 @@ onLoad((option) => {
 	if (blockedByLoginGuard) return
 	const opt = option as Record<string, string | undefined>
 	uuid.value = normalizeHex(String(opt.uuid || ''))
+	entrySource.value = normalizeDeviceDetailEntrySource(opt.entry_source)
 	if (!/^[0-9A-F]{32}$/.test(uuid.value)) uuid.value = ''
 })
 

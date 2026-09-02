@@ -46,7 +46,7 @@ type Props = {
 	totalVoltageText?: string
 	totalVoltageLabel?: string
 	footerStateText?: string
-	footerMacText?: string
+	footerIdentifierText?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -55,7 +55,7 @@ const props = withDefaults(defineProps<Props>(), {
 	totalVoltageText: '',
 	totalVoltageLabel: '',
 	footerStateText: '',
-	footerMacText: '',
+	footerIdentifierText: '',
 })
 
 const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params as any) as string
@@ -237,7 +237,7 @@ const draw = () => {
 	const totalVoltageText = String(props.totalVoltageText || '')
 	const totalVoltageLabel = String(totalVoltageLabelText.value || '')
 	const stateText = String(props.footerStateText || '')
-	const macText = String(props.footerMacText || '')
+	const identifierText = String(props.footerIdentifierText || '')
 
 	ctx.setTextAlign('center')
 	ctx.setTextBaseline('middle')
@@ -267,10 +267,10 @@ const draw = () => {
 		ctx.setFontSize(14)
 		ctx.fillText(stateText, 200, 188)
 	}
-	if (macText) {
+	if (identifierText) {
 		ctx.setFillStyle('#4b5563')
 		ctx.setFontSize(14)
-		ctx.fillText(macText, 200, 210)
+		ctx.fillText(identifierText, 200, 210)
 	}
 	// #endif
 
@@ -296,7 +296,10 @@ onMounted(() => {
 	setTimeout(measure, 200)
 })
 
-watch(() => [props.soc, props.totalVoltageText, totalVoltageLabelText.value, props.footerStateText, props.footerMacText], draw)
+watch(
+	() => [props.soc, props.totalVoltageText, totalVoltageLabelText.value, props.footerStateText, props.footerIdentifierText],
+	draw
+)
 </script>
 
 <style lang="scss" scoped>
@@ -416,7 +419,7 @@ watch(() => [props.soc, props.totalVoltageText, totalVoltageLabelText.value, pro
 	font-weight: 500;
 }
 
-.mac {
+.identifier {
 	font-size: 24rpx;
 	color: #4b5563;
 	font-family: 'Avenir Next', Helvetica, Arial, sans-serif;

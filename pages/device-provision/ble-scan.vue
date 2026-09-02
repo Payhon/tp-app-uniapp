@@ -43,7 +43,14 @@
 			</view>
 
 			<view class="list-panel">
-				<scroll-view scroll-y class="list" :show-scrollbar="false">
+				<scroll-view
+					scroll-y
+					class="list"
+					:show-scrollbar="false"
+					@touchstart="handleListTouchStart"
+					@touchend="handleListTouchEnd"
+					@touchcancel="handleListTouchEnd"
+				>
 					<view v-for="d in visibleDevices" :key="d.deviceId" class="item" @click="selectDevice(d)">
 						<view class="item-main">
 							<view class="item-title">
@@ -90,6 +97,18 @@ import {
 	classifyBleScanError,
 } from '@/common/ble/ble-scan-error-policy'
 import { useBoundDevicesStore } from '@/store/bound-devices'
+import type { DeviceDetailDiscoveryEntrySource } from '@/common/device-provision/detail-entry-source'
+import {
+	canRunScheduledBleScanAutoStart,
+	isBleScanAutoStartRequested,
+	resolveBleScanDurationMs,
+	shouldScheduleBleScanAutoStart,
+} from './ble-scan-entry-policy'
+import {
+	appendBleScanDeviceId,
+	createBleScanListSortScheduler,
+	sortBleScanDeviceIds,
+} from './ble-scan-list-order-policy'
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 declare const wx: any
@@ -136,12 +155,14 @@ const isScanning = ref(false)
 const errorMsg = ref('')
 
 const mode = ref<'manual' | 'qr'>('manual')
+const entrySource = ref<DeviceDetailDiscoveryEntrySource>('ble_search')
 const targetMac = ref<string | null>(null)
 const targetMacDisplay = computed(() => (targetMac.value ? mac12ToColon(targetMac.value) : ''))
 
 const boundDevicesStore = useBoundDevicesStore()
 
 const rows = ref<Map<string, DeviceRow>>(new Map())
+const orderedDeviceIds = ref<string[]>([])
 const navigated = ref(false)
 const debugLogFoundCount = ref(0)
 const debugLogFilteredCount = ref(0)
@@ -151,7 +172,11 @@ let scanTimeoutTimer: ReturnType<typeof setTimeout> | null = null
 let scanQueue: Promise<void> = Promise.resolve()
 let scanSessionId = 0
 let pageVisible = false
+let visibilityGeneration = 0
 let blockedByLoginGuard = false
+let autoStartRequested = false
+let autoStartConsumed = false
+let autoStartPending = false
 let scanLease: BleDiscoveryLease | null = null
 let stopScanPromise: Promise<void> | null = null
 
@@ -159,7 +184,6 @@ const SCAN_STOP_SETTLE_MS = 180
 const ADAPTER_READY_WAIT_MS = 1200
 const BLE_API_TIMEOUT_MS = 8000
 const STOP_DISCOVERY_TIMEOUT_MS = 1200
-const SCAN_DURATION_TIMEOUT_MS = 30000
 const sysInfo = (() => {
 	try {
 		return uni.getSystemInfoSync?.() || ({} as Record<string, unknown>)
@@ -174,16 +198,27 @@ const defaultMarginTop = (() => {
 })()
 
 const visibleDevices = computed(() => {
-	const list = Array.from(rows.value.values())
-	list.sort((a, b) => {
-		if (!targetMac.value) return (b.RSSI ?? -999) - (a.RSSI ?? -999)
-		const am = a.advMac === targetMac.value ? 0 : 1
-		const bm = b.advMac === targetMac.value ? 0 : 1
-		if (am !== bm) return am - bm
-		return (b.RSSI ?? -999) - (a.RSSI ?? -999)
-	})
-	return list
+	return orderedDeviceIds.value
+		.map((deviceId) => rows.value.get(deviceId))
+		.filter((item): item is DeviceRow => !!item)
 })
+
+function flushDeviceOrder() {
+	const nextOrder = sortBleScanDeviceIds({
+		items: Array.from(rows.value.values()),
+		previousOrder: orderedDeviceIds.value,
+		targetMac: targetMac.value,
+	})
+	if (
+		nextOrder.length === orderedDeviceIds.value.length &&
+		nextOrder.every((deviceId, index) => deviceId === orderedDeviceIds.value[index])
+	) {
+		return
+	}
+	orderedDeviceIds.value = nextOrder
+}
+
+const listSortScheduler = createBleScanListSortScheduler({ onFlush: flushDeviceOrder })
 
 const hasResolvedAdvMacRows = computed(() =>
 	Array.from(rows.value.values()).some((item) => !!normalizeMac(String(item?.advMac || '')))
@@ -210,17 +245,31 @@ function getBoundDeviceByRow(device: DeviceRow) {
 	return mac ? boundDevicesStore.findByBleMac(mac) : null
 }
 
+function detailEntrySourceQuery() {
+	return `&entry_source=${entrySource.value}`
+}
+
 function openBoundDeviceDetail(deviceId: string) {
 	const id = String(deviceId || '').trim()
 	if (!id) return false
 	uni.navigateTo({
-		url: `/pages/device-battery/detail?device_id=${encodeURIComponent(id)}`,
+		url: `/pages/device-battery/detail?device_id=${encodeURIComponent(id)}${detailEntrySourceQuery()}`,
 	})
 	return true
 }
 
 function clearList() {
+	listSortScheduler.cancel()
 	rows.value = new Map()
+	orderedDeviceIds.value = []
+}
+
+function handleListTouchStart() {
+	listSortScheduler.lockForTouch()
+}
+
+function handleListTouchEnd() {
+	listSortScheduler.releaseTouch()
 }
 
 function normalizeUuid(u: unknown): string {
@@ -326,12 +375,13 @@ function clearScanTimeoutTimer() {
 
 function armScanTimeout(sessionId: number) {
 	clearScanTimeoutTimer()
+	const timeoutMs = resolveBleScanDurationMs(mode.value)
 	scanTimeoutTimer = setTimeout(() => {
 		if (!isScanSessionActive(sessionId) || !isScanning.value) return
-		console.warn('[ble-scan] scan duration timeout, stop discovery', { sessionId, timeoutMs: SCAN_DURATION_TIMEOUT_MS })
+		console.warn('[ble-scan] scan duration timeout, stop discovery', { sessionId, timeoutMs })
 		errorMsg.value = t('pages.deviceProvision.scanTimeout') as string
 		void stopScan()
-	}, SCAN_DURATION_TIMEOUT_MS)
+	}, timeoutMs)
 }
 
 function runScanSerial<T>(task: () => Promise<T>): Promise<T> {
@@ -535,21 +585,29 @@ function upsertDevice(d: FoundDevice) {
 	const existing = rows.value.get(d.deviceId)
 	const deviceType = advMac ? resolveDeviceTypeByMac(advMac) : existing?.deviceType ?? null
 	const displayName = String(d.name || d.localName || t('pages.deviceProvision.unknownDevice'))
-	rows.value.set(d.deviceId, {
+	const nextRow: DeviceRow = {
 		deviceId: d.deviceId,
 		displayName,
 		RSSI: typeof d.RSSI === 'number' ? d.RSSI : existing?.RSSI ?? null,
 		advMac: advMac || existing?.advMac || null,
 		deviceType,
 		lastSeenAt: Date.now(),
-	})
+	}
+	rows.value.set(d.deviceId, nextRow)
+	if (!existing) {
+		// 新设备立即追加到末尾，不挤动用户正在查看或准备点击的已有设备。
+		orderedDeviceIds.value = appendBleScanDeviceId(orderedDeviceIds.value, d.deviceId)
+	}
+	if (!existing || existing.RSSI !== nextRow.RSSI || existing.advMac !== nextRow.advMac) {
+		listSortScheduler.markDirty()
+	}
 
 	// 扫码模式：发现匹配设备后自动进入向导页
 	if (mode.value === 'qr' && targetMac.value && advMac === targetMac.value && !navigated.value) {
 		navigated.value = true
 		stopScan().finally(() => {
 			uni.navigateTo({
-				url: `/pages/device-provision/provision-wizard?deviceId=${encodeURIComponent(d.deviceId)}&qrMac=${targetMac.value}&advMac=${encodeURIComponent(advMac)}`,
+				url: `/pages/device-provision/provision-wizard?deviceId=${encodeURIComponent(d.deviceId)}&qrMac=${targetMac.value}&advMac=${encodeURIComponent(advMac)}&entry_source=scan`,
 			})
 		})
 	}
@@ -579,9 +637,11 @@ async function startScan() {
 		clearScanTimeoutTimer()
 		try {
 			if (!isScanSessionActive(sessionId)) return
+			// 新一轮搜索不复用上轮列表，避免旧 RSSI 排序及旧 MAC 干扰扫描降级。
+			clearList()
 			console.log('[ble-scan] startScan', { sessionId })
-			// 用户主动扫描优先于首页遗留的自动连接任务，避免等待连接/扫描超时后才能取得 discovery 租约。
-			cancelHomeAutoConnectAttempts('manual BLE scan started')
+			// 搜索页交互扫描优先于首页遗留的自动连接任务，避免等待连接/扫描超时后才能取得 discovery 租约。
+			cancelHomeAutoConnectAttempts('interactive BLE scan started')
 			lease = await acquireBleDiscoveryLease(`ble-scan-page:${sessionId}`)
 			if (!isScanSessionActive(sessionId)) {
 				lease.release()
@@ -791,6 +851,8 @@ async function startScan() {
 
 async function stopScan() {
 	if (stopScanPromise) return stopScanPromise
+	// 停止后数据不再变化；未触摸列表时立即应用最终顺序，否则丢弃跨 session 的迟到排序任务。
+	if (!listSortScheduler.flushNow()) listSortScheduler.cancel()
 	++scanSessionId
 	clearFallbackTimer()
 	clearScanTimeoutTimer()
@@ -819,6 +881,8 @@ async function stopScan() {
 
 async function toggleScan() {
 	if (starting.value) return
+	// 用户已主动操作时，取消仍在等待绑定设备列表刷新的自动启动任务。
+	autoStartPending = false
 	if (isScanning.value) return stopScan()
 	return startScan()
 }
@@ -831,14 +895,14 @@ function selectDevice(d: DeviceRow) {
 		}
 		if (d.deviceType === DEVICE_TYPE_METER && d.advMac) {
 			uni.navigateTo({
-				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(d.advMac)}&ble_device_id=${encodeURIComponent(d.deviceId)}&allow_scan_handoff=1&device_name=${encodeURIComponent(d.displayName)}`,
+				url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(d.advMac)}&ble_device_id=${encodeURIComponent(d.deviceId)}&allow_scan_handoff=1&device_name=${encodeURIComponent(d.displayName)}${detailEntrySourceQuery()}`,
 			})
 			return
 		}
 		uni.navigateTo({
 			url: `/pages/device-provision/provision-wizard?deviceId=${encodeURIComponent(d.deviceId)}${
 				targetMac.value ? `&qrMac=${targetMac.value}` : ''
-			}${d.advMac ? `&advMac=${encodeURIComponent(d.advMac)}` : ''}`,
+			}${d.advMac ? `&advMac=${encodeURIComponent(d.advMac)}` : ''}${detailEntrySourceQuery()}`,
 		})
 	})
 }
@@ -849,6 +913,10 @@ onLoad((option) => {
 	const opt = option as Record<string, string | undefined>
 	const m = opt.mode === 'qr' ? 'qr' : 'manual'
 	mode.value = m
+	entrySource.value = m === 'qr' ? 'scan' : 'ble_search'
+	autoStartRequested = isBleScanAutoStartRequested(opt.auto_start)
+	autoStartConsumed = false
+	autoStartPending = false
 	if (m === 'qr') {
 		targetMac.value = normalizeMac(opt.mac || '') || null
 	}
@@ -857,6 +925,18 @@ onLoad((option) => {
 onShow(() => {
 	if (blockedByLoginGuard) return
 	pageVisible = true
+	const scheduledVisibilityGeneration = ++visibilityGeneration
+	const shouldAutoStart = shouldScheduleBleScanAutoStart({
+		requested: autoStartRequested,
+		consumed: autoStartConsumed,
+		mode: mode.value,
+		targetMac: targetMac.value,
+	})
+	// 标记在首次 onShow 即消费；即使刷新期间切后台，恢复后也不会再次自动搜索。
+	if (shouldAutoStart) {
+		autoStartConsumed = true
+		autoStartPending = true
+	}
 	marginTopHeight.value = uni.getStorageSync('contentPaddingTop') || defaultMarginTop
 	pageHeight.value = uni.getStorageSync('pageHeight') || defaultPageHeight
 	;(async () => {
@@ -864,13 +944,16 @@ onShow(() => {
 		try {
 			await boundDevicesStore.refresh({ force: true })
 		} catch (e) {}
+		// 离开页面或可见代次变化后，旧刷新任务既不能启动扫描，也不能抢占导航。
+		if (!pageVisible || blockedByLoginGuard || visibilityGeneration !== scheduledVisibilityGeneration) return
 
 		// 扫码模式：若目标设备已绑定，则不再进入扫描页
 		if (mode.value === 'qr' && targetMac.value && boundDevicesStore.hasBleMac(targetMac.value)) {
+			autoStartPending = false
 			const boundDevice = boundDevicesStore.findByBleMac(targetMac.value)
 			if (boundDevice?.device_id) {
 				uni.redirectTo({
-					url: `/pages/device-battery/detail?device_id=${encodeURIComponent(boundDevice.device_id)}`,
+					url: `/pages/device-battery/detail?device_id=${encodeURIComponent(boundDevice.device_id)}&entry_source=scan`,
 				})
 				return
 			}
@@ -881,11 +964,30 @@ onShow(() => {
 			return
 		}
 
+		if (
+			shouldAutoStart &&
+			autoStartPending &&
+			canRunScheduledBleScanAutoStart({
+				pageVisible,
+				blockedByLoginGuard,
+				starting: starting.value,
+				isScanning: isScanning.value,
+				visibilityGeneration,
+				scheduledVisibilityGeneration,
+			})
+		) {
+			autoStartPending = false
+			void startScan()
+		}
+
 	})()
 })
 
 onHide(() => {
 	pageVisible = false
+	autoStartPending = false
+	++visibilityGeneration
+	listSortScheduler.cancel()
 	// 页面离开（跳转/切后台）即停止扫描，避免占用系统资源
 	void stopScan()
 })
@@ -893,6 +995,9 @@ onHide(() => {
 onUnload(() => {
 	blockedByLoginGuard = false
 	pageVisible = false
+	autoStartPending = false
+	++visibilityGeneration
+	listSortScheduler.cancel()
 	void stopScan()
 })
 </script>

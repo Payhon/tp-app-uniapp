@@ -47,13 +47,31 @@
 			<view v-if="showRealtimeOccupiedNotice" class="realtime-notice">
 				<text class="realtime-notice__text">{{ $t('deviceDetail.conn.realtimeOccupied') }}</text>
 			</view>
+			<view v-if="showMeterWaitingNotice" class="realtime-notice">
+				<text class="realtime-notice__text">{{ $t('deviceDetail.meter.waitingBms') }}</text>
+			</view>
+			<view
+				v-if="activeTab === 0"
+				class="uuid-card"
+				:class="{ 'uuid-card--disabled': !itemUuid }"
+				hover-class="uuid-card--hover"
+				@tap="copyItemUuid"
+			>
+				<view class="uuid-card__head">
+					<text class="uuid-card__label">{{ $t('deviceDetail.identifier.uuid') }}</text>
+					<text class="uuid-card__action" :class="{ 'uuid-card__action--disabled': !itemUuid }">
+						{{ $t('deviceDetail.identifier.copy') }}
+					</text>
+				</view>
+				<text class="uuid-card__value">{{ itemUuidText }}</text>
+			</view>
 			<!-- #ifdef MP-WEIXIN -->
 			<cover-view v-if="showMeterFloatingPanel" class="session-float session-float--mp" :style="{ top: sessionFloatTopPx + 'px' }">
 				<cover-view class="session-card session-card--mp">
 					<cover-view class="session-card__head session-card__head--mp">
 						<cover-view class="session-card__main session-card__main--mp">
 							<cover-view class="session-card__title session-card__title--mp">{{ $t('deviceDetail.meter.sessionTitle') }}</cover-view>
-							<cover-view class="session-card__desc session-card__desc--mp">{{ $t('deviceDetail.meter.sessionHint') }}</cover-view>
+							<cover-view class="session-card__desc session-card__desc--mp">{{ meterSessionHint }}</cover-view>
 						</cover-view>
 						<cover-view class="session-card__collapse session-card__collapse--mp" hover-class="session-card__collapse--hover" @tap="closeMeterPanel">
 							<cover-view class="session-card__collapse-text">×</cover-view>
@@ -73,7 +91,7 @@
 					<view class="session-card__head">
 						<view class="session-card__main">
 							<view class="session-card__title">{{ $t('deviceDetail.meter.sessionTitle') }}</view>
-							<view class="session-card__desc">{{ $t('deviceDetail.meter.sessionHint') }}</view>
+							<view class="session-card__desc">{{ meterSessionHint }}</view>
 						</view>
 						<view class="session-card__collapse" hover-class="session-card__collapse--hover" @tap="closeMeterPanel">
 							<u-icon name="close" size="16" color="#6B7280"></u-icon>
@@ -123,6 +141,7 @@
 				:onPausePolling="pausePolling"
 				:onResumePolling="applyCurrentPollingPolicy"
 				@ota-state-change="patchOtaCheckState"
+				@ota-running-change="otaRunning = $event"
 			/>
 			<history-tab
 				v-else-if="activeTab === 3 && canShowHistoryTab"
@@ -161,7 +180,7 @@
 			</view>
 		</view>
 
-		<view v-if="connecting" class="connecting-mask">
+		<view v-if="showConnectingMask" class="connecting-mask">
 			<view class="connecting-mask__panel">
 				<text class="connecting-mask__text">{{ $t('deviceDetail.conn.connecting') }}</text>
 			</view>
@@ -184,10 +203,18 @@ import ParamsTab from './components/params-tab.vue'
 import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { consumeDeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
+import {
+	isQrScanDetailEntry,
+	normalizeDeviceDetailEntrySource,
+	resolveDeviceDetailEntrySource,
+	shouldDisconnectBleOnDetailUnload,
+	type DeviceDetailEntrySource,
+} from '@/common/device-provision/detail-entry-source'
 import { DEVICE_TYPE_BMS, isMeterMac } from '@/common/device-provision/device-prefix-shared'
 import { parseAddDeviceScanCode } from '@/common/device-provision/scan-code'
 import { getWindowInfo } from '@/common/platform'
 import { resolveDetailPollingPolicy } from './detail-polling-policy'
+import { normalizeDetailUuid } from './device-detail-identifier'
 import { resolveMeterScanHandoffUi, shouldCollapseMeterScanPanel } from './meter-scan-handoff-policy'
 import { useBatteryDetail } from './useBatteryDetail'
 const { t } = useI18n()
@@ -209,28 +236,34 @@ type DeviceOtaCheckState = {
 const DEVICE_HISTORY_PERMISSION = 'app_device_detail_history'
 const activeTab = ref<0 | 1 | 2 | 3>(0)
 const canShowHistoryTab = ref(false)
+const otaRunning = ref(false)
 const historyTabRef = ref<HistoryTabExposed | null>(null)
 const allowScanHandoff = ref(false)
 const meterPanelVisible = ref(true)
+const meterTargetSwitching = ref(false)
 let pageActive = true
+let detailEntrySource: DeviceDetailEntrySource = 'default'
 let pageLifecycleGeneration = 0
 let scanLoadingVisible = false
 let scanOperationSequence = 0
 let activeScanOperation = 0
-const pageTimers = new Set<ReturnType<typeof setTimeout>>()
+const pageTimers = new Map<ReturnType<typeof setTimeout>, (current: boolean) => void>()
 const capturePageLifecycle = () => pageLifecycleGeneration
 const isPageLifecycleCurrent = (generation: number) => pageActive && pageLifecycleGeneration === generation
-const schedulePageTask = (callback: () => void, delayMs: number, generation: number) => {
-	const timer = setTimeout(() => {
-		pageTimers.delete(timer)
-		if (!isPageLifecycleCurrent(generation)) return
-		callback()
-	}, delayMs)
-	pageTimers.add(timer)
-	return timer
-}
+const waitForPageTask = (delayMs: number, generation: number): Promise<boolean> =>
+	new Promise((resolve) => {
+		if (!isPageLifecycleCurrent(generation)) return resolve(false)
+		const timer = setTimeout(() => {
+			pageTimers.delete(timer)
+			resolve(isPageLifecycleCurrent(generation))
+		}, delayMs)
+		pageTimers.set(timer, resolve)
+	})
 const clearPageTasks = () => {
-	for (const timer of pageTimers) clearTimeout(timer)
+	for (const [timer, resolve] of pageTimers) {
+		clearTimeout(timer)
+		resolve(false)
+	}
 	pageTimers.clear()
 }
 const isScanOperationCurrent = (operation: number, pageGeneration: number) =>
@@ -242,6 +275,10 @@ const finishScanOperation = (operation: number, pageGeneration: number) => {
 		scanLoadingVisible = false
 		if (isPageLifecycleCurrent(pageGeneration)) uni.hideLoading()
 	}
+	if (meterTargetSwitching.value) {
+		meterTargetSwitching.value = false
+		if (isPageLifecycleCurrent(pageGeneration)) applyCurrentPollingPolicy()
+	}
 }
 const {
 	battery,
@@ -252,10 +289,12 @@ const {
 	connecting,
 	bmsDataLoading,
 	bmsDataLoadPhase,
+	scanFourGOnlineOverride,
 	instrumentPassthroughUnavailable,
 	sessionMode,
 	loadById,
 	loadInstrumentSession,
+	prepareInstrumentBmsSwitch,
 	disconnectBluetooth,
 	retryBmsDataRead,
 	reconnectBmsData,
@@ -288,6 +327,21 @@ const titleText = computed(() => {
 	const name = String(battery.value?.device_name || '').trim()
 	return name || t('pages.deviceDetailTitle')
 })
+const itemUuid = computed(() => normalizeDetailUuid(battery.value?.item_uuid))
+const itemUuidText = computed(() => itemUuid.value || '-')
+
+const copyItemUuid = () => {
+	if (!itemUuid.value) return
+	uni.setClipboardData({
+		data: itemUuid.value,
+		success: () => {
+			uni.showToast({ title: t('deviceDetail.identifier.uuidCopied') as string, icon: 'none' })
+		},
+		fail: () => {
+			uni.showToast({ title: t('deviceDetail.identifier.uuidCopyFailed') as string, icon: 'none' })
+		},
+	})
+}
 
 const allowOta = computed(() => connType.value === 'bluetooth' || sessionMode.value === 'cloud')
 const currentBleMac = computed(() =>
@@ -298,8 +352,12 @@ const isFourGDevice = computed(() => {
 	const commChipId = String(battery.value?.comm_chip_id || '').trim()
 	return commType === 2 || commType === 3 || !!commChipId
 })
-const isFourGConnPill = computed(() => !connecting.value && connType.value !== 'bluetooth' && isFourGDevice.value)
-const isFourGOnline = computed(() => Number(battery.value?.is_online || 0) === 1)
+const isFourGConnPill = computed(
+	() => (!connecting.value || scanFourGOnlineOverride.value) && connType.value !== 'bluetooth' && isFourGDevice.value
+)
+const isFourGOnline = computed(
+	() => scanFourGOnlineOverride.value || Number(battery.value?.is_online || 0) === 1
+)
 const isMeterDevice = computed(() => isMeterMac(currentBleMac.value))
 const meterHasBmsStatus = computed(() => sessionMode.value === 'instrument' && !!status.value)
 const meterScanHandoffUi = computed(() =>
@@ -317,6 +375,14 @@ const meterScanHandoffUi = computed(() =>
 )
 const showMeterFloatingPanel = computed(() => meterScanHandoffUi.value.showPanel)
 const showMeterPanelTrigger = computed(() => meterScanHandoffUi.value.showTrigger)
+const meterSessionHint = computed(() => instrumentPassthroughUnavailable.value
+	? `${t('deviceDetail.meter.waitingBms')} ${t('deviceDetail.meter.sessionHint')}`
+	: t('deviceDetail.meter.sessionHint'))
+const showMeterWaitingNotice = computed(() =>
+	sessionMode.value === 'instrument' && connType.value === 'bluetooth' &&
+	!connecting.value && !status.value && instrumentPassthroughUnavailable.value &&
+	!meterTargetSwitching.value && !otaRunning.value && activeTab.value <= 1 && !showMeterFloatingPanel.value
+)
 
 watch(meterHasBmsStatus, (hasBmsStatus, previousHasBmsStatus) => {
 	if (shouldCollapseMeterScanPanel({ hasBmsStatus, previousHasBmsStatus })) {
@@ -398,6 +464,7 @@ const maybeCheckOtaOnDashboard = async () => {
 }
 
 const connText = computed(() => {
+	if (isFourGConnPill.value && scanFourGOnlineOverride.value) return t('deviceDetail.conn.fourGOnline') as string
 	if (connecting.value) return t('deviceDetail.conn.connecting') as string
 	if (connType.value === 'bluetooth') return t('deviceDetail.conn.bluetooth') as string
 	if (isFourGConnPill.value) {
@@ -417,16 +484,18 @@ const showFourGConnIcon = computed(() => isFourGConnPill.value)
 const showRealtimeOccupiedNotice = computed(() => realtimeOccupied.value && connType.value === 'mqtt' && sessionMode.value === 'cloud')
 
 const connClass = computed(() => {
+	if (isFourGConnPill.value && scanFourGOnlineOverride.value) return '4g-online'
 	if (connecting.value) return 'connecting'
 	if (isFourGConnPill.value) return isFourGOnline.value ? '4g-online' : '4g-offline'
 	return connType.value
 })
 
 const showBleDisconnectBtn = computed(() => connType.value === 'bluetooth' && !connecting.value)
+const showConnectingMask = computed(() => connecting.value && !scanFourGOnlineOverride.value)
 const showBmsDataLoading = computed(
 	() =>
 		activeTab.value === 0 &&
-		!connecting.value &&
+		(!connecting.value || scanFourGOnlineOverride.value) &&
 		bmsDataLoading.value &&
 		!status.value &&
 		(connType.value === 'bluetooth' || connType.value === 'mqtt')
@@ -484,23 +553,26 @@ const reconnectInstrumentSession = async (options: {
 }) => {
 	const { meterBleMac, meterName, reason } = options
 	const pageGeneration = options.pageGeneration ?? capturePageLifecycle()
-	if (!meterBleMac || !isPageLifecycleCurrent(pageGeneration)) return
+	const isCurrent = () => isPageLifecycleCurrent(pageGeneration) &&
+		(options.scanOperation == null || isScanOperationCurrent(options.scanOperation, pageGeneration))
+	if (!meterBleMac || !isCurrent()) return
 	const disconnected = await disconnectBluetooth()
-	if (!isPageLifecycleCurrent(pageGeneration)) return
+	if (!isCurrent()) return
 	console.log('[meter-session] reconnect instrument session', {
 		meter_ble_mac: meterBleMac,
 		disconnected,
 		reason,
-		reconnect_after_ms: 900,
+		reconnect_after_ms: 450,
 	})
-	schedulePageTask(() => {
-		if (options.scanOperation != null && scanOperationSequence !== options.scanOperation) return
-		void loadInstrumentSession({
-			bleMac: meterBleMac,
-			deviceId: '',
-			deviceName: meterName || (t('deviceDetail.meter.deviceName') as string),
-		})
-	}, 450, pageGeneration)
+	if (!(await waitForPageTask(450, pageGeneration)) || !isCurrent()) return
+	await loadInstrumentSession({
+		bleMac: meterBleMac,
+		deviceId: '',
+		deviceName: meterName || (t('deviceDetail.meter.deviceName') as string),
+	})
+	if (isCurrent() && connType.value !== 'bluetooth') {
+		uni.showToast({ title: t('deviceDetail.meter.reconnectFailed') as string, icon: 'none' })
+	}
 }
 
 const onDisconnectBluetooth = async () => {
@@ -513,6 +585,10 @@ const onDisconnectBluetooth = async () => {
 }
 
 const applyCurrentPollingPolicy = () => {
+	if (!pageActive || (sessionMode.value === 'instrument' && (meterTargetSwitching.value || otaRunning.value))) {
+		pausePolling()
+		return
+	}
 	const policy = resolveDetailPollingPolicy({
 		tab: activeTab.value,
 		connType: connType.value,
@@ -531,7 +607,7 @@ const applyCurrentPollingPolicy = () => {
 }
 
 watch(
-	() => [activeTab.value, connType.value, !!client.value, connecting.value] as const,
+	() => [activeTab.value, connType.value, !!client.value, connecting.value, meterTargetSwitching.value, otaRunning.value] as const,
 	() => applyCurrentPollingPolicy(),
 	{ immediate: true }
 )
@@ -564,6 +640,7 @@ watch(
 
 const scanAndBindBms = async () => {
 	if (!ensureLoggedIn()) return
+	if (sessionMode.value !== 'instrument' || otaRunning.value) return
 	const pageGeneration = capturePageLifecycle()
 	if (!isPageLifecycleCurrent(pageGeneration)) return
 	const activeClient = client.value
@@ -595,56 +672,47 @@ const scanAndBindBms = async () => {
 					uni.showToast({ title: t('deviceDetail.meter.onlyBmsMacTip') as string, icon: 'none' })
 					return
 				}
+				if (client.value !== activeClient || connType.value !== 'bluetooth' || otaRunning.value) return
+				meterTargetSwitching.value = true
+				prepareInstrumentBmsSwitch()
 				scanLoadingVisible = true
 				uni.showLoading({ title: t('common.loading') as string, mask: true })
-				pausePolling()
-				await new Promise((resolve) => setTimeout(resolve, 160))
-				if (!isScanOperationCurrent(scanOperation, pageGeneration) || client.value !== activeClient) return
+				if (!(await waitForPageTask(160, pageGeneration))) return
+				if (!isScanOperationCurrent(scanOperation, pageGeneration) || client.value !== activeClient || otaRunning.value) return
 				console.log('[meter-session] configure meter target start', {
 					meter_ble_mac: meterBleMac || null,
 					target_bms_mac: parsed.value,
 				})
-				await activeClient.configureMeterMac({ meterAddress: 0xfc, mac: mac12ToColon(parsed.value) })
-				if (!isScanOperationCurrent(scanOperation, pageGeneration) || client.value !== activeClient) return
-				console.log('[meter-session] configure meter target ok', {
+				let configureTimedOut = false
+				try {
+					await activeClient.configureMeterMac({ meterAddress: 0xfc, mac: mac12ToColon(parsed.value) })
+				} catch (e) {
+					const message = e instanceof Error ? e.message : String(e || '')
+					if (!message.includes('BLE request timeout')) throw e
+					// 配置可能已经生效；只重连读取确认，不能重复写入。
+					configureTimedOut = true
+				}
+				if (!isScanOperationCurrent(scanOperation, pageGeneration) || client.value !== activeClient || otaRunning.value) return
+				console.log('[meter-session] configure meter target result', {
 					meter_ble_mac: meterBleMac || null,
 					target_bms_mac: parsed.value,
+					configureTimedOut,
 				})
-				uni.showToast({ title: t('deviceDetail.meter.bindTargetSuccess') as string, icon: 'none' })
+				uni.showToast({
+					title: t(configureTimedOut ? 'deviceDetail.meter.bindTargetPending' : 'deviceDetail.meter.bindTargetSuccess') as string,
+					icon: 'none',
+				})
 				await reconnectInstrumentSession({
 					meterBleMac,
 					meterName,
-					reason: 'configure_ack',
+					reason: configureTimedOut ? 'configure_timeout' : 'configure_ack',
 					pageGeneration,
 					scanOperation,
 				})
 			} catch (e) {
 				if (!isScanOperationCurrent(scanOperation, pageGeneration)) return
 				console.error('[meter-session] configure meter target failed', e)
-				const errMessage = e instanceof Error ? e.message : String(e || '')
-				const isTimeout = errMessage.includes('BLE request timeout')
-				if (isTimeout) {
-					console.log('[meter-session] configure meter target timeout, treat as ambiguous success and reconnect', {
-						meter_ble_mac: meterBleMac || null,
-						target_bms_mac: parsed.value,
-					})
-					uni.showToast({ title: t('deviceDetail.meter.bindTargetPending') as string, icon: 'none' })
-					await reconnectInstrumentSession({
-						meterBleMac,
-						meterName,
-						reason: 'configure_timeout',
-						pageGeneration,
-						scanOperation,
-					})
-				} else {
-					uni.showToast({ title: t('deviceDetail.meter.bindTargetFailed') as string, icon: 'none' })
-					if (activeTab.value !== 2 && activeTab.value !== 3) {
-						schedulePageTask(() => {
-							if (scanOperationSequence !== scanOperation) return
-							resumePolling()
-						}, 300, pageGeneration)
-					}
-				}
+				uni.showToast({ title: t('deviceDetail.meter.bindTargetFailed') as string, icon: 'none' })
 			} finally {
 				finishScanOperation(scanOperation, pageGeneration)
 			}
@@ -657,6 +725,7 @@ onLoad((query) => {
 	pageActive = true
 	pageLifecycleGeneration += 1
 	const rawQuery = (query as any) || {}
+	detailEntrySource = normalizeDeviceDetailEntrySource(rawQuery.entry_source)
 	void loadHistoryPermission()
 	if (String(rawQuery.session_mode || '').trim() === 'instrument') {
 		const bleMac = normalizeMac(String(rawQuery.ble_mac || rawQuery.mac || ''))
@@ -679,7 +748,16 @@ onLoad((query) => {
 	meterPanelVisible.value = false
 	const id = String(rawQuery.device_id || rawQuery.id || '').trim()
 	const handoff = consumeDeviceDetailHandoff(id)
-	loadById(id, { handoff, preferWarmBle: true })
+	detailEntrySource = resolveDeviceDetailEntrySource({
+		routeSource: rawQuery.entry_source,
+		handoffSource: handoff?.entrySource,
+	})
+	const scanEntry = isQrScanDetailEntry(detailEntrySource)
+	loadById(id, {
+		handoff,
+		preferWarmBle: true,
+		scanEntry,
+	})
 })
 
 onReachBottom(() => {
@@ -692,12 +770,17 @@ onUnload(() => {
 	pageLifecycleGeneration += 1
 	scanOperationSequence += 1
 	activeScanOperation = 0
+	meterTargetSwitching.value = false
 	clearPageTasks()
 	if (scanLoadingVisible) {
 		scanLoadingVisible = false
 		uni.hideLoading()
 	}
-	void dispose()
+	void dispose({
+		disconnectBleIfIdle: shouldDisconnectBleOnDetailUnload(detailEntrySource, {
+			bleCriticalOperationActive: otaRunning.value,
+		}),
+	})
 })
 </script>
 
@@ -888,6 +971,68 @@ onUnload(() => {
 	font-size: 24rpx;
 	line-height: 1.4;
 	color: #9a5b00;
+}
+
+.uuid-card {
+	min-height: 88rpx;
+	margin: 16rpx 24rpx 0;
+	padding: 18rpx 22rpx;
+	box-sizing: border-box;
+	border: 1rpx solid rgba(36, 111, 221, 0.16);
+	border-radius: 18rpx;
+	background: rgba(255, 255, 255, 0.94);
+	box-shadow: 0 8rpx 24rpx rgba(36, 111, 221, 0.07);
+	touch-action: manipulation;
+}
+
+.uuid-card--hover {
+	background: rgba(239, 246, 255, 0.98);
+}
+
+.uuid-card--disabled {
+	box-shadow: none;
+}
+
+.uuid-card__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16rpx;
+}
+
+.uuid-card__label {
+	font-size: 22rpx;
+	font-weight: 700;
+	line-height: 1.4;
+	color: #475569;
+}
+
+.uuid-card__action {
+	flex-shrink: 0;
+	font-size: 22rpx;
+	font-weight: 600;
+	line-height: 1.4;
+	color: #246fdd;
+}
+
+.uuid-card__action--disabled {
+	color: #94a3b8;
+}
+
+.uuid-card__value {
+	display: block;
+	max-width: 100%;
+	margin-top: 6rpx;
+	font-size: 22rpx;
+	font-weight: 500;
+	line-height: 1.5;
+	letter-spacing: 0.5rpx;
+	color: #0f172a;
+	font-family: 'Avenir Next', Menlo, Monaco, monospace;
+	white-space: normal;
+	word-break: break-all;
+	overflow-wrap: anywhere;
+	user-select: text;
 }
 
 .data-loading {

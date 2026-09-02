@@ -9,12 +9,12 @@
 					:total-voltage-text="totalVoltageText"
 					:total-voltage-label="$t('deviceDetail.dashboard.totalVoltage')"
 					:footer-state-text="stateText"
-					:footer-mac-text="macText"
+					:footer-identifier-text="deviceIdentifierText"
 				>
 					<template #footer>
 						<view class="gauge-footer">
 							<text class="state-pill">{{ stateText }}</text>
-							<text class="mac">{{ macText }}</text>
+							<text class="identifier">{{ deviceIdentifierText }}</text>
 						</view>
 					</template>
 				</dashboard-gauge>
@@ -143,6 +143,7 @@ import DashboardGauge from '@/components/dashboard-gauge/dashboard-gauge.vue'
 import { toSocDisplayInteger } from '@/common/soc-display'
 import type { AppBatteryDetail } from '@/service/app-battery'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
+import { resolveDashboardDeviceIdentifier } from '../device-detail-identifier'
 
 const props = defineProps<{
 	battery: AppBatteryDetail | null
@@ -164,17 +165,6 @@ const formatWithParams = (key: string, params: Record<string, unknown>) => {
 const isInvalidU16 = (v: unknown) => {
 	const n = typeof v === 'number' ? v : Number(v)
 	return !Number.isFinite(n) || n >= 0xffff
-}
-
-const formatMac = (raw: unknown) => {
-	const s = String(raw || '')
-	const hex = s.replace(/[^0-9a-fA-F]/g, '').toUpperCase()
-	if (hex.length === 12) {
-		const parts: string[] = []
-		for (let i = 0; i < 12; i += 2) parts.push(hex.slice(i, i + 2))
-		return parts.join(':')
-	}
-	return s || '-'
 }
 
 const socPct = computed(() => {
@@ -204,10 +194,16 @@ const stateText = computed(() => {
 	return t('deviceDetail.state.idle') as string
 })
 
-const macText = computed(() => {
-	if (props.connType === 'bluetooth') return formatMac(props.battery?.ble_mac || props.status?.identity?.bluetoothMac || '-')
-	return formatMac(props.status?.identity?.bluetoothMac || props.battery?.ble_mac || '-')
-})
+const deviceIdentifierText = computed(
+	() =>
+		resolveDashboardDeviceIdentifier({
+			connType: props.connType,
+			bmsCommType: props.battery?.bms_comm_type,
+			imei: props.battery?.imei,
+			batteryBleMac: props.battery?.ble_mac,
+			statusBleMac: props.status?.identity?.bluetoothMac,
+		}).text
+)
 
 const chargeDischargeTimeLabel = computed(() => {
 	if ((indicator.value as any).charging) return t('deviceDetail.dashboard.chargeRemainingTime') as string
@@ -446,7 +442,7 @@ const temperatureRows = computed(() => {
 	font-weight: 500;
 }
 
-.mac {
+.identifier {
 	font-size: 24rpx;
 	color: #4b5563;
 	font-family: 'Avenir Next', Helvetica, Arial, sans-serif;

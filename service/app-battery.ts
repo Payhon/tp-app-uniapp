@@ -16,6 +16,7 @@ export type AppBatteryDetail = {
 	batch_number?: string | null
 	ble_mac?: string | null
 	comm_chip_id?: string | null
+	imei?: string | null
 	soc?: number | null
 	soh?: number | null
 	updated_at?: string | null

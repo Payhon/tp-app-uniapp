@@ -1,5 +1,6 @@
 import {
 	INSTRUMENT_PASSTHROUGH_WAIT_TIMEOUT_MS,
+	resolveInstrumentPollDelay,
 	shouldExpireInstrumentPassthroughWait,
 } from './instrument-passthrough-policy'
 
@@ -39,5 +40,12 @@ assert(
 	!shouldExpireInstrumentPassthroughWait({ ...base, elapsedMs: 10_000, alreadyUnavailable: true }),
 	'an expired instrument session must not expire twice'
 )
+
+assert(resolveInstrumentPollDelay({ hasStatus: false, waitExpired: false, normalIntervalMs: 2000 }) === 1200,
+	'first frame warmup must retain the 1.2 second inter-round delay')
+assert(resolveInstrumentPollDelay({ hasStatus: false, waitExpired: true, normalIntervalMs: 2000 }) === 3000,
+	'expired first frame wait must continue with a 3 second inter-round delay')
+assert(resolveInstrumentPollDelay({ hasStatus: true, waitExpired: true, normalIntervalMs: 2000 }) === 2000,
+	'a complete status must restore the normal delay even at the deadline boundary')
 
 console.log('instrument passthrough policy tests passed')

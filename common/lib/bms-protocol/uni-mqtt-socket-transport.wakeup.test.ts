@@ -96,6 +96,7 @@ assert(
 async function assertSocketTransportKeepsValidFrameWithTrailingBytes(): Promise<void> {
 	const sent: string[] = []
 	const handlers: Record<string, Function> = {}
+	let expectedResponseCount = 0
 	const fakeTask = {
 		onOpen(cb: Function) {
 			handlers.open = cb
@@ -114,6 +115,7 @@ async function assertSocketTransportKeepsValidFrameWithTrailingBytes(): Promise<
 			success && success({})
 			if (String(data).includes('0304080009')) {
 				setTimeout(() => {
+					handlers.message && handlers.message({ data: socketJsonText })
 					handlers.message &&
 						handlers.message({
 							data: JSON.stringify({
@@ -139,6 +141,9 @@ async function assertSocketTransportKeepsValidFrameWithTrailingBytes(): Promise<
 			requestTimeoutMs: 1000,
 			minFrameIntervalMs: 0,
 			logger: {},
+			onExpectedResponse: () => {
+				expectedResponseCount += 1
+			},
 		})
 		const connectPromise = transport.connect()
 		handlers.open && handlers.open()
@@ -153,6 +158,7 @@ async function assertSocketTransportKeepsValidFrameWithTrailingBytes(): Promise<
 		const regs = await client.readRegisters(0x0408, 9, { timeoutMs: 1000 })
 		assert(regs.length === 9, 'socket transport should return registers from a valid frame with trailing bytes')
 		assert(regs[0] === 0x1414 && regs[8] === 0x3214, 'socket transport should preserve 0x0408 response registers')
+		assert(expectedResponseCount === 1, 'only the matching valid response should trigger the expected-response callback')
 		await transport.disconnect()
 		assert(transport.getSessionId() === '', 'disconnect should clear the owner session id')
 	} finally {

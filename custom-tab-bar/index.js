@@ -97,21 +97,21 @@ function resolveScanRoute(parsed) {
     : findBoundDeviceByUuid(parsed.value)
   const matchedDeviceId = String((matched && matched.device_id) || '').trim()
   if (matchedDeviceId) {
-    return { action: 'bound_detail', url: `/pages/device-battery/detail?device_id=${encodeURIComponent(matchedDeviceId)}` }
+    return { action: 'bound_detail', url: `/pages/device-battery/detail?device_id=${encodeURIComponent(matchedDeviceId)}&entry_source=scan` }
   }
   if (parsed.type === 'mac') {
     if (parsed.deviceType === DEVICE_TYPE_METER) {
       return {
         action: 'meter_session',
-        url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(parsed.value)}&allow_scan_handoff=1`
+        url: `/pages/device-battery/detail?session_mode=instrument&ble_mac=${encodeURIComponent(parsed.value)}&allow_scan_handoff=1&entry_source=scan`
       }
     }
     if (parsed.deviceType === DEVICE_TYPE_BMS) {
-      return { action: 'bms_provision', url: `/pages/device-provision/ble-scan?mode=qr&mac=${encodeURIComponent(parsed.value)}` }
+      return { action: 'bms_provision', url: `/pages/device-provision/ble-scan?mode=qr&mac=${encodeURIComponent(parsed.value)}&entry_source=scan` }
     }
     return { action: 'unsupported' }
   }
-  return { action: 'uuid_bind', url: `/pages/device-provision/uuid-bind?uuid=${encodeURIComponent(parsed.value)}` }
+  return { action: 'uuid_bind', url: `/pages/device-provision/uuid-bind?uuid=${encodeURIComponent(parsed.value)}&entry_source=scan` }
 }
 
 const normalizeLocale = (raw) => {
@@ -228,7 +228,7 @@ Component({
       const idx = Number(e.currentTarget.dataset.index)
       this.setData({ actionSheetVisible: false })
       if (idx === 0) {
-        wx.navigateTo({ url: '/pages/device-provision/ble-scan' })
+        wx.navigateTo({ url: '/pages/device-provision/ble-scan?auto_start=1&entry_source=ble_search' })
         return
       }
       if (idx === 1) {

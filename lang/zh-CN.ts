@@ -1052,6 +1052,12 @@ export default {
       params: "参数设置",
       history: "历史记录",
     },
+    identifier: {
+      uuid: "UUID",
+      copy: "复制",
+      uuidCopied: "UUID 已复制",
+      uuidCopyFailed: "UUID 复制失败",
+    },
     conn: {
       bluetooth: "蓝牙连接",
       mqtt: "MQTT连接",
@@ -1180,12 +1186,14 @@ export default {
     meter: {
       deviceName: "仪表设备",
       sessionTitle: "仪表临时连接",
+      waitingBms: "仪表已连接，正在等待 BMS 数据",
       sessionHint:
         "当前通过蓝牙直连仪表。若这是有线仪表，请检查仪表与 BMS 板连接、BMS 板供电是否正常；也可以继续扫码绑定 BMS。",
       scanBindBms: "继续扫码绑定 BMS",
       onlyBmsMacTip: "请扫描 BMS 设备二维码",
       bindTargetSuccess: "仪表目标已切换",
-      bindTargetPending: "仪表正在切换目标并重连",
+      bindTargetPending: "配置结果待确认，正在重连读取",
+      reconnectFailed: "仪表重连失败，请重新连接",
       bindTargetFailed: "仪表目标切换失败",
     },
     params: {
