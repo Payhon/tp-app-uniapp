@@ -37,7 +37,7 @@
 						:key="item.id"
 						:device="item"
 						@select="goDeviceDetail"
-						@longpress="onCardLongPress"
+						@manage="onCardManage"
 						@disconnect="disconnectCardBluetooth"
 					></home-device-card>
 					<view v-if="loading" class="list__footer">{{ $t('home.loadMoreLoading') }}</view>
@@ -160,6 +160,7 @@ import { useUserStore } from '@/store/user'
 import { useWarrantyReminderStore } from '@/store/warranty-reminder'
 import { appBoundDeviceList, appRemoveDevice, appUnbindDevice, updateDeviceName } from '@/service/device'
 import { imageUrl } from '@/common/assets/images'
+import { resolveHomeDeviceActionId } from '@/common/home-device-action'
 import { fetchWxmpRuntimeConfig, shouldUseDefaultWxmpBrandAsset } from '@/common/wxmp-runtime'
 import { isAuthExpiredApiResponse } from '@/common/auth/session-expired'
 import type { HomeDeviceCardModel } from '@/types/home'
@@ -579,8 +580,12 @@ const disconnectCardBluetooth = async (device: HomeDeviceCardModel) => {
 	}
 }
 
-const onCardLongPress = (device: HomeDeviceRow) => {
+const onCardManage = (device: HomeDeviceRow) => {
 	if (!isLoggedIn.value) return
+	if (!resolveHomeDeviceActionId(device)) {
+		console.warn('[home] ignored device action without a valid device id')
+		return
+	}
 	if (!actionSheetActions.value.length && currentViewMode.value === 'end_user_bound') return
 	selectedDevice.value = device
 	if (!actionSheetActions.value.length) return
@@ -640,6 +645,11 @@ const removeDeviceFromView = (device: HomeDeviceRow) => {
 const confirmUnbind = () => {
 	const d = selectedDevice.value
 	if (!d) return
+	const deviceId = resolveHomeDeviceActionId(d)
+	if (!deviceId) {
+		uni.showToast({ title: t('home.deviceMenu.unbindFailed') as string, icon: 'none' })
+		return
+	}
 	actionSheetShow.value = false
 	uni.showModal({
 		title: t('common.tip') as string,
@@ -651,7 +661,7 @@ const confirmUnbind = () => {
 			if (submitting.value) return
 			submitting.value = true
 			try {
-				const rsp = await appUnbindDevice(String(d.id))
+				const rsp = await appUnbindDevice(deviceId)
 				if (rsp && (rsp as any).code === 200) {
 					removeDeviceFromView(d)
 					uni.showToast({ title: t('home.deviceMenu.unbindSuccess') as string, icon: 'none' })

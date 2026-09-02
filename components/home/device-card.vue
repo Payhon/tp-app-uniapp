@@ -1,5 +1,5 @@
 <template>
-	<view class="card" hover-class="card--hover" @tap="onTap" @longpress="onLongPress">
+	<view class="card" hover-class="card--hover" @tap="onTap" @longpress.stop="onLongPress">
 		<view v-if="showStatus" class="status" :class="`status--${statusClass}`">
 			<image class="status__icon" :src="statusIcon" mode="aspectFit" />
 			<text class="status__text">{{ statusText }}</text>
@@ -40,14 +40,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	(e: 'select', id: string): void
-	(e: 'longpress', device: HomeDeviceCardModel): void
+	(e: 'manage', device: HomeDeviceCardModel): void
 	(e: 'disconnect', device: HomeDeviceCardModel): void
 }>()
 
 const { t } = useI18n()
 
 const onTap = () => emit('select', String(props.device.id))
-const onLongPress = () => emit('longpress', props.device)
+const onLongPress = () => emit('manage', props.device)
 const onDisconnectTap = () => emit('disconnect', props.device)
 
 const showDisconnectButton = computed(() => props.device.connectType === 'bluetooth')

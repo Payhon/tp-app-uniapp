@@ -1,4 +1,5 @@
 import api from '@/API/'
+import { resolveHomeDeviceActionId } from '@/common/home-device-action'
 
 type ApiResponse<T> = { code: number; data: T; message?: string }
 type ApiRequest = <T>(
@@ -225,7 +226,9 @@ export const deviceMapTelemetry = (id: string | number) => {
 
 // APP 端设备解绑（解绑当前用户与设备的绑定关系）
 export const appUnbindDevice = (deviceId: string) => {
-	return apiRequest<unknown>('/api/v1/app/device/unbind', { device_id: deviceId }, 'POST')
+	const normalizedDeviceId = resolveHomeDeviceActionId({ id: deviceId })
+	if (!normalizedDeviceId) return Promise.reject(new Error('invalid device_id'))
+	return apiRequest<unknown>('/api/v1/app/device/unbind', { device_id: normalizedDeviceId }, 'POST')
 }
 
 // APP 端：机构用户移除“我添加的设备”
