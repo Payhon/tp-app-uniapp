@@ -53,8 +53,8 @@ assert(
 	'BMS provision selected from Bluetooth search should preserve the BLE search source'
 )
 assert(
-	homeSource.includes('`/pages/device-battery/detail?device_id=${encodeURIComponent(String(id || \'\'))}`'),
-	'home device-list detail route should remain unmarked and preserve warm BLE behavior'
+	homeSource.includes("&entry_source=home`"),
+	'home device-list detail route should enable the 4G online grace'
 )
 assert(
 	orgDevicesSource.includes('`/pages/device-battery/detail?device_id=${encodeURIComponent(String(item.device_id))}`'),

@@ -1,9 +1,9 @@
-export type DeviceDetailEntrySource = 'default' | 'scan' | 'ble_search'
-export type DeviceDetailDiscoveryEntrySource = Exclude<DeviceDetailEntrySource, 'default'>
+export type DeviceDetailEntrySource = 'default' | 'scan' | 'ble_search' | 'home'
+export type DeviceDetailDiscoveryEntrySource = 'scan' | 'ble_search'
 
 export function normalizeDeviceDetailEntrySource(value: unknown): DeviceDetailEntrySource {
 	const normalized = String(value || '').trim()
-	if (normalized === 'scan' || normalized === 'ble_search') return normalized
+	if (normalized === 'scan' || normalized === 'ble_search' || normalized === 'home') return normalized
 	return 'default'
 }
 
@@ -11,7 +11,7 @@ export function normalizeDeviceDetailDiscoveryEntrySource(
 	value: unknown
 ): DeviceDetailDiscoveryEntrySource | undefined {
 	const normalized = normalizeDeviceDetailEntrySource(value)
-	return normalized === 'default' ? undefined : normalized
+	return normalized === 'scan' || normalized === 'ble_search' ? normalized : undefined
 }
 
 export function resolveDeviceDetailEntrySource(input: {
@@ -33,4 +33,8 @@ export function shouldDisconnectBleOnDetailUnload(
 
 export function isQrScanDetailEntry(source: DeviceDetailEntrySource): boolean {
 	return source === 'scan'
+}
+
+export function shouldUseFourGOnlineGrace(source: DeviceDetailEntrySource): boolean {
+	return source === 'scan' || source === 'home'
 }

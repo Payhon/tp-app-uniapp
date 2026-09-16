@@ -4,6 +4,7 @@ import {
 	normalizeDeviceDetailEntrySource,
 	resolveDeviceDetailEntrySource,
 	shouldDisconnectBleOnDetailUnload,
+	shouldUseFourGOnlineGrace,
 } from './detail-entry-source'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -12,8 +13,10 @@ function assert(condition: unknown, message: string): asserts condition {
 
 assert(normalizeDeviceDetailEntrySource('scan') === 'scan', 'QR scan source should be preserved')
 assert(normalizeDeviceDetailEntrySource('ble_search') === 'ble_search', 'BLE search source should be preserved')
-assert(normalizeDeviceDetailEntrySource('home') === 'default', 'unknown sources should use the safe default')
+assert(normalizeDeviceDetailEntrySource('home') === 'home', 'home source should be preserved')
+assert(normalizeDeviceDetailEntrySource('unknown') === 'default', 'unknown sources should use the safe default')
 assert(!normalizeDeviceDetailDiscoveryEntrySource('default'), 'default source should not be propagated as discovery')
+assert(!normalizeDeviceDetailDiscoveryEntrySource('home'), 'home source should not leak into discovery handoffs')
 
 assert(
 	resolveDeviceDetailEntrySource({ routeSource: 'ble_search', handoffSource: 'scan' }) === 'ble_search',
@@ -33,5 +36,9 @@ assert(
 )
 assert(isQrScanDetailEntry('scan'), 'QR scan source should retain scan-only policies')
 assert(!isQrScanDetailEntry('ble_search'), 'BLE search must not enable QR-only policies')
+assert(shouldUseFourGOnlineGrace('scan'), 'QR scan should enable the 4G online grace')
+assert(shouldUseFourGOnlineGrace('home'), 'home device list should enable the 4G online grace')
+assert(!shouldUseFourGOnlineGrace('default'), 'other detail entries must not enable the 4G online grace')
+assert(!shouldUseFourGOnlineGrace('ble_search'), 'BLE search must not enable the 4G online grace')
 
 console.log('device detail entry source tests passed')

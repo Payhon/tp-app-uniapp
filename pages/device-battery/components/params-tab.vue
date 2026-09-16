@@ -289,6 +289,7 @@
 					<u-line-progress :percentage="otaState.progress" activeColor="#0B3BFF"></u-line-progress>
 				</view>
 				<text class="ota__text">{{ otaMessageText }}</text>
+				<text v-if="otaState.recoveryMessage" class="ota__text">{{ otaState.recoveryMessage }}</text>
 			</view>
 		</u-popup>
 
@@ -485,10 +486,10 @@ import {
 	setFunctionConfigFlag,
 	type FunctionConfigFlagKey,
 } from '@/common/lib/bms-protocol/function-config'
-import { bootOtaUpgrade } from '@/common/lib/bms-protocol/boot-ota'
+import { bootOtaUpgrade, resolveBootMaxPacketSizeForMtu } from '@/common/lib/bms-protocol/boot-ota'
+import type { BmsRequestOptions } from '@/common/lib/bms-protocol/types'
 import {
-	BLE_BOOT_FINALIZE_BURST_INTERVALS_MS,
-	BLE_BOOT_FINALIZE_TIMEOUT_MS,
+	MOBILE_BOOT_MAX_RETRIES,
 	getMqttBmsBootOtaRuntimeOptions,
 	MOBILE_BOOT_FINALIZE_DELAY_MS,
 	MOBILE_BOOT_FINALIZE_TIMEOUT_MS,
@@ -511,6 +512,7 @@ import {
 	copyOtaDebugLogs,
 	otaDebugLogs,
 	resetOtaDebugLog,
+	setOtaDebugLogDeferred,
 	type OtaDebugLogLevel,
 	type OtaDebugLogScope,
 } from '../ota-debug-log'
@@ -592,6 +594,8 @@ const BATTERY_TYPE_OPTIONS = computed(() =>
 	}))
 )
 
+import type { BleOtaRecoveryRequest, BleOtaRecoveryResult } from '../useBatteryDetail'
+
 const props = defineProps<{
 	battery: AppBatteryDetail | null
 	status: BmsStatus | null
@@ -606,6 +610,7 @@ const props = defineProps<{
 	otaNeedUpgrade?: boolean
 	onPausePolling?: () => void
 	onResumePolling?: () => void
+	onRecoverBleOta?: (request: BleOtaRecoveryRequest) => Promise<BleOtaRecoveryResult>
 }>()
 const emit = defineEmits<{
 	(e: 'ota-state-change', patch: Partial<DeviceOtaCheckState>): void
@@ -1157,6 +1162,7 @@ const editPopup = reactive({
 type ActiveOtaKind = 'bms-ota' | 'meter-ota' | 'meter-bms-ota' | ''
 const activeOtaKind = ref<ActiveOtaKind>('')
 const otaState = reactive({
+	recoveryMessage: '',
 	show: false,
 	progress: 0,
 	message: '',
@@ -1165,7 +1171,10 @@ const otaState = reactive({
 
 watch(
 	() => otaState.running,
-	(running) => emit('ota-running-change', running),
+	(running) => {
+		if (running) otaState.recoveryMessage = ''
+		emit('ota-running-change', running)
+	},
 	{ immediate: true, flush: 'sync' }
 )
 
@@ -1298,6 +1307,7 @@ const loadMeterPackages = async () => {
 }
 
 const openMeterPackagePopup = async () => {
+	if (otaState.running) return
 	meterPackagePopup.show = true
 	await loadMeterPackages()
 }
@@ -1307,6 +1317,7 @@ const closeMeterPackagePopup = () => {
 }
 
 const selectMeterPackage = (pkg: MeterOtaPackage) => {
+	if (otaState.running) return
 	selectedMeterPackageId.value = pkg.id
 	appendMeterOtaDebug('info', 'meter-ota', 'meter firmware selected', {
 		id: pkg.id,
@@ -1548,6 +1559,31 @@ const updateOtaStage = (stage: string, progress: number) => {
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const setOtaKeepScreenOn = (keepScreenOn: boolean): Promise<boolean> =>
+	new Promise((resolve) => {
+		const api = (uni as any)?.setKeepScreenOn
+		if (typeof api !== 'function') {
+			resolve(false)
+			return
+		}
+		let settled = false
+		const finish = (enabled: boolean) => {
+			if (settled) return
+			settled = true
+			clearTimeout(timer)
+			resolve(enabled)
+		}
+		const timer = setTimeout(() => finish(false), 1200)
+		try {
+			api({
+				keepScreenOn,
+				success: () => finish(true),
+				fail: () => finish(false),
+			})
+		} catch (e) {
+			finish(false)
+		}
+	})
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> =>
 	new Promise<T>((resolve, reject) => {
 		const timer = setTimeout(() => reject(new Error(message)), Math.max(1, timeoutMs))
@@ -1586,7 +1622,27 @@ const formatDebugError = (e: unknown) => {
 		errCode: err?.errCode,
 		message: err?.message || err?.errMsg || String(e || ''),
 		errMsg: err?.errMsg,
+		extra: err?.extra,
 	}
+}
+
+const isExplicitBleDisconnectError = (e: unknown) => {
+	const err = e as any
+	const extra = err?.extra as any
+	const codes = [err?.errCode, err?.code, extra?.errCode, extra?.code]
+		.map((value) => Number(value))
+		.filter((value) => Number.isFinite(value))
+	if (codes.some((value) => value === 10006)) return true
+	const message = [err?.message, err?.errMsg, extra?.message, extra?.errMsg]
+		.filter(Boolean)
+		.join(' ')
+		.toLowerCase()
+	return (
+		message.includes('no connection') ||
+		message.includes('not connected') ||
+		message.includes('connection disconnected') ||
+		message.includes('connection was disconnected')
+	)
 }
 
 const isMiniProgramDomainListError = (message: string) => message.toLowerCase().includes('url not in domain list')
@@ -1663,7 +1719,8 @@ const writeOtaLog = (
 	consoleWriter: (...args: unknown[]) => void,
 	args: unknown[]
 ) => {
-	consoleWriter('[ota]', ...args)
+	// 逐包日志保留在端上缓冲，不再通过控制台重复跨桥输出。
+	if (level === 'warn' || level === 'error') consoleWriter('[ota]', ...args)
 	const { message, data } = normalizeOtaLoggerArgs(args)
 	appendCurrentOtaDebug(level, inferOtaDebugScope(message), message, data)
 }
@@ -1749,36 +1806,35 @@ type BootOtaRunOptions = {
 	prepareTimeoutMs?: number
 	bootPacketTimeoutMs?: number
 	finalizeTimeoutMs?: number
-	finalizeAssumeSuccessOnTimeout?: boolean
 	finalizeMaxAttempts?: number
 	finalizeDisableAlternateWriteRetry?: boolean
-	terminalPacketWriteErrorAsComplete?: boolean
+	allowPostFinalizeBleDisconnectSuccess?: boolean
 	finalizeDelayMs?: number
 	requireFinalPacketAck?: boolean
-	finalizeBurstIntervalsMs?: number[]
-	forceWriteWithResponse?: boolean
+	negotiateAndroidBleMtu?: boolean
+	maxPacketSize?: number
 	minFrameIntervalMs?: number
 	minFrameIntervalMode?: 'max' | 'set'
 	packetDelayMs?: number
 	pageBoundaryDelayMs?: number
-	adaptiveSlowdownOnPacketTimeout?: boolean
-	adaptivePacketDelayMs?: number
-	adaptivePageBoundaryDelayMs?: number
 	tracePacketTiming?: boolean
 	logger?: typeof otaLogger
 }
 
 const getBleBootOtaRuntimeOptions = ({
 	isMeterUpgrade,
+	throughMeter = false,
 	logger,
 }: {
 	isMeterUpgrade: boolean
+	throughMeter?: boolean
 	logger?: typeof otaLogger
 }): BootOtaRunOptions => {
 	const runtimePlatform = getRuntimePlatform()
 	const isBluetooth = props.connType === 'bluetooth'
 	const isMqtt = props.connType === 'mqtt'
 	const isAndroid = runtimePlatform === 'android'
+	const negotiateAndroidBleMtu = isBluetooth && isAndroid
 	if (isMeterUpgrade) {
 		return {
 			queryTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
@@ -1786,20 +1842,16 @@ const getBleBootOtaRuntimeOptions = ({
 			prepareTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
 			bootPacketTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
 			finalizeDelayMs: MOBILE_BOOT_FINALIZE_DELAY_MS,
-			finalizeTimeoutMs: BLE_BOOT_FINALIZE_TIMEOUT_MS,
-			finalizeAssumeSuccessOnTimeout: false,
-			finalizeMaxAttempts: 1,
+			finalizeTimeoutMs: MOBILE_BOOT_FINALIZE_TIMEOUT_MS,
+			finalizeMaxAttempts: MOBILE_BOOT_MAX_RETRIES + 1,
 			finalizeDisableAlternateWriteRetry: true,
-			terminalPacketWriteErrorAsComplete: false,
+			allowPostFinalizeBleDisconnectSuccess: isBluetooth,
 			requireFinalPacketAck: true,
-			finalizeBurstIntervalsMs: [...BLE_BOOT_FINALIZE_BURST_INTERVALS_MS],
-			forceWriteWithResponse: isAndroid,
-			minFrameIntervalMs: isAndroid ? 100 : undefined,
+			negotiateAndroidBleMtu,
+			minFrameIntervalMs: 0,
+			minFrameIntervalMode: 'set',
 			packetDelayMs: 0,
-			pageBoundaryDelayMs: isAndroid ? 300 : undefined,
-			adaptiveSlowdownOnPacketTimeout: isAndroid,
-			adaptivePacketDelayMs: 100,
-			adaptivePageBoundaryDelayMs: 1500,
+			pageBoundaryDelayMs: 300,
 			logger,
 		}
 	}
@@ -1812,30 +1864,42 @@ const getBleBootOtaRuntimeOptions = ({
 		prepareTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
 		bootPacketTimeoutMs: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
 		finalizeDelayMs: MOBILE_BOOT_FINALIZE_DELAY_MS,
-		finalizeTimeoutMs: isBluetooth ? BLE_BOOT_FINALIZE_TIMEOUT_MS : MOBILE_BOOT_FINALIZE_TIMEOUT_MS,
-		finalizeAssumeSuccessOnTimeout: false,
-		finalizeMaxAttempts: 1,
+		finalizeTimeoutMs: MOBILE_BOOT_FINALIZE_TIMEOUT_MS,
+		finalizeMaxAttempts: MOBILE_BOOT_MAX_RETRIES + 1,
 		finalizeDisableAlternateWriteRetry: true,
-		terminalPacketWriteErrorAsComplete: false,
+		allowPostFinalizeBleDisconnectSuccess: isBluetooth && !throughMeter,
 		requireFinalPacketAck: true,
-		finalizeBurstIntervalsMs: isBluetooth ? [...BLE_BOOT_FINALIZE_BURST_INTERVALS_MS] : undefined,
-		forceWriteWithResponse: isMeterUpgrade && isAndroid,
-		minFrameIntervalMs: isMeterUpgrade && isAndroid ? 220 : undefined,
-		packetDelayMs: isMeterUpgrade && isAndroid ? 100 : undefined,
-		pageBoundaryDelayMs: isMeterUpgrade && isAndroid ? 1500 : undefined,
+		negotiateAndroidBleMtu,
+		minFrameIntervalMs: 0,
+		minFrameIntervalMode: 'set',
+		packetDelayMs: 0,
+		pageBoundaryDelayMs: 300,
 		logger,
 	}
 }
 
+let pendingBleOtaRecovery: BleOtaRecoveryRequest | null = null
 const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, options?: BootOtaRunOptions) => {
+	const ANDROID_BLE_OTA_MTU = 512
+	const MIN_BOOT_PACKET_SIZE = 64
 	if (!props.client) throw new Error('client not ready')
 	const { sourceAddress } = props.client.getAddresses()
 	const rawTransport = props.client.getTransport()
 	const transportAny = rawTransport as any
+	const recovery: BleOtaRecoveryRequest | null = props.connType === 'bluetooth' && props.onRecoverBleOta ? {
+		originalClient: props.client,
+		mac: String(props.battery?.ble_mac || ''), deviceId: String(transportAny?.deviceId || ''),
+		kind: targetAddress === 0xfc ? 'meter' : isMeterMac(props.battery?.ble_mac) ? 'meter-bms' : 'bms',
+		upgradeSucceeded: false,
+		previousVersion: targetAddress === 0xfc ? '' : String(props.status?.meta?.softwareVersion ?? ''),
+		debug: developerStore.enabled ? (event, data) => appendCurrentOtaDebug('info', 'recovery', event, data) : undefined,
+	} : null
+	let bootStarted = false
 	const prevMinFrameIntervalMs =
 		transportAny && typeof transportAny.minFrameIntervalMs === 'number' ? transportAny.minFrameIntervalMs : undefined
 	const prevTransportLogger = transportAny && 'logger' in transportAny ? transportAny.logger : undefined
 	let exclusiveBootSessionStarted = false
+	let effectiveMaxPacketSize = options?.maxPacketSize
 	if (options?.minFrameIntervalMs != null && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
 		const nextMinFrameIntervalMs = Math.max(0, options.minFrameIntervalMs)
 		transportAny.minFrameIntervalMs =
@@ -1850,12 +1914,7 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 	const otaTransport = {
 		request: (
 			frameBytes: Uint8Array,
-			overrideOptions?: {
-				timeoutMs?: number
-				writeApiTimeoutMs?: number
-				suppressTimeoutLog?: boolean
-				disableAlternateWriteRetry?: boolean
-			}
+			overrideOptions?: BmsRequestOptions
 		) => {
 			const t = transportAny
 			if (typeof t?.request !== 'function') throw new Error('transport not ready')
@@ -1873,23 +1932,17 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 									? options?.finalizeTimeoutMs ?? MOBILE_BOOT_FINALIZE_TIMEOUT_MS
 									: MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS
 			const isNonFinalizeBootCommand = cmd >= 0x50 && cmd <= 0x53
-			const finalizeTimeoutLimitMs =
-				props.connType === 'bluetooth' ? BLE_BOOT_FINALIZE_TIMEOUT_MS : MOBILE_BOOT_FINALIZE_TIMEOUT_MS
-			const timeoutMs = isNonFinalizeBootCommand
-				? Math.min(configuredTimeoutMs, MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS)
-				: Math.min(overrideOptions?.timeoutMs ?? configuredTimeoutMs, finalizeTimeoutLimitMs)
+			const timeoutMs = overrideOptions?.timeoutMs ?? configuredTimeoutMs
 			const requestOptions = {
 				timeoutMs,
+				bootAckGraceMs: overrideOptions?.bootAckGraceMs,
 				writeApiTimeoutMs:
 					overrideOptions?.writeApiTimeoutMs ??
 					(isNonFinalizeBootCommand && props.connType === 'bluetooth' ? MOBILE_BOOT_WRITE_API_SOFT_TIMEOUT_MS : undefined),
-				suppressTimeoutLog:
-					!!overrideOptions?.suppressTimeoutLog || (cmd === 0x54 && !!options?.finalizeAssumeSuccessOnTimeout),
+				suppressTimeoutLog: !!overrideOptions?.suppressTimeoutLog,
 				disableAlternateWriteRetry: isNonFinalizeBootCommand || !!overrideOptions?.disableAlternateWriteRetry,
 			}
-			if (options?.forceWriteWithResponse && cmd === 0x53 && typeof t?.requestWithResponse === 'function') {
-				return t.requestWithResponse(frameBytes, requestOptions)
-			}
+			bootStarted = true
 			return t.request(frameBytes, requestOptions)
 		},
 		writeFrame: (frameBytes: Uint8Array, overrideOptions?: { writeWithResponse?: boolean }) => {
@@ -1897,11 +1950,62 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			if (typeof t?.writeFrame !== 'function') throw new Error('transport raw write not ready')
 			return t.writeFrame(frameBytes, overrideOptions)
 		},
+		isExplicitDisconnectError: isExplicitBleDisconnectError,
 	}
 	try {
-		if (props.connType === 'bluetooth' && typeof transportAny?.beginExclusiveBootSession === 'function') {
+		setOtaDebugLogDeferred(true)
+		const keepScreenOnEnabled = await setOtaKeepScreenOn(true)
+		if (!keepScreenOnEnabled) runLogger.warn('[boot] keep screen on unavailable')
+		if (typeof transportAny?.beginExclusiveBootSession === 'function') {
 			await transportAny.beginExclusiveBootSession({ drainTimeoutMs: 1200 })
 			exclusiveBootSessionStarted = true
+		}
+		if (options?.negotiateAndroidBleMtu) {
+			let actualMtu: number | null = null
+			try {
+				if (typeof transportAny?.setMtu !== 'function') throw new Error('setBLEMTU unavailable')
+				actualMtu = await transportAny.setMtu(ANDROID_BLE_OTA_MTU)
+			} catch (e) {
+				runLogger.warn('[boot] MTU unavailable, retain legacy whole-frame write capacity', {
+					platform: getRuntimePlatform(),
+					deviceId: transportAny?.deviceId,
+					requestedMtu: ANDROID_BLE_OTA_MTU,
+					error: formatDebugError(e),
+				})
+			}
+			const writeCapacity = Number(transportAny?.writeChunkSize)
+			const mtuMaxPacketSize = resolveBootMaxPacketSizeForMtu(writeCapacity + 3)
+			if (mtuMaxPacketSize < MIN_BOOT_PACKET_SIZE) {
+				runLogger.error('[boot] Android BLE write capacity too small', {
+					platform: getRuntimePlatform(),
+					deviceId: transportAny?.deviceId,
+					requestedMtu: ANDROID_BLE_OTA_MTU,
+					actualMtu,
+					attPayloadSize: actualMtu == null ? null : actualMtu - 3,
+					writeCapacity,
+					minimumMtu: MIN_BOOT_PACKET_SIZE + 11 + 3,
+				})
+				throw new Error('boot_ble_mtu_unsupported')
+			}
+			effectiveMaxPacketSize = effectiveMaxPacketSize
+				? Math.min(effectiveMaxPacketSize, mtuMaxPacketSize)
+				: mtuMaxPacketSize
+			let rssi: number | null = null
+			try {
+				rssi = typeof transportAny?.getRssi === 'function' ? await transportAny.getRssi() : null
+			} catch (ignored) {}
+			runLogger.info('[boot] Android BLE preflight ready', {
+				platform: getRuntimePlatform(),
+				deviceId: transportAny.deviceId,
+				requestedMtu: ANDROID_BLE_OTA_MTU,
+				actualMtu,
+				actualMtuSource: actualMtu == null ? 'unknown' : 'reported',
+				attPayloadSize: actualMtu == null ? null : actualMtu - 3,
+				writeCapacity,
+				maxPacketSize: effectiveMaxPacketSize,
+				maxBootFrameSize: effectiveMaxPacketSize + 11,
+				rssi,
+			})
 		}
 		runLogger.info('[boot] runtime options', {
 			connType: props.connType,
@@ -1923,12 +2027,14 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			minFrameIntervalMode: options?.minFrameIntervalMode || 'max',
 			packetDelayMs: options?.packetDelayMs,
 			pageBoundaryDelayMs: options?.pageBoundaryDelayMs,
-			adaptiveSlowdownOnPacketTimeout: !!options?.adaptiveSlowdownOnPacketTimeout,
-			adaptivePacketDelayMs: options?.adaptivePacketDelayMs,
-			adaptivePageBoundaryDelayMs: options?.adaptivePageBoundaryDelayMs,
+			dataAckTimeoutAction: 'retry-same-packet',
+			requireFinalPacketAck: !!options?.requireFinalPacketAck,
+			allowPostFinalizeBleDisconnectSuccess: !!options?.allowPostFinalizeBleDisconnectSuccess,
 			tracePacketTiming: !!options?.tracePacketTiming,
+			negotiateAndroidBleMtu: !!options?.negotiateAndroidBleMtu,
+			maxPacketSize: effectiveMaxPacketSize,
 		})
-		await bootOtaUpgrade({
+		const result = await bootOtaUpgrade({
 			transport: otaTransport,
 			firmware,
 			targetAddress,
@@ -1936,20 +2042,16 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 			sourceAddress,
 			skipEnterBoot: options?.skipEnterBoot,
 			prepareBaudRate: options?.prepareBaudRate,
+			maxPacketSize: effectiveMaxPacketSize,
 			enterBootTimeoutAsSuccess: options?.enterBootTimeoutAsSuccess,
 			packetDelayMs: options?.packetDelayMs,
 			pageBoundaryDelayMs: options?.pageBoundaryDelayMs,
-			adaptiveSlowdownOnPacketTimeout: options?.adaptiveSlowdownOnPacketTimeout,
-			adaptivePacketDelayMs: options?.adaptivePacketDelayMs,
-			adaptivePageBoundaryDelayMs: options?.adaptivePageBoundaryDelayMs,
 			finalizeDelayMs: options?.finalizeDelayMs,
 			finalizeTimeoutMs: options?.finalizeTimeoutMs,
-			finalizeAssumeSuccessOnTimeout: options?.finalizeAssumeSuccessOnTimeout,
 			finalizeMaxAttempts: options?.finalizeMaxAttempts,
 			finalizeDisableAlternateWriteRetry: options?.finalizeDisableAlternateWriteRetry,
-			terminalPacketWriteErrorAsComplete: options?.terminalPacketWriteErrorAsComplete,
+			allowPostFinalizeBleDisconnectSuccess: options?.allowPostFinalizeBleDisconnectSuccess,
 			requireFinalPacketAck: options?.requireFinalPacketAck,
-			finalizeBurstIntervalsMs: options?.finalizeBurstIntervalsMs,
 			tracePacketTiming: options?.tracePacketTiming,
 			logger: runLogger,
 			onProgress: (p) => {
@@ -1973,16 +2075,51 @@ const runBootOtaUpgrade = async (firmware: Uint8Array, targetAddress: number, op
 				if (p.stage === 'query') updateOtaStage('checking', 2)
 			},
 		})
+		if (recovery) {
+			recovery.upgradeSucceeded = true
+			if (recovery.kind === 'meter') recovery.previousVersion = String(result.versionInfo?.softwareVersion ?? '')
+		}
 	} finally {
-		if (exclusiveBootSessionStarted && typeof transportAny?.endExclusiveBootSession === 'function') {
-			transportAny.endExclusiveBootSession()
+		try {
+			if (exclusiveBootSessionStarted && typeof transportAny?.endExclusiveBootSession === 'function') {
+				transportAny.endExclusiveBootSession()
+			}
+		} finally {
+			if (prevMinFrameIntervalMs != null && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
+				transportAny.minFrameIntervalMs = prevMinFrameIntervalMs
+			}
+			if (transportAny && 'logger' in transportAny) {
+				transportAny.logger = prevTransportLogger
+			}
+			try {
+				// 开启回调缺失不代表原生调用未生效，结束时仍须尝试恢复。
+				await setOtaKeepScreenOn(false)
+			} finally {
+				setOtaDebugLogDeferred(false)
+				if (bootStarted && recovery) pendingBleOtaRecovery = recovery
+			}
 		}
-		if (prevMinFrameIntervalMs != null && transportAny && typeof transportAny.minFrameIntervalMs === 'number') {
-			transportAny.minFrameIntervalMs = prevMinFrameIntervalMs
+	}
+}
+
+const finishBleOtaRecovery = async () => {
+	const request = pendingBleOtaRecovery
+	pendingBleOtaRecovery = null
+	if (!request || !props.onRecoverBleOta) return
+	otaState.recoveryMessage = t('deviceDetail.toast.otaRecovering') as string
+	try {
+		const result = await props.onRecoverBleOta(request)
+		if (result.state === 'cancelled') return
+		otaState.recoveryMessage = t(result.state === 'ready'
+			? 'deviceDetail.toast.otaRecoveryReady' : 'deviceDetail.toast.otaRecoveryFailed') as string
+		if (result.state === 'ready') {
+			if (result.version != null) otaState.recoveryMessage += ` ${t('deviceDetail.toast.otaActualVersion')}: ${result.version}`
+			if (result.version == null || !request.previousVersion || result.version === request.previousVersion) {
+				otaState.recoveryMessage += ` ${t('deviceDetail.toast.otaVersionUnverified')}`
+			}
 		}
-		if (transportAny && 'logger' in transportAny) {
-			transportAny.logger = prevTransportLogger
-		}
+	} catch (_) {
+		otaState.recoveryMessage = t('deviceDetail.toast.otaRecoveryFailed') as string
 	}
 }
 
@@ -2139,7 +2276,11 @@ const startBmsOta = async ({ throughMeter = false }: { throughMeter?: boolean } 
 			throughMeter,
 			firmwareSize: firmware.length,
 		})
-		await runBootOtaUpgrade(firmware, BOOT_TARGET_BMS, getBleBootOtaRuntimeOptions({ isMeterUpgrade: false }))
+		await runBootOtaUpgrade(
+			firmware,
+			BOOT_TARGET_BMS,
+			getBleBootOtaRuntimeOptions({ isMeterUpgrade: false, throughMeter })
+		)
 
 		updateOtaStage('success', 100)
 		appendCurrentOtaDebug('info', 'bms-ota', 'bms ota success', {
@@ -2172,7 +2313,10 @@ const startBmsOta = async ({ throughMeter = false }: { throughMeter?: boolean } 
 		}
 		updateOtaStage('failed', otaState.progress || 0)
 		const errMessage = (e as Error)?.message || String(e || '')
-		if (errMessage === 'boot_packet0_no_ack' || errMessage === 'boot_firmware_hardware_mismatch') {
+		if (errMessage === 'boot_packet0_no_ack' || errMessage.startsWith('boot_packet_no_ack:')) {
+			otaState.message = t('deviceDetail.toast.otaPacketNoAck') as string
+			uni.showToast({ title: otaState.message, icon: 'none' })
+		} else if (errMessage === 'boot_firmware_hardware_mismatch') {
 			const mismatchText = t('deviceDetail.toast.otaHardwareMismatch') as string
 			otaState.message = mismatchText
 			uni.showToast({ title: mismatchText, icon: 'none' })
@@ -2192,6 +2336,13 @@ const startBmsOta = async ({ throughMeter = false }: { throughMeter?: boolean } 
 			const finalizeText = t('deviceDetail.toast.otaFinalizeNoAck') as string
 			otaState.message = finalizeText
 			uni.showToast({ title: finalizeText, icon: 'none' })
+		} else if (
+			errMessage === 'boot_ble_mtu_unsupported' ||
+			errMessage.startsWith('boot_ble_frame_exceeds_mtu')
+		) {
+			const mtuText = t('deviceDetail.toast.otaBleMtuUnsupported') as string
+			otaState.message = mtuText
+			uni.showToast({ title: mtuText, icon: 'none' })
 		} else if (isMiniProgramDomainListError(errMessage)) {
 			const domainText = t('deviceDetail.toast.otaDomainNotConfigured') as string
 			otaState.message = domainText
@@ -2200,6 +2351,7 @@ const startBmsOta = async ({ throughMeter = false }: { throughMeter?: boolean } 
 			uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
 		}
 	} finally {
+		await finishBleOtaRecovery()
 		otaState.running = false
 		activeOtaKind.value = ''
 		applyPollingState()
@@ -2269,19 +2421,14 @@ const startMeterOta = async () => {
 			bootPacketTimeoutMs: meterRuntimeOptions.bootPacketTimeoutMs,
 			finalizeDelayMs: meterRuntimeOptions.finalizeDelayMs,
 			finalizeTimeoutMs: meterRuntimeOptions.finalizeTimeoutMs,
-			finalizeAssumeSuccessOnTimeout: !!meterRuntimeOptions.finalizeAssumeSuccessOnTimeout,
 			finalizeMaxAttempts: meterRuntimeOptions.finalizeMaxAttempts,
 			finalizeDisableAlternateWriteRetry: !!meterRuntimeOptions.finalizeDisableAlternateWriteRetry,
-			forceWriteWithResponse: !!meterRuntimeOptions.forceWriteWithResponse,
-			terminalPacketWriteErrorAsComplete: !!meterRuntimeOptions.terminalPacketWriteErrorAsComplete,
+			allowPostFinalizeBleDisconnectSuccess: !!meterRuntimeOptions.allowPostFinalizeBleDisconnectSuccess,
 			requireFinalPacketAck: !!meterRuntimeOptions.requireFinalPacketAck,
-			finalizeBurstIntervalsMs: meterRuntimeOptions.finalizeBurstIntervalsMs,
 			minFrameIntervalMs: meterRuntimeOptions.minFrameIntervalMs,
 			packetDelayMs: meterRuntimeOptions.packetDelayMs,
 			pageBoundaryDelayMs: meterRuntimeOptions.pageBoundaryDelayMs,
-			adaptiveSlowdownOnPacketTimeout: !!meterRuntimeOptions.adaptiveSlowdownOnPacketTimeout,
-			adaptivePacketDelayMs: meterRuntimeOptions.adaptivePacketDelayMs,
-			adaptivePageBoundaryDelayMs: meterRuntimeOptions.adaptivePageBoundaryDelayMs,
+			dataAckTimeoutAction: 'retry-same-packet',
 			firmwareSize: firmware.length,
 		})
 		await runBootOtaUpgrade(firmware, BOOT_TARGET_METER, {
@@ -2304,7 +2451,10 @@ const startMeterOta = async () => {
 			progress: otaState.progress,
 			message: otaState.message,
 		})
-		if (errMessage === 'boot_packet0_no_ack' || errMessage === 'boot_firmware_hardware_mismatch') {
+		if (errMessage === 'boot_packet0_no_ack' || errMessage.startsWith('boot_packet_no_ack:')) {
+			otaState.message = t('deviceDetail.toast.otaPacketNoAck') as string
+			uni.showToast({ title: otaState.message, icon: 'none' })
+		} else if (errMessage === 'boot_firmware_hardware_mismatch') {
 			const mismatchText = t('deviceDetail.toast.otaHardwareMismatch') as string
 			otaState.message = mismatchText
 			uni.showToast({ title: mismatchText, icon: 'none' })
@@ -2324,6 +2474,13 @@ const startMeterOta = async () => {
 			const finalizeText = t('deviceDetail.toast.otaFinalizeNoAck') as string
 			otaState.message = finalizeText
 			uni.showToast({ title: finalizeText, icon: 'none' })
+		} else if (
+			errMessage === 'boot_ble_mtu_unsupported' ||
+			errMessage.startsWith('boot_ble_frame_exceeds_mtu')
+		) {
+			const mtuText = t('deviceDetail.toast.otaBleMtuUnsupported') as string
+			otaState.message = mtuText
+			uni.showToast({ title: mtuText, icon: 'none' })
 		} else if (isMiniProgramDomainListError(errMessage)) {
 			const domainText = t('deviceDetail.toast.otaDomainNotConfigured') as string
 			otaState.message = domainText
@@ -2332,6 +2489,7 @@ const startMeterOta = async () => {
 			uni.showToast({ title: t('deviceDetail.toast.otaFailed') as string, icon: 'none' })
 		}
 	} finally {
+		await finishBleOtaRecovery()
 		otaState.running = false
 		activeOtaKind.value = ''
 		applyPollingState()

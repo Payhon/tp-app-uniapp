@@ -14,8 +14,9 @@ export function resolveDetailPollingPolicy(options: {
 	connType: DetailPollingConnType
 	hasClient: boolean
 	connecting: boolean
+	otaRunning?: boolean
 }): DetailPollingPolicy {
-	if (options.connecting || !options.hasClient) return { mode: 'paused' }
+	if (options.otaRunning || options.connecting || !options.hasClient) return { mode: 'paused' }
 
 	if (options.tab === 2) {
 		if (options.connType !== 'mqtt') return { mode: 'paused' }

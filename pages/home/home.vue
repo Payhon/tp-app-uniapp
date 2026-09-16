@@ -544,7 +544,7 @@ const goAlarm = () => {
 }
 
 const goDeviceDetail = (id: string) => {
-	uni.navigateTo({ url: `/pages/device-battery/detail?device_id=${encodeURIComponent(String(id || ''))}` })
+	uni.navigateTo({ url: `/pages/device-battery/detail?device_id=${encodeURIComponent(String(id || ''))}&entry_source=home` })
 }
 
 const disconnectCardBluetooth = async (device: HomeDeviceCardModel) => {

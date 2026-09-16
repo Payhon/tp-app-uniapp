@@ -68,4 +68,15 @@ const pendingConnectionPolicy = resolveDetailPollingPolicy({
 })
 assert(pendingConnectionPolicy.mode === 'paused', 'params keepalive should wait for the MQTT client to become ready')
 
+for (const connType of ['bluetooth', 'mqtt'] as const) {
+	for (const tab of [0, 1, 2, 3] as const) {
+		const base = { tab, connType, hasClient: true, connecting: false }
+		assert(resolveDetailPollingPolicy({ ...base, otaRunning: true }).mode === 'paused', `${connType} tab ${tab}: OTA must pause all ordinary polling`)
+		assert(
+			JSON.stringify(resolveDetailPollingPolicy({ ...base, otaRunning: false })) === JSON.stringify(resolveDetailPollingPolicy(base)),
+			`${connType} tab ${tab}: finishing/canceling OTA must restore the original tab policy`
+		)
+	}
+}
+
 console.log('detail polling policy tests passed')
