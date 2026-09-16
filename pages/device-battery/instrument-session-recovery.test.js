@@ -36,7 +36,7 @@ function createHarness(options = {}) {
   let alive = true
   let inFlight = 0
   const timers = new Map()
-  const calls = { reads: [], writes: [], scans: 0, connections: 0, disconnects: 0, maxInFlight: 0, toasts: [] }
+  const calls = { reads: [], writes: [], scans: 0, connections: 0, disconnects: 0, maxInFlight: 0, toasts: [], versionQueries: 0, pendingCancels: 0 }
   const state = { availableAt: options.availableAt ?? 0, target: A, configure: 'ack', connectDelay: 0, connectFailure: false }
   class ClockDate extends Date { static now() { return now } }
   const later = (fn, ms) => {
@@ -52,10 +52,10 @@ function createHarness(options = {}) {
       calls.reads.push(now)
       calls.maxInFlight = Math.max(calls.maxInFlight, ++inFlight)
       try {
-        await sleep(options.readDelay ?? (available ? 100 : 5000))
+        await sleep(state.readDelay ?? options.readDelay ?? (available ? 100 : 5000))
         if (!available) throw new Error('BLE request timeout after 5000ms')
         // Deliberately allow stale complete replies; production generation guards must reject them.
-        return { identity: { bluetoothMac: target }, energy: { socPct: target === A ? 20 : 80 } }
+        return { identity: { bluetoothMac: target }, meta: { softwareVersion: 4 }, energy: { socPct: target === A ? 20 : 80 } }
       } finally { inFlight-- }
     },
     async configureMeterMac(input) {
@@ -65,13 +65,34 @@ function createHarness(options = {}) {
       if (state.configure === 'timeout') throw new Error('BLE request timeout after 5000ms')
     },
   }
+  let lastEntry
+  const makeEntry = mac => {
+    const listeners = new Set()
+    const transport = {
+      cancelPendingRequest() { calls.pendingCancels++ },
+      onDisconnect(fn) { listeners.add(fn); return () => listeners.delete(fn) },
+      notifyDisconnect() { for (const fn of [...listeners]) fn() },
+      async disconnect() { calls.disconnects++; transport.notifyDisconnect(); await sleep(state.closeDelay || 0); if (state.closeFailure) throw new Error('close failed') },
+    }
+    return { key: mac, mac, deviceId: 'meter-native-id', transport, connectedAt: now,
+      client: { ...bleClient, getTransport: () => transport, getAddresses: () => ({ sourceAddress: 0xfe }) } }
+  }
+  const closeTasks = new Map()
   const cache = {
     canBleAutoConnect: (_, mac) => ({ ok: true, mac }),
-    async connectBleClient({ mac }) {
+    async connectBleClient({ mac, onTransport, isCancelled, singleAttempt }) {
       calls.connections++
+      const entry = makeEntry(mac)
+      onTransport?.(entry.transport)
       await sleep(state.connectDelay)
-      if (!alive || state.connectFailure) throw new Error('connect failed')
-      return { key: mac, client: bleClient }
+      if (!alive || state.connectFailure || isCancelled?.()) throw new Error('connect failed')
+      if (singleAttempt) assert.equal(singleAttempt, true)
+      lastEntry = entry
+      return entry
+    },
+    closeBleClientEntry(entry) {
+      if (!closeTasks.has(entry.transport)) closeTasks.set(entry.transport, entry.transport.disconnect().then(() => true, () => false))
+      return closeTasks.get(entry.transport)
     },
     disconnectBleClient: async () => { calls.disconnects++; return true },
     releaseBleClientAndDisconnectIfIdle: async () => true,
@@ -94,6 +115,9 @@ function createHarness(options = {}) {
     '@/service/app-battery': {},
     '@/common/lib/bms-protocol/client': { BMS_STATUS_READ_CANCELED_MESSAGE: 'BMS status read canceled' },
     '@/common/lib/bms-protocol/uni-mqtt-socket-transport': {},
+    '@/common/lib/bms-protocol/boot-ota': { async bootQueryVersion({ targetAddress }) {
+      calls.versionQueries++; assert.equal(targetAddress, 0); return { softwareVersion: 4 }
+    } },
     '@/common/ble/ble-client-cache': cache,
     '@/common/device-provision/ble': { normalizeMac: value => value },
   }
@@ -129,6 +153,11 @@ function createHarness(options = {}) {
   scope.run(() => vm.runInContext(pageCode, context))
   return {
     detail, state, calls, context,
+    entry: () => lastEntry,
+    recoveryRequest: (kind = 'meter-bms', upgradeSucceeded = true) => ({
+      originalClient: lastEntry.client, mac: lastEntry.mac, deviceId: lastEntry.deviceId,
+      kind, upgradeSucceeded, previousVersion: '3',
+    }),
     scanCallback: () => callback,
     async start() {
       await detail.loadInstrumentSession({ bleMac: 'AA0000000001' })
@@ -161,6 +190,75 @@ function createHarness(options = {}) {
 }
 
 async function main() {
+  for (const kind of ['bms', 'meter', 'meter-bms']) for (const upgradeSucceeded of [true, false]) {
+    const h = createHarness()
+    await h.start(); await h.tick(100)
+    h.detail.setBleOtaActive(true)
+    h.detail.pausePolling()
+    const request = h.recoveryRequest(kind, upgradeSucceeded)
+    const original = h.entry()
+    if (upgradeSucceeded) original.transport.notifyDisconnect()
+    assert.equal(h.detail.client.value, original.client, 'Boot retains ownership of native disconnect evidence')
+    const operation = h.detail.recoverBleOta(request)
+    await h.tick(999)
+    assert.equal(h.calls.connections, 1, 'wait one second before fresh connection')
+    await h.tick(201)
+    const result = await operation
+    assert.equal(result.state, 'ready'); assert.equal(result.version, '4')
+    assert.notEqual(h.detail.client.value, original.client)
+    assert.equal(request.upgradeSucceeded, upgradeSucceeded, 'recovery cannot rewrite OTA result')
+    original.transport.notifyDisconnect()
+    assert.equal(h.detail.connType.value, 'bluetooth', 'old disconnect cannot clear replacement')
+    assert.equal(h.calls.writes.length, 0, 'recovery never reconfigures or reflashes')
+    assert.equal(h.calls.versionQueries, kind === 'meter' ? 1 : 0)
+    await h.unload()
+  }
+  {
+    const h = createHarness()
+    await h.start(); await h.tick(100)
+    h.entry().transport.notifyDisconnect()
+    assert.equal(h.detail.client.value, null); assert.equal(h.detail.connType.value, 'offline')
+    const reads = h.calls.reads.length
+    await h.tick(10000)
+    assert.equal(h.calls.reads.length, reads, 'native disconnect stops normal polling')
+    await h.unload()
+  }
+  for (const failure of ['connectFailure', 'closeFailure', 'timeout', 'closeTimeout', 'readTimeout', 'unload']) {
+    const h = createHarness()
+    await h.start(); await h.tick(100)
+    const request = h.recoveryRequest()
+    if (failure === 'connectFailure' || failure === 'closeFailure') h.state[failure] = true
+    if (failure === 'timeout' || failure === 'unload') h.state.connectDelay = 60000
+    if (failure === 'closeTimeout') h.state.closeDelay = 60000
+    if (failure === 'readTimeout') h.state.readDelay = 60000
+    const operation = h.detail.recoverBleOta(request)
+    await h.tick(1200)
+    if (failure === 'unload') await h.unload()
+    await h.tick(31000)
+    const result = await operation
+    assert.equal(result.state, failure === 'unload' ? 'cancelled' : 'failed')
+    assert.equal(h.detail.connType.value, 'offline')
+    assert.ok(h.calls.connections <= 3, 'initial connection plus at most two recovery attempts')
+    const connections = h.calls.connections
+    await h.tick(70000)
+    assert.equal(h.calls.connections, connections, 'late operation cannot reconnect again')
+    assert.equal(h.detail.client.value, null)
+    if (failure !== 'unload') await h.unload()
+  }
+  {
+    const h = createHarness()
+    await h.start(); await h.tick(100)
+    h.state.connectDelay = 60000
+    const operation = h.detail.recoverBleOta(h.recoveryRequest())
+    await h.tick(1200)
+    h.state.connectDelay = 0
+    await h.detail.loadInstrumentSession({ bleMac: 'AA0000000002' })
+    const nextClient = h.detail.client.value
+    assert.equal((await operation).state, 'cancelled')
+    await h.tick(70000)
+    assert.equal(h.detail.client.value, nextClient, 'old recovery cannot overwrite switched device')
+    await h.unload()
+  }
   {
     const h = createHarness({ availableAt: 30000 })
     await h.start()

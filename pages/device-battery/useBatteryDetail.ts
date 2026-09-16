@@ -13,6 +13,7 @@ import {
 	type AppBatteryReportReq,
 } from '@/service/app-battery'
 import { BMS_STATUS_READ_CANCELED_MESSAGE, BmsClient } from '@/common/lib/bms-protocol/client'
+import { bootQueryVersion } from '@/common/lib/bms-protocol/boot-ota'
 import {
 	createUniMqttSocketBmsTransport,
 	isMqttSocketOccupiedError,
@@ -21,6 +22,7 @@ import {
 import {
 	canBleAutoConnect,
 	connectBleClient,
+	closeBleClientEntry,
 	disconnectBleClient,
 	getBleClientEntry,
 	invalidateBleConnectAttempts,
@@ -62,6 +64,16 @@ import {
 } from './scan-four-g-online-policy'
 
 type ConnType = 'bluetooth' | 'mqtt' | 'offline'
+export type BleOtaRecoveryRequest = {
+	originalClient: BmsClient
+	mac: string
+	deviceId: string
+	kind: 'bms' | 'meter' | 'meter-bms'
+	upgradeSucceeded: boolean
+	previousVersion: string
+	debug?: (event: string, data: Record<string, unknown>) => void
+}
+export type BleOtaRecoveryResult = { state: 'ready' | 'failed' | 'cancelled'; version: string | null }
 type DataSourceMode = 'realtime' | 'cloud_fallback' | 'offline'
 type DeviceDetailSessionMode = 'cloud' | 'instrument'
 type LoadInstrumentSessionOptions = {
@@ -486,6 +498,12 @@ export const useBatteryDetail = () => {
 	let cloudPollTimer: number | null = null
 	let mqttTransport: MqttTransportLike | null = null
 	let bleCacheKey: string | null = null
+	let attachedBleEntry: BleClientEntry | null = null
+	let unsubscribeBleDisconnect: (() => void) | undefined
+	let bleOtaActive = false
+	let cancelBleRecovery: (() => void) | null = null
+	const bleOtaRecoveryFailed = ref(false)
+	const setBleOtaActive = (active: boolean) => { bleOtaActive = active }
 	let pollErrLogged = 0
 	let firstFrameFailCount = 0
 	let firstFrameAutoReconnectCount = 0
@@ -613,6 +631,8 @@ export const useBatteryDetail = () => {
 
 	const startSession = (sessionKey: string, nextDeviceId: string): DetailDataSessionToken | null => {
 		if (componentDisposed) return null
+		cancelBleRecovery?.()
+		bleOtaRecoveryFailed.value = false
 		resetScanFourGOnlineState()
 		dataArbiter = beginDetailDataSession(dataArbiter, { sessionKey, deviceId: nextDeviceId })
 		if (dataArbiter.disposed) return null
@@ -1382,6 +1402,22 @@ export const useBatteryDetail = () => {
 			retainBleClient(entry.key)
 		}
 		bleCacheKey = entry.key
+		attachedBleEntry = entry
+		bleOtaRecoveryFailed.value = false
+		unsubscribeBleDisconnect?.()
+		unsubscribeBleDisconnect = entry.transport?.onDisconnect?.(() => {
+			if (attachedBleEntry !== entry || client.value !== entry.client) return
+			stopPolling()
+			if (bleOtaActive) return // Boot owns the pending error and finalize evidence until its finally completes.
+			client.value = null
+			bleCacheKey = null
+			connType.value = 'offline'
+			dataSourceMode.value = 'offline'
+			bmsDataLoading.value = false
+			connecting.value = false
+			closeRelaySocket()
+			if (!isInstrumentSession()) void reportConnectionStatus(false, 'bluetooth')
+		})
 		client.value = entry.client
 		connType.value = 'bluetooth'
 		dataSourceMode.value = 'realtime'
@@ -1609,6 +1645,10 @@ export const useBatteryDetail = () => {
 	}
 
 	const disconnectAll = async (options?: DisconnectAllOptions) => {
+		cancelBleRecovery?.()
+		unsubscribeBleDisconnect?.()
+		unsubscribeBleDisconnect = undefined
+		attachedBleEntry = null
 		invalidateBleConnectAttempts('device-detail disconnectAll')
 		const wasBluetooth = connType.value === 'bluetooth'
 		if (wasBluetooth && !isInstrumentSession()) {
@@ -1653,6 +1693,7 @@ export const useBatteryDetail = () => {
 	}
 
 	const disconnectBluetooth = async () => {
+		if (cancelBleRecovery) return false
 		if (connType.value !== 'bluetooth') return false
 		const bleKey = bleCacheKey || String(battery.value?.ble_mac || '').trim()
 		await disconnectAll()
@@ -2054,6 +2095,110 @@ export const useBatteryDetail = () => {
 		}
 	}
 
+	const recoverBleOta = async (request: BleOtaRecoveryRequest): Promise<BleOtaRecoveryResult> => {
+		const original = attachedBleEntry
+		if (componentDisposed || cancelBleRecovery || !original || original.client !== request.originalClient ||
+			original.key !== normalizeMac(request.mac) || original.deviceId !== request.deviceId) {
+			return { state: 'cancelled', version: null }
+		}
+		const session = captureSession()
+		bleOtaRecoveryFailed.value = false
+		const deadline = Date.now() + 30_000
+		let cancelled = false
+		let timedOut = false
+		let recovered = false
+		let activeTransport = original.transport
+		let rejectStopped!: (error: Error) => void
+		const stopped = new Promise<never>((_, reject) => { rejectStopped = reject })
+		const current = () => !cancelled && !timedOut && isSessionCurrent(session) && Date.now() < deadline
+		const remaining = () => Math.max(1, deadline - Date.now())
+		const wait = <T>(task: Promise<T>) => Promise.race([task, stopped])
+		const stop = () => {
+			activeTransport.cancelPendingRequest()
+			void closeBleClientEntry({ key: original.key, transport: activeTransport })
+			rejectStopped(new Error('BLE OTA recovery stopped'))
+		}
+		const cancel = () => { cancelled = true; stop() }
+		cancelBleRecovery = cancel
+		const timer = setTimeout(() => { timedOut = true; stop() }, remaining())
+		pausePolling()
+		stopCloudPolling()
+		closeRelaySocket()
+		unsubscribeBleDisconnect?.()
+		unsubscribeBleDisconnect = undefined
+		client.value = null
+		connType.value = 'offline'
+		dataSourceMode.value = 'offline'
+		bleCacheKey = null
+		connecting.value = true
+		const debug = (phase: string, data: Record<string, unknown> = {}) => {
+			try { request.debug?.('BLE OTA recovery', {
+				session: session.generation, deviceId: original.deviceId, kind: request.kind,
+				upgradeSucceeded: request.upgradeSucceeded, phase, ...data,
+			}) } catch (_) { /* Diagnostics must not change the recovery result. */ }
+		}
+		try {
+			debug('closing')
+			const closed = await wait(closeBleClientEntry(original, remaining()))
+			debug('closed', { closed, error: original.transport.getDisconnectError?.() })
+			if (!closed) throw new Error('BLE close incomplete')
+			for (let attempt = 1; attempt <= 2 && current(); attempt++) {
+				await wait(sleep(1000))
+				if (!current()) break
+				debug('connecting', { attempt })
+				try {
+					const entry = await wait(connectBleClient({ mac: original.mac, preferredDeviceId: original.deviceId,
+						force: true, probe: false, singleAttempt: true, maxReadRegisters: original.maxReadRegisters,
+						isCancelled: () => !current(), onTransport: transport => { activeTransport = transport },
+					}))
+					if (!entry || !current()) throw new Error('BLE reconnect failed')
+					debug('checking-response', { attempt, connectedAt: entry.connectedAt })
+					let version: string | null
+					let nextStatus: BmsStatus | null = null
+					if (request.kind === 'meter') {
+						const info = await wait(bootQueryVersion({
+							transport: { request: (frame, options) => entry.transport.request(frame, {
+								...options, timeoutMs: Math.min(450, remaining()),
+							}) }, targetAddress: 0, sourceAddress: entry.client.getAddresses().sourceAddress,
+						}))
+						version = info.softwareVersion == null ? null : String(info.softwareVersion)
+					} else {
+						nextStatus = await wait(entry.client.readAllStatus({ shouldContinue: current, timeoutMs: Math.min(3000, remaining()) }))
+						version = nextStatus.meta?.softwareVersion == null ? null : String(nextStatus.meta.softwareVersion)
+					}
+					if (!current()) break
+					status.value = nextStatus
+					attachBleEntry(entry, { sessionToken: session })
+					if (nextStatus) markFirstFrameSuccess()
+					recovered = true
+					debug('ready', { version, attempt })
+					return { state: 'ready', version }
+				} catch (error) {
+					if (!current()) break
+					debug('attempt-failed', { attempt, error: formatErr(error) })
+					activeTransport.cancelPendingRequest()
+					if (!(await wait(closeBleClientEntry({ key: original.key, transport: activeTransport }, remaining())))) break
+				}
+			}
+		} catch (error) {
+			debug('failed', { error: formatErr(error), closeError: activeTransport.getDisconnectError?.(), timedOut })
+		} finally {
+			clearTimeout(timer)
+			if (!recovered) {
+				activeTransport.cancelPendingRequest()
+				void closeBleClientEntry({ key: original.key, transport: activeTransport })
+			}
+			if (cancelBleRecovery === cancel) cancelBleRecovery = null
+			if (isSessionCurrent(session)) {
+				connecting.value = false
+				bmsDataLoading.value = false
+			}
+		}
+		const wasCancelled = cancelled || !isSessionCurrent(session)
+		if (!wasCancelled) bleOtaRecoveryFailed.value = true
+		return { state: wasCancelled ? 'cancelled' : 'failed', version: null }
+	}
+
 	const dispose = async (options?: { disconnectBleIfIdle?: boolean }) => {
 		if (componentDisposed) return
 		componentDisposed = true
@@ -2067,6 +2212,9 @@ export const useBatteryDetail = () => {
 	}
 
 	return {
+		recoverBleOta,
+		setBleOtaActive,
+		bleOtaRecoveryFailed,
 		deviceId,
 		battery,
 		status,

@@ -44,6 +44,10 @@
 		</view>
 
 		<view class="content" :style="{ paddingTop: navHeight + 'px', paddingBottom: contentBottomPadPx + 'px' }">
+			<view v-if="bleOtaRecoveryFailed && !otaRunning" class="realtime-notice">
+				<text class="realtime-notice__text">{{ $t('deviceDetail.toast.otaRecoveryFailed') }}</text>
+				<u-button size="mini" :disabled="connecting" @click="reconnectBmsData">{{ $t('deviceDetail.dashboard.reconnectRead') }}</u-button>
+			</view>
 			<view v-if="showRealtimeOccupiedNotice" class="realtime-notice">
 				<text class="realtime-notice__text">{{ $t('deviceDetail.conn.realtimeOccupied') }}</text>
 			</view>
@@ -140,8 +144,9 @@
 				:otaNeedUpgrade="showOtaBadge"
 				:onPausePolling="pausePolling"
 				:onResumePolling="applyCurrentPollingPolicy"
+				:onRecoverBleOta="recoverBleOta"
 				@ota-state-change="patchOtaCheckState"
-				@ota-running-change="otaRunning = $event"
+				@ota-running-change="otaRunning = $event; setBleOtaActive($event)"
 			/>
 			<history-tab
 				v-else-if="activeTab === 3 && canShowHistoryTab"
@@ -158,22 +163,22 @@
 
 		<view class="bottom-bar" :style="{ paddingBottom: safeBottom + 'px' }">
 			<view class="bottom-bar__inner">
-				<view class="tab" hover-class="tab--hover" @tap="activeTab = 0">
+				<view class="tab" hover-class="tab--hover" @tap="switchTab(0)">
 					<image class="tab__icon" :src="activeTab === 0 ? '/static/image/device/navbar-dashboard-on@2x.png' : '/static/image/device/navbar-dashboard@2x.png'" mode="aspectFit" />
 					<text class="tab__text" :class="{ 'tab__text--on': activeTab === 0 }">{{ $t('deviceDetail.tabs.dashboard') }}</text>
 				</view>
-				<view class="tab" hover-class="tab--hover" @tap="activeTab = 1">
+				<view class="tab" hover-class="tab--hover" @tap="switchTab(1)">
 					<image class="tab__icon" :src="activeTab === 1 ? '/static/image/device/navbar-cell-on@2x.png' : '/static/image/device/navbar-cell@2x.png'" mode="aspectFit" />
 					<text class="tab__text" :class="{ 'tab__text--on': activeTab === 1 }">{{ $t('deviceDetail.tabs.cells') }}</text>
 				</view>
-				<view class="tab" hover-class="tab--hover" @tap="activeTab = 2">
+				<view class="tab" hover-class="tab--hover" @tap="switchTab(2)">
 					<image class="tab__icon" :src="activeTab === 2 ? '/static/image/device/navbar-params-on@2x.png' : '/static/image/device/navbar-params@2x.png'" mode="aspectFit" />
 					<view class="tab__text-wrap">
 						<text class="tab__text" :class="{ 'tab__text--on': activeTab === 2 }">{{ $t('deviceDetail.tabs.params') }}</text>
 						<view v-if="showOtaBadge" class="tab__badge"></view>
 					</view>
 				</view>
-				<view v-if="canShowHistoryTab" class="tab" hover-class="tab--hover" @tap="activeTab = 3">
+				<view v-if="canShowHistoryTab" class="tab" hover-class="tab--hover" @tap="switchTab(3)">
 					<image class="tab__icon" src="/static/image/device/icon-charge-time@2x.png" mode="aspectFit" :class="{ 'tab__icon--muted': activeTab !== 3 }" />
 					<text class="tab__text" :class="{ 'tab__text--on': activeTab === 3 }">{{ $t('deviceDetail.tabs.history') }}</text>
 				</view>
@@ -204,10 +209,10 @@ import { ensureLoggedIn } from '@/common/auth/ensure-login'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { consumeDeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
 import {
-	isQrScanDetailEntry,
 	normalizeDeviceDetailEntrySource,
 	resolveDeviceDetailEntrySource,
 	shouldDisconnectBleOnDetailUnload,
+	shouldUseFourGOnlineGrace,
 	type DeviceDetailEntrySource,
 } from '@/common/device-provision/detail-entry-source'
 import { DEVICE_TYPE_BMS, isMeterMac } from '@/common/device-provision/device-prefix-shared'
@@ -300,8 +305,16 @@ const {
 	reconnectBmsData,
 	dispose,
 	pausePolling,
+	recoverBleOta,
+	setBleOtaActive,
+	bleOtaRecoveryFailed,
 	resumePolling,
 } = useBatteryDetail()
+
+const switchTab = (tab: 0 | 1 | 2 | 3) => {
+	if (otaRunning.value && connType.value !== 'mqtt') return
+	activeTab.value = tab
+}
 const sessionActionButtonStyle = {
 	width: '100%',
 	height: '76rpx',
@@ -491,7 +504,7 @@ const connClass = computed(() => {
 })
 
 const showBleDisconnectBtn = computed(() => connType.value === 'bluetooth' && !connecting.value)
-const showConnectingMask = computed(() => connecting.value && !scanFourGOnlineOverride.value)
+const showConnectingMask = computed(() => connecting.value && !otaRunning.value && !scanFourGOnlineOverride.value)
 const showBmsDataLoading = computed(
 	() =>
 		activeTab.value === 0 &&
@@ -585,7 +598,7 @@ const onDisconnectBluetooth = async () => {
 }
 
 const applyCurrentPollingPolicy = () => {
-	if (!pageActive || (sessionMode.value === 'instrument' && (meterTargetSwitching.value || otaRunning.value))) {
+	if (!pageActive || (sessionMode.value === 'instrument' && meterTargetSwitching.value)) {
 		pausePolling()
 		return
 	}
@@ -594,6 +607,7 @@ const applyCurrentPollingPolicy = () => {
 		connType: connType.value,
 		hasClient: !!client.value,
 		connecting: connecting.value,
+		otaRunning: otaRunning.value,
 	})
 	if (policy.mode === 'paused') {
 		pausePolling()
@@ -752,7 +766,7 @@ onLoad((query) => {
 		routeSource: rawQuery.entry_source,
 		handoffSource: handoff?.entrySource,
 	})
-	const scanEntry = isQrScanDetailEntry(detailEntrySource)
+	const scanEntry = shouldUseFourGOnlineGrace(detailEntrySource)
 	loadById(id, {
 		handoff,
 		preferWarmBle: true,

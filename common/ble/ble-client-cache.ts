@@ -24,6 +24,7 @@ export type BleClientEntry = {
 	maxReadRegisters?: number
 	refCount: number
 	cleanupTimer?: number | null
+	unsubscribeDisconnect?: () => void
 }
 
 export type AdoptBleClientConnectionOptions = {
@@ -35,6 +36,37 @@ export type AdoptBleClientConnectionOptions = {
 }
 
 const cache = new Map<string, BleClientEntry>()
+const closing = new Map<string, Promise<boolean>>()
+
+// A timeout bounds the caller, not the native close. Keep the device fenced until native success.
+export const closeBleClientEntry = async (entry: Pick<BleClientEntry, 'key' | 'transport' | 'cleanupTimer' | 'unsubscribeDisconnect'>, timeoutMs = 1200): Promise<boolean> => {
+	if (entry.cleanupTimer != null) clearTimeout(entry.cleanupTimer)
+	entry.cleanupTimer = null
+	entry.unsubscribeDisconnect?.()
+	entry.unsubscribeDisconnect = undefined
+	const replacement = cache.get(entry.key)
+	if (replacement && replacement.transport !== entry.transport) return true
+	if (cache.get(entry.key) === entry) cache.delete(entry.key)
+	let task = closing.get(entry.key)
+	if (!task) {
+		task = Promise.resolve().then(() => entry.transport.disconnect()).then(() => true, () => false)
+		closing.set(entry.key, task)
+		const current = task
+		void task.then(ok => { if (ok && closing.get(entry.key) === current) closing.delete(entry.key) })
+	}
+	let timer: ReturnType<typeof setTimeout> | undefined
+	try {
+		return await Promise.race([task, new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), Math.max(1, timeoutMs)) })])
+	} finally { if (timer) clearTimeout(timer) }
+}
+
+const observeEntryDisconnect = (entry: BleClientEntry) => {
+	entry.unsubscribeDisconnect?.()
+	entry.unsubscribeDisconnect = entry.transport.onDisconnect?.(() => {
+		if (cache.get(entry.key) !== entry) return
+		void closeBleClientEntry(entry)
+	})
+}
 const inFlight = new Map<string, Promise<BleClientEntry | null>>()
 const homeAutoConnectTransports = new Set<UniBleBmsTransport>()
 
@@ -446,10 +478,7 @@ const scheduleCleanup = (entry: BleClientEntry) => {
 	entry.cleanupTimer = setTimeout(async () => {
 		if (entry.refCount > 0) return
 		log('idle disconnect', { mac: entry.mac, deviceId: entry.deviceId })
-		try {
-			await entry.transport.disconnect()
-		} catch (e) {}
-		cache.delete(entry.key)
+		await closeBleClientEntry(entry)
 	}, IDLE_DISCONNECT_MS) as unknown as number
 }
 
@@ -498,21 +527,10 @@ export const releaseBleClientAndDisconnectIfIdle = async (mac: unknown): Promise
 		clearTimeout(entry.cleanupTimer)
 		entry.cleanupTimer = null
 	}
-	if (cache.get(key) === entry) cache.delete(key)
-
 	const lease = await acquireBleDiscoveryLease(`ble-client-cache:release-disconnect:${key}`)
 	try {
-		let disconnectTimeoutTimer: ReturnType<typeof setTimeout> | null = null
-		const result = await Promise.race([
-			entry.transport.disconnect().then(
-				() => 'disconnected' as const,
-				() => 'failed' as const
-			),
-			new Promise<'timeout'>((resolve) => {
-				disconnectTimeoutTimer = setTimeout(() => resolve('timeout'), DISCOVERY_ENTRY_DISCONNECT_TIMEOUT_MS)
-			}),
-		])
-		if (disconnectTimeoutTimer != null) clearTimeout(disconnectTimeoutTimer)
+		if (cache.get(key) !== entry || entry.refCount > 0) return false
+		const result = await closeBleClientEntry(entry, DISCOVERY_ENTRY_DISCONNECT_TIMEOUT_MS) ? 'disconnected' : 'incomplete'
 		log(result === 'disconnected' ? 'discovery-entry disconnect' : 'discovery-entry disconnect incomplete', {
 			mac: key,
 			deviceId: entry.deviceId,
@@ -539,21 +557,8 @@ export const disconnectBleClient = async (mac: unknown): Promise<boolean> => {
 	}
 	const entry = cache.get(key)
 	if (!entry) return false
-	try {
-		if (entry.cleanupTimer != null) {
-			clearTimeout(entry.cleanupTimer)
-			entry.cleanupTimer = null
-		}
-		entry.refCount = 0
-		await entry.transport.disconnect()
-		log('manual disconnect', { mac: key, deviceId: entry.deviceId })
-		return true
-	} catch (e) {
-		log('manual disconnect failed', { mac: key, deviceId: entry.deviceId })
-		return false
-	} finally {
-		cache.delete(key)
-	}
+	entry.refCount = 0
+	return closeBleClientEntry(entry)
 }
 
 export const canBleAutoConnect = (commType: unknown, bleMac: unknown) => {
@@ -572,17 +577,13 @@ type ConnectBleOptions = {
 	probe?: boolean
 	preferredDeviceId?: string
 	source?: 'home_auto' | 'interactive'
+	isCancelled?: () => boolean
+	onTransport?: (transport: UniBleBmsTransport) => void
+	singleAttempt?: boolean
 }
 
 const closeEntry = async (entry: BleClientEntry) => {
-	try {
-		if (entry.cleanupTimer != null) {
-			clearTimeout(entry.cleanupTimer)
-			entry.cleanupTimer = null
-		}
-		await entry.transport.disconnect()
-	} catch (e) {}
-	cache.delete(entry.key)
+	if (!(await closeBleClientEntry(entry))) throw new Error('BLE close incomplete')
 }
 
 export const adoptBleClientConnection = async ({
@@ -595,6 +596,8 @@ export const adoptBleClientConnection = async ({
 	const key = normalizeBleMac(mac)
 	const normalizedDeviceId = String(deviceId || '').trim()
 	if (!key || !normalizedDeviceId || !client || !transport) return null
+	const pendingClose = closing.get(key)
+	if (pendingClose && (!(await waitConnectTaskSettled(pendingClose, 1200)) || !(await pendingClose))) return null
 	const pending = inFlight.get(key)
 	if (pending) {
 		try {
@@ -602,6 +605,8 @@ export const adoptBleClientConnection = async ({
 		} catch (e) {}
 	}
 	const existing = cache.get(key)
+	existing?.unsubscribeDisconnect?.()
+	if (existing?.cleanupTimer != null) clearTimeout(existing.cleanupTimer)
 	if (existing && existing.transport !== transport) {
 		await closeEntry(existing)
 	}
@@ -619,6 +624,7 @@ export const adoptBleClientConnection = async ({
 		cleanupTimer: null,
 	}
 	cache.set(key, entry)
+	observeEntryDisconnect(entry)
 	if (entry.refCount === 0) scheduleCleanup(entry)
 	log('adopt connection', { mac: key, deviceId: normalizedDeviceId, refCount: entry.refCount })
 	return entry
@@ -631,9 +637,15 @@ export const connectBleClient = async ({
 	probe = false,
 	preferredDeviceId,
 	source = 'interactive',
+	isCancelled,
+	onTransport,
+	singleAttempt,
 }: ConnectBleOptions): Promise<BleClientEntry | null> => {
 	const key = normalizeBleMac(mac)
 	if (!key) return null
+	const closeTask = closing.get(key)
+	if (closeTask && (!(await waitConnectTaskSettled(closeTask, 1200)) || !(await closeTask))) return null
+	if (isCancelled?.()) return null
 	const epoch = connectEpoch
 
 	const desiredMax = Number.isFinite(maxReadRegisters as number) ? Number(maxReadRegisters) : undefined
@@ -671,21 +683,39 @@ export const connectBleClient = async ({
 		log('force connect waits existing pending task', { mac: key })
 		const settled = await waitConnectTaskSettled(existing, CONNECT_LOCK_WAIT_TIMEOUT_MS)
 		if (!settled) {
-			log('force connect pending task timeout, replace it', { mac: key, timeoutMs: CONNECT_LOCK_WAIT_TIMEOUT_MS })
-			if (inFlight.get(key) === existing) inFlight.delete(key)
+			log('force connect pending task still active', { mac: key, timeoutMs: CONNECT_LOCK_WAIT_TIMEOUT_MS })
+			return null
 		}
+		const completedEntry = cache.get(key)
+		if (completedEntry) await closeEntry(completedEntry)
 	}
 
 	const task = runSerial(async () => {
+		if (isCancelled?.()) return null
+		const pendingClose = closing.get(key)
+		if (pendingClose && (!(await waitConnectTaskSettled(pendingClose, 1200)) || !(await pendingClose))) return null
 		log('connect start', { mac: key })
 		const transport = createUniBleBmsTransport({})
+		onTransport?.(transport)
+		const assertActive = () => {
+			assertConnectActive(epoch, key)
+			if (isCancelled?.()) throw new BleConnectCancelledError()
+		}
+		const closeAttempt = async () => {
+			if (!(await closeBleClientEntry({ key, transport }))) throw new BleConnectCancelledError('BLE close incomplete')
+		}
 		if (source === 'home_auto') homeAutoConnectTransports.add(transport)
 		try {
-			assertConnectActive(epoch, key)
+			assertActive()
 			const sys = uni.getSystemInfoSync ? uni.getSystemInfoSync() : ({} as any)
 			const platform = String((sys as any)?.platform || '').toLowerCase()
 			const isAndroid = platform === 'android'
 			const isIOS = platform === 'ios'
+			if (singleAttempt) {
+				if (!preferredDeviceId || !isDeviceIdCompatibleWithTarget(preferredDeviceId, key)) return null
+				return await connectDirectCandidate({ label: 'OTA recovery', key, epoch, platform,
+					deviceId: preferredDeviceId, transport, maxReadRegisters: desiredMax })
+			}
 
 			if (isAndroid) {
 				const directCandidates: string[] = []
@@ -695,6 +725,7 @@ export const connectBleClient = async ({
 				pushCompatibleCandidate(directCandidates, key, key)
 				pushCompatibleCandidate(directCandidates, key.toLowerCase(), key)
 				for (const cand of directCandidates) {
+					assertActive()
 					try {
 						return await connectDirectCandidate({
 							label: 'direct connect',
@@ -709,14 +740,15 @@ export const connectBleClient = async ({
 						if (e instanceof BleConnectCancelledError) throw e
 						log('direct connect failed', { deviceId: cand, mac: key })
 						try {
-							await transport.disconnect()
-						} catch (e2) {}
+							await closeAttempt()
+						} catch (e2) { throw e2 }
 					}
 				}
 			}
 
 			if (isIOS) {
 				for (const cand of buildIosDirectCandidates(key, preferredDeviceId)) {
+					assertActive()
 					try {
 						return await connectDirectCandidate({
 							label: 'ios direct connect',
@@ -731,8 +763,8 @@ export const connectBleClient = async ({
 						if (e instanceof BleConnectCancelledError) throw e
 						log('ios direct connect failed', { deviceId: cand, mac: key })
 						try {
-							await transport.disconnect()
-						} catch (e2) {}
+							await closeAttempt()
+						} catch (e2) { throw e2 }
 					}
 				}
 			}
@@ -769,6 +801,7 @@ export const connectBleClient = async ({
 			}
 
 			log('discover connect try', { deviceId: hit.deviceId, mac: key })
+			assertActive()
 			await transport.connect({ deviceId: hit.deviceId })
 			assertConnectActive(epoch, key)
 			rememberBleDeviceId({ mac: key, platform, deviceId: hit.deviceId })
@@ -783,13 +816,13 @@ export const connectBleClient = async ({
 		} catch (e) {
 			if (e instanceof BleConnectCancelledError) {
 				try {
-					await transport.disconnect()
+					await closeAttempt()
 				} catch (e2) {}
 				return null
 			}
 			log('connect failed', { mac: key })
 			try {
-				await transport.disconnect()
+				await closeAttempt()
 			} catch (e2) {}
 			return null
 		} finally {
@@ -800,7 +833,14 @@ export const connectBleClient = async ({
 	inFlight.set(key, task)
 	try {
 		const entry = await task
-		if (entry) cache.set(key, entry)
+		if (entry && isCancelled?.()) {
+			await closeBleClientEntry(entry)
+			return null
+		}
+		if (entry) {
+			cache.set(key, entry)
+			observeEntryDisconnect(entry)
+		}
 		return entry
 	} finally {
 		if (inFlight.get(key) === task) {
