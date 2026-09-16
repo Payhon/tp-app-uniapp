@@ -1,5 +1,5 @@
 import { BmsProtocolError, parseFrame } from './frame'
-import { parseBootFrame } from './boot-frame'
+import { isExpectedBootResponse, parseBootFrame } from './boot-frame'
 import { BMS_BLE_NOTIFY_UUID, BMS_BLE_SERVICE_UUID, BMS_BLE_WRITE_UUID } from './ble-uuids'
 import type { BmsRequestOptions, LoggerLike } from './types'
 import { acquireBleDiscoveryLease } from '@/common/ble/ble-discovery-coordinator'
@@ -22,18 +22,27 @@ type UniBleDeviceInfo = { deviceId: string; name?: string; localName?: string; R
 type UniBleService = { uuid: string }
 type UniBleCharacteristic = {
 	uuid: string
-	properties?: { write?: boolean; writeNoResponse?: boolean; notify?: boolean }
+	properties?: { write?: boolean; writeNoResponse?: boolean; notify?: boolean; read?: boolean }
 }
 
-type ReqExpect = { functionCode: number; targetAddress: number; sourceAddress: number }
+type ReqExpect = { functionCode: number; targetAddress: number; sourceAddress: number; bootRequested?: number }
 
-function isExpectedBootSourceAddress(expectedSourceAddress: number, parsedSourceAddress: number): boolean {
-	const expect = expectedSourceAddress & 0xff
-	const actual = parsedSourceAddress & 0xff
-	if (expect === 0x00) return true
-	if (actual === expect) return true
-	// 仪表 OTA 通过 0xFC 透传，但不同 Bootloader 回包可能来自 0x01/0xFC/0xFD。
-	return expect === 0xfc && (actual === 0x01 || actual === 0xfd)
+type BleCapability = boolean | null
+
+type NativeWriteDiagnostic = {
+	attempt: number
+	writeType: 'write' | 'writeNoResponse'
+	outcome: 'pending' | 'success' | 'failure' | 'timeout' | 'late_success' | 'late_failure'
+	rttMs?: number
+	errCode?: unknown
+	errMsg?: string
+}
+
+type ReadProbeDiagnostic = {
+	outcome: 'started' | 'success' | 'failure' | 'timeout'
+	rttMs?: number
+	errCode?: unknown
+	errMsg?: string
 }
 
 function isBootRequestFrame(frameBytes: Uint8Array | ArrayLike<number>): boolean {
@@ -45,6 +54,15 @@ type PendingReq = {
 	reject: (err: unknown) => void
 	expect: ReqExpect
 	expectBoot?: boolean
+	bootFrameSubmitted?: boolean
+	writeFallbackUsed?: boolean
+	nativeWrites?: NativeWriteDiagnostic[]
+	readProbe?: ReadProbeDiagnostic
+	rxChunkCount?: number
+	rxByteCount?: number
+	lastRxHex?: string
+	unexpectedFrameCount?: number
+	lastUnexpectedFrameHex?: string
 	timer: ReturnType<typeof setTimeout>
 	createdAt: number
 }
@@ -84,12 +102,32 @@ function normalizeUuid(uuid: unknown): string {
 	return String(uuid || '').toLowerCase();
 }
 
+function readCapability(value: unknown): BleCapability {
+	return typeof value === 'boolean' ? value : null;
+}
+
+function nativeErrorDiagnostic(error: unknown): { errCode?: unknown; errMsg: string } {
+	const value = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+	return {
+		errCode: value.errCode ?? value.code,
+		errMsg: String(value.errMsg ?? value.message ?? error ?? '').slice(0, 240),
+	};
+}
+
+function isPropertyNotSupported(error: unknown): boolean {
+	const { errCode, errMsg } = nativeErrorDiagnostic(error);
+	const normalized = errMsg.toLowerCase();
+	return Number(errCode) === 10007 || normalized.includes('property not support');
+}
+
 function mkNotifyKey(deviceId: string, serviceId: string, characteristicId: string): string {
 	return `${deviceId}|${normalizeUuid(serviceId)}|${normalizeUuid(characteristicId)}`;
 }
 
 const notifyCallbacks = new Map<string, (value: ArrayBuffer) => void>();
 let notifyListenerInstalled = false;
+const connectionStateCallbacks = new Map<string, (connected: boolean) => void>();
+let connectionStateListenerInstalled = false;
 
 function ensureNotifyListener() {
 	if (notifyListenerInstalled) return;
@@ -106,13 +144,32 @@ function ensureNotifyListener() {
 	notifyListenerInstalled = true;
 }
 
+function ensureConnectionStateListener() {
+	if (connectionStateListenerInstalled) return;
+	const api = (uni as Record<string, any>).onBLEConnectionStateChange;
+	if (typeof api !== 'function') return;
+	api((res: { deviceId?: string; connected?: boolean }) => {
+		try {
+			const callback = connectionStateCallbacks.get(String(res?.deviceId || ''));
+			callback?.(res?.connected === true);
+		} catch (e) {
+			// ignore
+		}
+	});
+	connectionStateListenerInstalled = true;
+}
+
 class FrameCollector {
 	private _logger?: LoggerLike
 	private _buf: Uint8Array
+	private _invalidBootFrameCount: number
+	private _lastBootParseError: string
 
 	constructor({ logger }: { logger?: LoggerLike }) {
 		this._logger = logger;
 		this._buf = new Uint8Array(0);
+		this._invalidBootFrameCount = 0;
+		this._lastBootParseError = '';
 	}
 
 	push(arrayBufferOrBytes: ArrayBuffer | Uint8Array | ArrayLike<number>) {
@@ -130,6 +187,8 @@ class FrameCollector {
 
 	reset() {
 		this._buf = new Uint8Array(0);
+		this._invalidBootFrameCount = 0;
+		this._lastBootParseError = '';
 	}
 
 	snapshotHex({ headBytes = 24, tailBytes = 24 }: { headBytes?: number; tailBytes?: number } = {}) {
@@ -140,7 +199,14 @@ class FrameCollector {
 			len,
 			headHex: u8ToHex(head),
 			tailHex: u8ToHex(tail),
+			invalidBootFrameCount: this._invalidBootFrameCount,
+			lastBootParseError: this._lastBootParseError,
 		};
+	}
+
+	private _noteInvalidBootFrame(error: unknown) {
+		this._invalidBootFrameCount = Math.min(9999, this._invalidBootFrameCount + 1);
+		this._lastBootParseError = String(error instanceof Error ? error.message : error || '').slice(0, 240);
 	}
 
 	/**
@@ -247,38 +313,42 @@ class FrameCollector {
 	}
 
 	tryShiftOneBootFrame(): Uint8Array | null {
-		const bytes = this._buf;
-		if (bytes.length < 9) return null;
+		for (;;) {
+			const bytes = this._buf;
+			if (bytes.length < 9) return null;
 
-		let start = -1;
-		for (let i = 0; i < bytes.length; i += 1) {
-			if (bytes[i] === 0x55) {
-				start = i;
-				break;
+			let start = -1;
+			for (let i = 0; i < bytes.length; i += 1) {
+				if (bytes[i] === 0x55 && (i === 0 || bytes[i - 1] !== 0x7f)) {
+					start = i;
+					break;
+				}
 			}
-		}
-		if (start < 0) {
-			this._buf = bytes.slice(Math.max(0, bytes.length - 1));
-			return null;
-		}
-		if (start > 0) this._buf = bytes.slice(start);
+			if (start < 0) {
+				this._noteInvalidBootFrame('boot header not found');
+				this._buf = bytes.slice(Math.max(0, bytes.length - 1));
+				return null;
+			}
+			if (start > 0) this._buf = bytes.slice(start);
 
-		if (this._buf.length < 9) return null;
-		const dataLen = ((this._buf[4] & 0xff) << 8) | (this._buf[5] & 0xff);
-		const expectedLen = 1 + 1 + 1 + 1 + 2 + dataLen + 2 + 1;
-		if (expectedLen > this._buf.length) return null;
-		const candidate = this._buf.slice(0, expectedLen);
-		if (candidate[candidate.length - 1] !== 0xfd) {
-			this._buf = this._buf.slice(1);
-			return null;
-		}
-		try {
-			parseBootFrame(candidate);
-			this._buf = this._buf.slice(expectedLen);
-			return candidate;
-		} catch (e) {
-			this._buf = this._buf.slice(1);
-			return null;
+			if (this._buf.length < 9) return null;
+			const dataLen = (this._buf[4] << 8) | this._buf[5];
+			const expectedLen = dataLen + 9;
+			if (this._buf[3] < 0x50 || this._buf[3] > 0x54 || expectedLen > 2048) {
+				this._noteInvalidBootFrame(`invalid boot command/length: ${this._buf[3]}/${expectedLen}`);
+				this._buf = this._buf.slice(1);
+				continue;
+			}
+			if (expectedLen > this._buf.length) return null;
+			const candidate = this._buf.slice(0, expectedLen);
+			try {
+				parseBootFrame(candidate);
+				this._buf = this._buf.slice(expectedLen);
+				return candidate;
+			} catch (e) {
+				this._noteInvalidBootFrame(e);
+				this._buf = this._buf.slice(1);
+			}
 		}
 	}
 }
@@ -427,8 +497,11 @@ export class UniBleBmsTransport {
 	private _queue: Promise<Uint8Array>
 	private _rxLogCount: number
 	private _platform: string
-	private _writeSupportsNoResponse: boolean
-	private _writeSupportsResponse: boolean
+	private _writeSupportsNoResponse: BleCapability
+	private _writeSupportsResponse: BleCapability
+	private _notifySupportsRead: boolean
+	private _bootForceWriteNoResponse: boolean
+	private _bootReadProbeDisabled: boolean
 	private _preferWriteWithResponse: boolean
 	private _bleApiTimeoutMarker: { __bleApiTimeout: true }
 	private _iosWriteAckUnreliable: boolean
@@ -436,6 +509,52 @@ export class UniBleBmsTransport {
 	private _lastWriteTimeoutLogAt: number
 	private _bootSessionExclusive: boolean
 	private _cancelPendingConnect: (() => void) | null
+	private _disconnectTask: Promise<void> | null = null
+	private _disconnectError: unknown = null
+	private _nativeConnectSettled: Promise<void> | null = null
+	private _connectionGeneration = 0
+	private _disconnectListeners = new Set<() => void>()
+	private _notifyCallback = (value: ArrayBuffer) => this._onNotify(value)
+	private _connectionCallback = (connected: boolean) => this._onConnectionStateChange(connected)
+
+	onDisconnect(listener: () => void): () => void {
+		this._disconnectListeners.add(listener)
+		return () => { this._disconnectListeners.delete(listener) }
+	}
+	getDisconnectError(): unknown { return this._disconnectError }
+
+	cancelPendingRequest(): void {
+		this._connectionGeneration++
+		const pending = this._pending
+		if (!pending) return
+		clearTimeout(pending.timer)
+		this._pending = null
+		this._collector.reset()
+		pending.reject(new BmsProtocolError('BLE request canceled'))
+	}
+
+	private _detachConnectionRoutes(): void {
+		if (!this.deviceId) return
+		if (connectionStateCallbacks.get(this.deviceId) === this._connectionCallback) connectionStateCallbacks.delete(this.deviceId)
+		if (this.serviceId && this.notifyCharId) {
+			const key = mkNotifyKey(this.deviceId, this.serviceId, this.notifyCharId)
+			if (notifyCallbacks.get(key) === this._notifyCallback) notifyCallbacks.delete(key)
+		}
+	}
+
+	private _notifyDisconnected(): void {
+		this._connectionGeneration++
+		this._collector.reset()
+		this._writeSupportsResponse = null
+		this._writeSupportsNoResponse = null
+		this._notifySupportsRead = false
+		this._preferWriteWithResponse = false
+		this._bootForceWriteNoResponse = false
+		this._bootReadProbeDisabled = false
+		for (const listener of [...this._disconnectListeners]) {
+			try { listener() } catch (e) { /* one observer must not prevent cleanup */ }
+		}
+	}
 
 	constructor({
 		serviceUUID = BMS_BLE_SERVICE_UUID,
@@ -470,8 +589,11 @@ export class UniBleBmsTransport {
 		this._queue = Promise.resolve(new Uint8Array(0)); // 串行化 request，避免并发导致“回复帧串包”
 		this._rxLogCount = 0;
 		this._platform = '';
-		this._writeSupportsNoResponse = true;
-		this._writeSupportsResponse = true;
+		this._writeSupportsNoResponse = null;
+		this._writeSupportsResponse = null;
+		this._notifySupportsRead = false;
+		this._bootForceWriteNoResponse = false;
+		this._bootReadProbeDisabled = false;
 		this._preferWriteWithResponse = false;
 		this._bleApiTimeoutMarker = { __bleApiTimeout: true };
 		this._iosWriteAckUnreliable = false;
@@ -507,6 +629,7 @@ export class UniBleBmsTransport {
 			// #endif
 		}
 		ensureNotifyListener();
+		ensureConnectionStateListener();
 	}
 
 	async destroy() {
@@ -570,6 +693,9 @@ export class UniBleBmsTransport {
 		 * - 打开 notify
 		 */
 	async connect({ deviceId }: { deviceId: string }) {
+		if (this._disconnectTask) await this._disconnectTask;
+		this._disconnectTask = null;
+		this._disconnectError = null;
 		if (!deviceId) throw new BmsProtocolError('deviceId is required for BLE connect');
 		this._cancelPendingConnect?.();
 		let connectCancelled = false;
@@ -621,15 +747,19 @@ export class UniBleBmsTransport {
 		if (this.logger?.info) {
 			this.logger.info('[ble] connect()', { deviceId, serviceUUID: this.serviceUUID, writeCharUUID: this.writeCharUUID, notifyCharUUID: this.notifyCharUUID, platform });
 		}
+		let connectTimer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			await waitForConnect(uniAsyncHardTimeout('createBLEConnection', { deviceId }, { timeoutMs: isIOS ? 9000 : 6500 }));
+			const nativeConnect = uniAsync('createBLEConnection', { deviceId });
+			this._nativeConnectSettled = nativeConnect.then(() => undefined, () => undefined);
+			await waitForConnect(Promise.race([nativeConnect, new Promise<never>((_, reject) => {
+				connectTimer = setTimeout(() => reject(new BmsProtocolError('BLE connect timeout')), isIOS ? 9000 : 6500);
+			})]));
 		} catch (e) {
-			this.deviceId = null;
 			this._connected = false;
-			try {
-				await uniAsyncBestEffort('closeBLEConnection', { deviceId }, 800);
-			} catch (e2) {}
+			void this.disconnect().catch(() => undefined);
 			throw e;
+		} finally {
+			if (connectTimer) clearTimeout(connectTimer);
 		}
 		this._connected = true;
 
@@ -697,20 +827,26 @@ export class UniBleBmsTransport {
 		if (!notifyChar) throw new BmsProtocolError('Notify characteristic not found', { expect: this.notifyCharUUID, chars: chars.map((c) => c.uuid) });
 		const writeProps = writeChar.properties || {};
 		const notifyProps = notifyChar.properties || {};
-		this._writeSupportsNoResponse = writeProps.writeNoResponse !== false;
-		this._writeSupportsResponse = writeProps.write !== false;
-		this._preferWriteWithResponse = isIOS && this._writeSupportsResponse;
+		this._writeSupportsNoResponse = readCapability(writeProps.writeNoResponse);
+		this._writeSupportsResponse = readCapability(writeProps.write);
+		this._notifySupportsRead = notifyProps.read === true;
+		this._bootForceWriteNoResponse = false;
+		this._bootReadProbeDisabled = false;
+		this._preferWriteWithResponse = isIOS && this._writeSupportsResponse === true;
 		if (this.logger?.info) {
 			this.logger.info('[ble] write characteristic properties', {
 				deviceId,
 				writeCharacteristicId: writeChar.uuid,
 				properties: writeProps,
+				supportsWrite: this._writeSupportsResponse,
+				supportsWriteNoResponse: this._writeSupportsNoResponse,
 				preferWriteWithResponse: this._preferWriteWithResponse,
 			});
 			this.logger.info('[ble] notify characteristic properties', {
 				deviceId,
 				notifyCharacteristicId: notifyChar.uuid,
 				properties: notifyProps,
+				supportsRead: this._notifySupportsRead,
 			});
 		}
 
@@ -725,9 +861,10 @@ export class UniBleBmsTransport {
 			state: true,
 		}));
 
-		// 注册 notify 回调
-		const key = mkNotifyKey(deviceId, this.serviceId, this.notifyCharId);
-		notifyCallbacks.set(key, (ab) => this._onNotify(ab));
+			// 注册 notify 回调
+			const key = mkNotifyKey(deviceId, this.serviceId, this.notifyCharId);
+			notifyCallbacks.set(key, this._notifyCallback);
+			this._registerConnectionStateCallback();
 
 			this._rxLogCount = 0;
 			const postConnectWarmupMs = isIOS ? 820 : 220;
@@ -737,6 +874,7 @@ export class UniBleBmsTransport {
 			// 部分设备在打开 notify 后需要短暂准备时间，iOS App 端首包前需要更长稳定窗口
 			await waitForConnect(sleep(postConnectWarmupMs));
 			await waitForConnect(this._primeNotifyValue('connect_ready'));
+			if (!this._connected) throw new BmsProtocolError('BLE disconnected during connection warmup');
 
 			this.logger && this.logger.info && this.logger.info('[ble] connected:', { deviceId, serviceId: this.serviceId });
 			} finally {
@@ -745,23 +883,41 @@ export class UniBleBmsTransport {
 			}
 		}
 
-	async disconnect() {
+	disconnect(): Promise<void> {
+		if (!this._disconnectTask) this._disconnectTask = this._disconnectNative()
+		return this._disconnectTask
+	}
+
+	private async _disconnectNative(): Promise<void> {
 		const cancelPendingConnect = this._cancelPendingConnect;
 		this._cancelPendingConnect = null;
 		cancelPendingConnect?.();
+		const pending = this._pending;
+		if (pending) {
+			const command = pending.expectBoot ? pending.expect.functionCode & 0xff : undefined;
+			clearTimeout(pending.timer);
+			this._pending = null;
+			this._collector.reset();
+			pending.reject(new BmsProtocolError('BLE connection disconnected by app', {
+				bootFrameSubmitted: false,
+				command,
+				deviceId: this.deviceId,
+			}));
+		}
 		if (!this.deviceId) return;
 		const deviceId = this.deviceId;
-		try {
-			if (this.serviceId && this.notifyCharId) {
-				const key = mkNotifyKey(deviceId, this.serviceId, this.notifyCharId);
-				notifyCallbacks.delete(key);
-			}
-		} catch (e) {
-			// ignore
-		}
+		this._detachConnectionRoutes();
+		this._connected = false;
+		this._notifyDisconnected();
 
 		try {
+			// A late native create must finish before its close; never close a subsequent connection.
+			await this._nativeConnectSettled;
 			await uniAsync('closeBLEConnection', { deviceId });
+			} catch (e) {
+				this._disconnectError = e;
+				const diagnostic = nativeErrorDiagnostic(e);
+				if (Number(diagnostic.errCode) !== 10006 && !/no connection|not connected/i.test(diagnostic.errMsg)) throw e;
 			} finally {
 				this._connected = false;
 				this.deviceId = null;
@@ -769,15 +925,47 @@ export class UniBleBmsTransport {
 				this.writeCharId = null;
 				this.notifyCharId = null;
 				this._platform = '';
-				this._writeSupportsNoResponse = true;
-				this._writeSupportsResponse = true;
+				this._writeSupportsNoResponse = null;
+				this._writeSupportsResponse = null;
+				this._notifySupportsRead = false;
+				this._bootForceWriteNoResponse = false;
+				this._bootReadProbeDisabled = false;
 				this._preferWriteWithResponse = false;
 				this._iosWriteAckUnreliable = false;
 				this._iosWriteTimeoutLogged = false;
 				this._bootSessionExclusive = false;
 				this._lastWriteTimeoutLogAt = 0;
-				}
 			}
+		}
+
+		_registerConnectionStateCallback() {
+			if (!this.deviceId) return;
+			ensureConnectionStateListener();
+			connectionStateCallbacks.set(this.deviceId, this._connectionCallback);
+		}
+
+		_onConnectionStateChange(connected: boolean) {
+			this._connected = connected;
+			if (connected) return;
+			const pending = this._pending;
+			if (!pending) {
+				this._detachConnectionRoutes();
+				this._notifyDisconnected();
+				return;
+			}
+			const command = pending.expectBoot ? pending.expect.functionCode & 0xff : undefined;
+			const finalizeSubmitted = command === 0x54 && pending.bootFrameSubmitted === true;
+			clearTimeout(pending.timer);
+			this._pending = null;
+			this._collector.reset();
+			pending.reject(new BmsProtocolError('BLE connection disconnected', {
+				bootFrameSubmitted: finalizeSubmitted,
+				command,
+				deviceId: this.deviceId,
+			}));
+			this._detachConnectionRoutes();
+			this._notifyDisconnected();
+		}
 
 		_getWriteApiSoftTimeoutMs() {
 			if (this._platform !== 'ios') return 4000;
@@ -832,8 +1020,16 @@ export class UniBleBmsTransport {
 		}
 
 		_onNotify(arrayBuffer: ArrayBuffer) {
+			const expectBoot = this._bootSessionExclusive || !!this._pending?.expectBoot;
+			const pending = this._pending;
+			if (pending?.expectBoot) {
+				const chunk = new Uint8Array(arrayBuffer);
+				pending.rxChunkCount = Math.min(9999, (pending.rxChunkCount || 0) + 1);
+				pending.rxByteCount = Math.min(1_000_000, (pending.rxByteCount || 0) + chunk.length);
+				pending.lastRxHex = u8ToHex(chunk.slice(0, Math.min(32, chunk.length)));
+			}
 			try {
-				if (this.logger?.debug && this._rxLogCount < 10) {
+				if (!expectBoot && this.logger?.debug && this._rxLogCount < 10) {
 					this._rxLogCount += 1;
 					const u8 = new Uint8Array(arrayBuffer);
 					this.logger.debug(`[ble] rx chunk len=${u8.length} head=${u8ToHex(u8.slice(0, Math.min(24, u8.length)))}`);
@@ -841,23 +1037,29 @@ export class UniBleBmsTransport {
 			} catch (e) {}
 			this._collector.push(arrayBuffer);
 
-			const expectBoot = !!this._pending?.expectBoot;
 			while (true) {
 				const frame = expectBoot ? this._collector.tryShiftOneBootFrame() : this._collector.tryShiftOneValidFrame();
 				if (!frame) break;
+				this._tryResolvePending(frame);
 				try {
 					if (this.logger?.debug) {
 						this.logger.debug(`[ble] rx frame len=${frame.length} hex=${u8ToHex(frame)}`);
 					}
 				} catch (e) {}
-				this._tryResolvePending(frame);
 			}
 		}
 
 		_tryResolvePending(frameBytes: Uint8Array) {
 			if (!this._pending) return;
-			const { expect, resolve, timer, expectBoot } = this._pending;
-			if (!this._isExpectedResponse(frameBytes, expect, expectBoot)) return;
+			const pending = this._pending;
+			const { expect, resolve, timer, expectBoot } = pending;
+			if (!this._isExpectedResponse(frameBytes, expect, expectBoot)) {
+				if (expectBoot) {
+					pending.unexpectedFrameCount = Math.min(9999, (pending.unexpectedFrameCount || 0) + 1);
+					pending.lastUnexpectedFrameHex = u8ToHex(frameBytes.slice(0, Math.min(32, frameBytes.length)));
+				}
+				return;
+			}
 			clearTimeout(timer);
 			this._pending = null;
 			resolve(frameBytes);
@@ -866,10 +1068,7 @@ export class UniBleBmsTransport {
 		_isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect, expectBoot?: boolean): boolean {
 			try {
 				if (expectBoot) {
-					const parsed = parseBootFrame(frameBytes);
-					if (parsed.targetAddress !== expect.targetAddress) return false;
-					if (parsed.command !== expect.functionCode) return false;
-					return isExpectedBootSourceAddress(expect.sourceAddress, parsed.sourceAddress);
+					return isExpectedBootResponse(frameBytes, expect);
 				}
 				const parsed = parseFrame(frameBytes);
 				if (parsed.type === 'error') {
@@ -896,12 +1095,159 @@ export class UniBleBmsTransport {
 				chunkIntervalMs = this.writeChunkIntervalMs,
 				writeWithResponse = false,
 				writeApiTimeoutMs,
-			}: { chunkSize?: number; chunkIntervalMs?: number; writeWithResponse?: boolean; writeApiTimeoutMs?: number } = {}
+				isRequestActive,
+			}: { chunkSize?: number; chunkIntervalMs?: number; writeWithResponse?: boolean; writeApiTimeoutMs?: number; isRequestActive?: () => boolean } = {}
 		): Promise<void> {
 			if (!this._connected) throw new BmsProtocolError('BLE is not connected');
+			const generation = this._connectionGeneration;
 			if (!this.deviceId || !this.serviceId || !this.writeCharId) throw new BmsProtocolError('BLE characteristic not ready');
 
 			const bytes = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
+			const isBootDataFrame = isBootRequestFrame(bytes) && bytes[3] === 0x53;
+			if (isBootDataFrame && bytes.length > chunkSize) {
+				throw new BmsProtocolError(`boot_ble_frame_exceeds_mtu:${bytes.length}/${chunkSize}`);
+			}
+			if (this._bootSessionExclusive && isBootRequestFrame(bytes)) {
+				const pending = this._pending;
+				const command = bytes[3] & 0xff;
+				const sequence = command === 0x53 && bytes.length >= 8 ? ((bytes[6] << 8) | bytes[7]) : undefined;
+				let directWriteFallbackUsed = false;
+				let directNativeWrites: NativeWriteDiagnostic[] = [];
+				const belongsToPending = () => {
+					if (!pending) return isRequestActive ? isRequestActive() : true;
+					if (this._pending !== pending) return false;
+					return isRequestActive
+						? isRequestActive()
+						: pending.expectBoot === true && pending.expect.functionCode === command;
+				};
+				const rejectPendingWrite = (error: unknown): BmsProtocolError | null => {
+					if (!pending || !belongsToPending()) return null;
+					clearTimeout(pending.timer);
+					this._pending = null;
+					const nativeError = error && typeof error === 'object'
+						? error as Record<string, unknown>
+						: { error: String(error || '') };
+					const writeError = new BmsProtocolError('BLE OTA write failed', {
+						...nativeError,
+						...nativeErrorDiagnostic(error),
+						bootFrameSubmitted: pending.bootFrameSubmitted === true,
+						command,
+						sequence,
+						nativeWrites: pending.nativeWrites,
+					});
+					pending.reject(writeError);
+					this.logger?.error?.('[ble] OTA whole-frame write failed', writeError);
+					return writeError;
+				};
+				const withResponse = this._writeSupportsResponse === true && (this._platform === 'android'
+					? !this._bootForceWriteNoResponse
+					: writeWithResponse || this._preferWriteWithResponse);
+				const initialWriteType: NativeWriteDiagnostic['writeType'] = withResponse ? 'write' : 'writeNoResponse';
+				const submitWrite = (writeType: NativeWriteDiagnostic['writeType']) => {
+					if (!belongsToPending()) return;
+					const startedAt = Date.now();
+					const previousWrites = pending?.nativeWrites || directNativeWrites;
+					const diagnostic: NativeWriteDiagnostic = {
+						attempt: previousWrites.length + 1,
+						writeType,
+						outcome: 'pending',
+					};
+					const nextWrites = [...previousWrites.slice(-1), diagnostic];
+					if (pending) pending.nativeWrites = nextWrites;
+					else directNativeWrites = nextWrites;
+					let callbackFinished = false;
+					let callbackTimedOut = false;
+					const callbackTimer = setTimeout(() => {
+						if (callbackFinished) return;
+						callbackTimedOut = true;
+						diagnostic.outcome = 'timeout';
+						diagnostic.rttMs = Date.now() - startedAt;
+						if (belongsToPending()) {
+							this.logger?.warn?.('[ble] OTA native write callback timeout', {
+								command,
+								sequence,
+								attempt: diagnostic.attempt,
+								writeType,
+								nativeRttMs: diagnostic.rttMs,
+							});
+						}
+					}, 300);
+
+					const finishSuccess = () => {
+						if (callbackFinished) return;
+						callbackFinished = true;
+						clearTimeout(callbackTimer);
+						diagnostic.outcome = callbackTimedOut || !belongsToPending() ? 'late_success' : 'success';
+						diagnostic.rttMs = Date.now() - startedAt;
+					};
+					const finishFailure = (error: unknown) => {
+						if (callbackFinished) return;
+						callbackFinished = true;
+						clearTimeout(callbackTimer);
+						const active = belongsToPending();
+						const errorDiagnostic = nativeErrorDiagnostic(error);
+						diagnostic.outcome = callbackTimedOut || !active ? 'late_failure' : 'failure';
+						diagnostic.rttMs = Date.now() - startedAt;
+						diagnostic.errCode = errorDiagnostic.errCode;
+						diagnostic.errMsg = errorDiagnostic.errMsg;
+						if (!active) {
+							this.logger?.warn?.('[ble] OTA late native write failure ignored after ACK', {
+								command,
+								sequence,
+								...diagnostic,
+							});
+							return;
+						}
+						if (
+							this._platform === 'android' &&
+							writeType === 'write' &&
+							isPropertyNotSupported(error) &&
+							(pending ? pending.writeFallbackUsed !== true : !directWriteFallbackUsed) &&
+							this._writeSupportsNoResponse !== false
+						) {
+							if (pending) pending.writeFallbackUsed = true;
+							else directWriteFallbackUsed = true;
+							this._bootForceWriteNoResponse = true;
+							this.logger?.warn?.('[ble] OTA write unsupported, fallback to writeNoResponse', {
+								command,
+								sequence,
+								...errorDiagnostic,
+							});
+							submitWrite('writeNoResponse');
+							return;
+						}
+						rejectPendingWrite(error);
+					};
+
+					try {
+						uni.writeBLECharacteristicValue({
+							deviceId: this.deviceId,
+							serviceId: this.serviceId,
+							characteristicId: this.writeCharId,
+							...(writeType === 'write'
+								? (this._platform === 'android' ? { writeType: 'write' } : {})
+								: { writeType: 'writeNoResponse' }),
+							value: toArrayBuffer(bytes),
+							success: finishSuccess,
+							fail: finishFailure,
+						});
+					} catch (error) {
+						finishFailure(error);
+					}
+				};
+
+				// ACK 是推进 OTA 的唯一依据；原生成功回调只用于诊断。
+				this._lastTxAt = Date.now();
+				if (pending && belongsToPending() && command === 0x54) pending.bootFrameSubmitted = true;
+				submitWrite(initialWriteType);
+				this.logger?.debug?.('[ble] OTA whole-frame write', {
+					sentAt: this._lastTxAt,
+					frameLen: bytes.length,
+					writeCapacity: chunkSize,
+					writeType: initialWriteType,
+				});
+				return;
+			}
 			const hasExplicitWriteApiTimeout = Number.isFinite(writeApiTimeoutMs) && Number(writeApiTimeoutMs) > 0;
 			const effectiveWriteApiTimeoutMs =
 				hasExplicitWriteApiTimeout
@@ -912,13 +1258,21 @@ export class UniBleBmsTransport {
 			const effectiveChunkWriteApiTimeoutMs = hasExplicitWriteApiTimeout
 				? Math.max(1, Math.floor(Math.max(1, effectiveWriteApiTimeoutMs - totalChunkIntervalMs) / chunkCount))
 				: effectiveWriteApiTimeoutMs;
+			if (isBootDataFrame && this.logger?.debug) {
+				this.logger.debug('[ble] OTA data write config', {
+					frameLen: bytes.length,
+					attPayloadSize: chunkSize,
+					writeWithResponse: !!writeWithResponse && this._writeSupportsResponse === true,
+				});
+			}
 
 			for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+				if (generation !== this._connectionGeneration) throw new BmsProtocolError('BLE connection changed');
+				if (isRequestActive && !isRequestActive()) return;
 				const chunk = bytes.slice(offset, Math.min(bytes.length, offset + chunkSize));
 				const shouldWriteWithResponse =
 					writeWithResponse ||
-					(this._preferWriteWithResponse && this._writeSupportsResponse && !this._writeSupportsNoResponse)
-					|| (this._preferWriteWithResponse && this._writeSupportsResponse);
+					(this._preferWriteWithResponse && this._writeSupportsResponse === true);
 				try {
 					const writeRes = await uniAsyncSoftTimeout<Record<string, unknown> | { __bleApiTimeout: true }>('writeBLECharacteristicValue', {
 						deviceId: this.deviceId,
@@ -940,6 +1294,8 @@ export class UniBleBmsTransport {
 						});
 					}
 				} catch (e: any) {
+					if (generation !== this._connectionGeneration) throw e;
+					if (isRequestActive && !isRequestActive()) return;
 					const code = e?.code
 					const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
 					if (code === 10007 || msg.includes('property not support') || msg.includes('not support')) {
@@ -974,27 +1330,66 @@ export class UniBleBmsTransport {
 			{ writeWithResponse = false }: { writeWithResponse?: boolean } = {}
 		): Promise<void> {
 			const bytes = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes);
+			const generation = this._connectionGeneration;
 			const now = Date.now();
 			const delta = now - this._lastTxAt;
 			if (delta < this.minFrameIntervalMs) await sleep(this.minFrameIntervalMs - delta);
-			if (this.logger?.debug) this.logger.debug(`[ble] tx frame len=${bytes.length} hex=${u8ToHex(bytes)}`);
-			await this._writeFrameBytes(bytes, { writeWithResponse });
-			this._lastTxAt = Date.now();
+			if (generation !== this._connectionGeneration) throw new BmsProtocolError('BLE connection changed');
+			const expectBoot = isBootRequestFrame(bytes);
+			if (!expectBoot) this.logger?.debug?.(`[ble] tx frame len=${bytes.length} hex=${u8ToHex(bytes)}`);
+			const writeTask = this._writeFrameBytes(bytes, { writeWithResponse });
+			if (expectBoot) this.logger?.debug?.(`[ble] tx frame len=${bytes.length} hex=${u8ToHex(bytes)}`);
+			await writeTask;
+			if (!this._bootSessionExclusive || !isBootRequestFrame(bytes)) this._lastTxAt = Date.now();
 		}
 
-	async setMtu(mtu: number): Promise<number> {
+	async setMtu(mtu: number): Promise<number | null> {
 		if (!this.deviceId) throw new BmsProtocolError('deviceId is required for setMtu');
 		const api = (uni as Record<string, any>)?.setBLEMTU;
 		if (typeof api !== 'function') throw new BmsProtocolError('setBLEMTU not supported');
-		const desired = Math.max(23, Math.floor(mtu));
-		const res = await uniAsync<{ mtu?: number }>('setBLEMTU', { deviceId: this.deviceId, mtu: desired });
-		const actual = Number.isFinite(res?.mtu as number) ? Number(res?.mtu) : desired;
-		const attPayload = Math.max(20, actual - 3);
-		this.writeChunkSize = attPayload;
+		const desired = Math.min(512, Math.max(23, Math.floor(mtu)));
+		const res = await uniAsyncHardTimeout<{ mtu?: number }>(
+			'setBLEMTU',
+			{ deviceId: this.deviceId, mtu: desired },
+			{ timeoutMs: 3000 }
+		);
+		const actual = Number.isInteger(res?.mtu) && Number(res.mtu) >= 23 ? Number(res.mtu) : null;
+		if (actual != null) this.writeChunkSize = actual - 3;
+		if (this.logger?.info) {
+			this.logger.info('[ble] MTU ready', {
+				requestedMtu: desired,
+				actualMtu: actual,
+				actualMtuSource: actual == null ? 'unknown' : 'reported',
+				writeCapacity: this.writeChunkSize,
+			});
+		}
 		return actual;
 	}
 
+	supportsWriteWithResponse(): boolean {
+		return this._writeSupportsResponse === true;
+	}
+
+	async getRssi(): Promise<number | null> {
+		if (!this.deviceId) return null;
+		const api = (uni as Record<string, any>)?.getBLEDeviceRSSI;
+		if (typeof api !== 'function') return null;
+		const res = await uniAsyncHardTimeout<{ RSSI?: number }>(
+			'getBLEDeviceRSSI',
+			{ deviceId: this.deviceId },
+			{ timeoutMs: 1000 }
+		);
+		return Number.isFinite(res?.RSSI as number) ? Number(res.RSSI) : null;
+	}
+
 	async beginExclusiveBootSession({ drainTimeoutMs = 1200 }: { drainTimeoutMs?: number } = {}): Promise<void> {
+		if (this._bootSessionExclusive) throw new BmsProtocolError('BLE transport is already reserved for OTA');
+		if (this._writeSupportsResponse !== true && this._writeSupportsNoResponse === false) {
+			throw new BmsProtocolError('BLE write characteristic does not support write or writeNoResponse');
+		}
+		this._registerConnectionStateCallback();
+		this._bootForceWriteNoResponse = false;
+		this._bootReadProbeDisabled = false;
 		this._bootSessionExclusive = true;
 		const pending = this._pending;
 		if (pending) {
@@ -1017,12 +1412,36 @@ export class UniBleBmsTransport {
 			throw new BmsProtocolError('BLE request queue did not drain for OTA');
 		}
 		this._queue = Promise.resolve(new Uint8Array(0));
-		if (this.logger?.info) this.logger.info('[ble] OTA exclusive session ready');
+		this._collector.reset();
+		if (this.logger?.info) {
+			this.logger.info('[ble] OTA exclusive session ready', {
+				platform: this._platform,
+				deviceId: this.deviceId,
+				writeCharacteristicId: this.writeCharId,
+				notifyCharacteristicId: this.notifyCharId,
+				supportsWrite: this._writeSupportsResponse,
+				supportsWriteNoResponse: this._writeSupportsNoResponse,
+				supportsNotifyRead: this._notifySupportsRead,
+				writeCapabilitySource:
+					this._writeSupportsResponse == null && this._writeSupportsNoResponse == null
+						? 'legacy-unknown'
+						: 'reported',
+			});
+		}
 	}
 
 	endExclusiveBootSession(): void {
 		if (!this._bootSessionExclusive) return;
+		const pending = this._pending;
+		if (pending?.expectBoot) {
+			clearTimeout(pending.timer);
+			this._pending = null;
+			pending.reject(new BmsProtocolError('BLE OTA session ended'));
+		}
 		this._bootSessionExclusive = false;
+		this._bootForceWriteNoResponse = false;
+		this._bootReadProbeDisabled = false;
+		this._collector.reset();
 		if (this.logger?.info) this.logger.info('[ble] OTA exclusive session ended');
 	}
 
@@ -1034,6 +1453,7 @@ export class UniBleBmsTransport {
 		frameBytes: Uint8Array | ArrayLike<number>,
 		{
 			timeoutMs = this.requestTimeoutMs,
+			bootAckGraceMs,
 			writeApiTimeoutMs,
 			suppressTimeoutLog = false,
 			disableAlternateWriteRetry = false,
@@ -1042,17 +1462,20 @@ export class UniBleBmsTransport {
 		if (this._bootSessionExclusive && !isBootRequestFrame(frameBytes)) {
 			return Promise.reject(new BmsProtocolError('BLE transport is reserved for OTA'));
 		}
+		const generation = this._connectionGeneration;
 		this._queue = this._queue
 				.catch(() => new Uint8Array(0))
-				.then(() =>
-					this._requestWithFallback(frameBytes, {
+				.then(() => {
+					if (generation !== this._connectionGeneration) throw new BmsProtocolError('BLE connection changed');
+					return this._requestWithFallback(frameBytes, {
 						timeoutMs,
+						bootAckGraceMs,
 						writeApiTimeoutMs,
 						writeWithResponse: false,
 					suppressTimeoutLog,
 					disableAlternateWriteRetry,
 				})
-			);
+			});
 		return this._queue;
 	}
 
@@ -1060,6 +1483,7 @@ export class UniBleBmsTransport {
 		frameBytes: Uint8Array | ArrayLike<number>,
 		{
 			timeoutMs = this.requestTimeoutMs,
+			bootAckGraceMs,
 			writeApiTimeoutMs,
 			suppressTimeoutLog = false,
 			disableAlternateWriteRetry = false,
@@ -1068,17 +1492,20 @@ export class UniBleBmsTransport {
 		if (this._bootSessionExclusive && !isBootRequestFrame(frameBytes)) {
 			return Promise.reject(new BmsProtocolError('BLE transport is reserved for OTA'));
 		}
+		const generation = this._connectionGeneration;
 		this._queue = this._queue
 				.catch(() => new Uint8Array(0))
-				.then(() =>
-					this._requestWithFallback(frameBytes, {
+				.then(() => {
+					if (generation !== this._connectionGeneration) throw new BmsProtocolError('BLE connection changed');
+					return this._requestWithFallback(frameBytes, {
 						timeoutMs,
+						bootAckGraceMs,
 						writeApiTimeoutMs,
 						writeWithResponse: true,
 					suppressTimeoutLog,
 					disableAlternateWriteRetry,
 				})
-			);
+			});
 		return this._queue;
 	}
 
@@ -1106,38 +1533,44 @@ export class UniBleBmsTransport {
 		frameBytes: Uint8Array | ArrayLike<number>,
 		{
 			timeoutMs,
+			bootAckGraceMs,
 			writeApiTimeoutMs,
 			writeWithResponse,
 			suppressTimeoutLog,
 			disableAlternateWriteRetry,
 		}: {
 			timeoutMs: number
+			bootAckGraceMs?: number
 			writeApiTimeoutMs?: number
 			writeWithResponse?: boolean
 			suppressTimeoutLog?: boolean
 			disableAlternateWriteRetry?: boolean
 		}
 	): Promise<Uint8Array> {
+		const generation = this._connectionGeneration;
 		if (this._bootSessionExclusive && !isBootRequestFrame(frameBytes)) {
 			throw new BmsProtocolError('BLE transport is reserved for OTA');
 		}
 		try {
 			return await this._requestSerial(frameBytes, {
 				timeoutMs,
+				bootAckGraceMs,
 				writeApiTimeoutMs,
 				writeWithResponse,
 				suppressTimeoutLog,
 			});
 		} catch (e) {
+			if (generation !== this._connectionGeneration) throw e;
 			const msg = String((e as any)?.message || (e as any)?.errMsg || e || '');
 			const canRetryWithAlternateWriteMode =
 				this._platform === 'ios' &&
+				!isBootRequestFrame(frameBytes) &&
 				!writeWithResponse &&
 				!suppressTimeoutLog &&
 				!disableAlternateWriteRetry &&
 				msg.includes('BLE request timeout') &&
-				this._writeSupportsResponse &&
-				this._writeSupportsNoResponse;
+				this._writeSupportsResponse === true &&
+				this._writeSupportsNoResponse === true;
 			if (!canRetryWithAlternateWriteMode) throw e;
 			if (this.logger?.warn) {
 				this.logger.warn('[ble] request timeout, retry with alternate write mode', {
@@ -1149,6 +1582,7 @@ export class UniBleBmsTransport {
 			try {
 				await this._primeNotifyValue('timeout_retry');
 				await sleep(120);
+				if (generation !== this._connectionGeneration) throw new BmsProtocolError('BLE connection changed');
 				return await this._requestSerial(frameBytes, {
 					timeoutMs,
 					writeApiTimeoutMs,
@@ -1156,7 +1590,7 @@ export class UniBleBmsTransport {
 					suppressTimeoutLog,
 				});
 			} finally {
-				this._preferWriteWithResponse = prev;
+				if (generation === this._connectionGeneration) this._preferWriteWithResponse = prev;
 			}
 		}
 	}
@@ -1165,10 +1599,11 @@ export class UniBleBmsTransport {
 			frameBytes: Uint8Array | ArrayLike<number>,
 			{
 				timeoutMs,
+				bootAckGraceMs = 0,
 				writeApiTimeoutMs,
 				writeWithResponse,
 				suppressTimeoutLog,
-			}: { timeoutMs: number; writeApiTimeoutMs?: number; writeWithResponse?: boolean; suppressTimeoutLog?: boolean }
+			}: BmsRequestOptions & { timeoutMs: number; writeWithResponse?: boolean }
 		): Promise<Uint8Array> {
 		if (this._pending) {
 			const ageMs = Date.now() - (this._pending.createdAt || 0);
@@ -1203,11 +1638,12 @@ export class UniBleBmsTransport {
 			throw new BmsProtocolError('BLE transport is reserved for OTA');
 		}
 
-		const expect = expectBoot
+		const expect: ReqExpect = expectBoot
 			? {
 					functionCode: req[3] & 0xff,
 					targetAddress: req[1] & 0xff, // host addr
 					sourceAddress: req[2] & 0xff, // slave addr
+					bootRequested: req[3] === 0x53 && req.length >= 11 ? ((req[6] << 8) | req[7]) + 1 : undefined,
 				}
 			: {
 					functionCode: req[4] & 0xff,
@@ -1217,35 +1653,108 @@ export class UniBleBmsTransport {
 				};
 
 		const deferred = defer<Uint8Array>();
+		const graceMs = expect.bootRequested != null ? Math.max(0, bootAckGraceMs) : 0;
 		// 清空上一次请求遗留的残包，避免超时后的半帧污染下一次请求。
 		this._collector.reset();
 		const timer = setTimeout(() => {
-			if (this._pending && this._pending.reject === deferred.reject) this._pending = null;
+			const pending = this._pending;
+			if (pending?.reject !== deferred.reject) return;
+			const timeoutDiagnostic = {
+				...this._collector.snapshotHex(),
+				rxChunkCount: pending.rxChunkCount || 0,
+				rxByteCount: pending.rxByteCount || 0,
+				lastRxHex: pending.lastRxHex || '',
+				unexpectedFrameCount: pending.unexpectedFrameCount || 0,
+				lastUnexpectedFrameHex: pending.lastUnexpectedFrameHex || '',
+				nativeWrites: (pending.nativeWrites || []).map((item) => ({ ...item })),
+				readProbe: pending.readProbe ? { ...pending.readProbe } : undefined,
+			};
+			this._pending = null;
 			try {
 				if (!suppressTimeoutLog && this.logger?.warn) {
-					this.logger.warn('[ble] request timeout snapshot', { expect, ...this._collector.snapshotHex() });
+					this.logger.warn('[ble] request timeout snapshot', { expect, ...timeoutDiagnostic });
 				}
 			} catch (e) {}
 			this._collector.reset();
-			deferred.reject(new BmsProtocolError(`BLE request timeout after ${timeoutMs}ms`, { expect }));
-		}, timeoutMs);
-		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot, createdAt: Date.now() };
+			deferred.reject(new BmsProtocolError(`BLE request timeout after ${timeoutMs}ms + ${graceMs}ms grace`, {
+				expect,
+				bootAckGraceMs: graceMs,
+				...timeoutDiagnostic,
+			}));
+		}, timeoutMs + graceMs);
+		this._pending = {
+			resolve: deferred.resolve,
+			reject: deferred.reject,
+			expect,
+			timer,
+			expectBoot,
+			createdAt: Date.now(),
+			nativeWrites: [],
+			rxChunkCount: 0,
+			rxByteCount: 0,
+			unexpectedFrameCount: 0,
+		};
 		const respPromise = deferred.promise;
+		const pendingRef = this._pending;
+		if (
+			this._platform === 'android' &&
+			expectBoot &&
+			expect.functionCode === 0x53 &&
+			graceMs > 0 &&
+			this._notifySupportsRead &&
+			!this._bootReadProbeDisabled
+		) {
+			setTimeout(() => {
+				if (this._pending !== pendingRef || !this.deviceId || !this.serviceId || !this.notifyCharId) return;
+				const startedAt = Date.now();
+				pendingRef.readProbe = { outcome: 'started' };
+				this.logger?.debug?.('[ble] OTA probe read notify', { requested: expect.bootRequested, ms: timeoutMs });
+				void uniAsyncSoftTimeout<Record<string, unknown> | { __bleApiTimeout: true }>('readBLECharacteristicValue', {
+					deviceId: this.deviceId,
+					serviceId: this.serviceId,
+					characteristicId: this.notifyCharId,
+				}, {
+					timeoutMs: Math.max(1, Math.min(180, graceMs || 180)),
+					timeoutValue: this._bleApiTimeoutMarker,
+				}).then((readRes) => {
+					const timedOut = (readRes as { __bleApiTimeout?: true })?.__bleApiTimeout === true;
+					pendingRef.readProbe = {
+						outcome: timedOut ? 'timeout' : 'success',
+						rttMs: Date.now() - startedAt,
+					};
+				}, (error) => {
+					const diagnostic = nativeErrorDiagnostic(error);
+					pendingRef.readProbe = {
+						outcome: 'failure',
+						rttMs: Date.now() - startedAt,
+						...diagnostic,
+					};
+					if (isPropertyNotSupported(error)) this._bootReadProbeDisabled = true;
+				});
+			}, timeoutMs);
+		}
+		// 普通请求的写 API 尚未返回时，OTA 也可能取消它；先挂接拒绝处理。
+		void respPromise.catch(() => undefined);
 
 		try {
-			if (this.logger?.debug) this.logger.debug(`[ble] tx frame len=${req.length} hex=${u8ToHex(req)}`);
-			await this._writeFrameBytes(req, { writeWithResponse: !!writeWithResponse, writeApiTimeoutMs });
-			this._lastTxAt = Date.now();
+			if (!expectBoot) this.logger?.debug?.(`[ble] tx frame len=${req.length} hex=${u8ToHex(req)}`);
+			const writeTask = this._writeFrameBytes(req, {
+				writeWithResponse: !!writeWithResponse, writeApiTimeoutMs,
+				isRequestActive: () => this._pending === pendingRef,
+			});
+			if (expectBoot) this.logger?.debug?.(`[ble] tx frame len=${req.length} hex=${u8ToHex(req)}`);
+			// 取消/超时立即释放队列；普通 ACK 仍保留原来的写 API 等待语义。
+			await Promise.race([writeTask, respPromise.then(() => writeTask)]);
+			if (!this._bootSessionExclusive || !expectBoot) this._lastTxAt = Date.now();
 
 			// 某些设备/运行时不会主动推送 notify，需要通过 read 触发 value change（特征值含 Read 属性时）
-			const pendingRef = this._pending;
-			void (async () => {
+			if (!expectBoot) void (async () => {
 				const delays = [220, 520, 900, 1400, 2100, 3000, 4200, 5600, 7200, 9000, 11000, 13000];
 				for (let idx = 0; idx < delays.length; idx += 1) {
 					const ms = delays[idx];
 					const prev = idx === 0 ? 0 : delays[idx - 1];
 					await sleep(ms - prev);
-					if (!this._pending || this._pending !== pendingRef) return;
+					if (this._bootSessionExclusive || !this._pending || this._pending !== pendingRef) return;
 					if (!this.deviceId || !this.serviceId || !this.notifyCharId) return;
 					try {
 						if (this.logger?.debug) this.logger.debug('[ble] probe read notify', { ms });
@@ -1269,9 +1778,11 @@ export class UniBleBmsTransport {
 			return await respPromise;
 		} catch (e) {
 			const pending = this._pending;
-			if (pending) clearTimeout(pending.timer);
-			this._pending = null;
-			this._collector.reset();
+			if (pending?.reject === deferred.reject) {
+				clearTimeout(pending.timer);
+				this._pending = null;
+				this._collector.reset();
+			}
 			throw e;
 		}
 	}

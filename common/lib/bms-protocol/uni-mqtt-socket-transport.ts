@@ -1,5 +1,5 @@
 import { BMS_FUNC, BmsProtocolError, buildReadFrame, parseFrame } from './frame'
-import { parseBootFrame } from './boot-frame'
+import { isBootFrameBytes, isExpectedBootResponse, parseBootFrame } from './boot-frame'
 import type { BmsRequestOptions } from './types'
 
 type LoggerLike = {
@@ -13,20 +13,13 @@ export type MqttSocketResponseExpectation = {
 	functionCode: number
 	targetAddress: number
 	sourceAddress: number
+	bootRequested?: number
 	readByteCount?: number
 	socketStartAddress?: number
 	socketQuantity?: number
 }
 
 type ReqExpect = MqttSocketResponseExpectation
-
-function isExpectedBootSourceAddress(expectedSourceAddress: number, parsedSourceAddress: number): boolean {
-	const expect = expectedSourceAddress & 0xff
-	const actual = parsedSourceAddress & 0xff
-	if (expect === 0x00) return true
-	if (actual === expect) return true
-	return expect === 0xfc && (actual === 0x01 || actual === 0xfd)
-}
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms))
@@ -224,14 +217,7 @@ export function isExpectedMqttSocketResponse(
 ): boolean {
 	try {
 		if (expectBoot) {
-			const parsed = parseBootFrame(frameBytes)
-			if (parsed.targetAddress !== expect.targetAddress) return false
-			const expectedCommand = expect.functionCode & 0xff
-			const actualCommand = parsed.command & 0xff
-			if (actualCommand !== expectedCommand) {
-				if (expectedCommand !== 0x54 || actualCommand !== 0x53) return false
-			}
-			return isExpectedBootSourceAddress(expect.sourceAddress, parsed.sourceAddress)
+			return isExpectedBootResponse(frameBytes, expect)
 		}
 		const parsed = parseFrame(frameBytes)
 		if (parsed.type === 'error') {
@@ -351,6 +337,10 @@ class FrameCollector {
 		this._buf = new Uint8Array(0)
 	}
 
+	reset() {
+		this._buf = new Uint8Array(0)
+	}
+
 	push(bytes: Uint8Array | ArrayLike<number>) {
 		const chunk = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)
 		const merged = new Uint8Array(this._buf.length + chunk.length)
@@ -420,7 +410,7 @@ class FrameCollector {
 
 			let start = -1
 			for (let i = 0; i < bytes.length; i += 1) {
-				if (bytes[i] === 0x55) {
+				if (bytes[i] === 0x55 && (i === 0 || bytes[i - 1] !== 0x7f)) {
 					start = i
 					break
 				}
@@ -432,6 +422,10 @@ class FrameCollector {
 			if (start > 0) this._buf = bytes.slice(start)
 
 			if (this._buf.length < 9) return null
+			if (this._buf[3] < 0x50 || this._buf[3] > 0x54) {
+				this._buf = this._buf.slice(1)
+				continue
+			}
 			const dataLen = ((this._buf[4] & 0xff) << 8) | (this._buf[5] & 0xff)
 			const expectedLen = 1 + 1 + 1 + 1 + 2 + dataLen + 2 + 1
 			if (expectedLen < 9 || expectedLen > MAX_BOOT_FRAME_BYTES) {
@@ -501,6 +495,7 @@ export class UniMqttSocketBmsTransport {
 	private _collector: FrameCollector
 	private _queue: Promise<any>
 	private _bridgeError: string
+	private _bootSessionExclusive = false
 	private _pending:
 		| null
 		| {
@@ -698,13 +693,14 @@ export class UniMqttSocketBmsTransport {
 							socketTask.close({})
 						} catch (e) {}
 						return
+					} else {
+						this.logger?.debug && this.logger.debug('[socket] ignore non-frame message:', txt)
+						return
 					}
-					this.logger?.debug && this.logger.debug('[socket] ignore non-frame message:', txt)
-					return
 				}
 				const bytes = hexToBytes(payloadHex)
 				this._collector.push(bytes)
-				const expectBoot = !!this._pending?.expectBoot
+				const expectBoot = this._bootSessionExclusive || !!this._pending?.expectBoot
 				for (;;) {
 					const frame = expectBoot ? this._collector.tryShiftOneBootFrame() : this._collector.tryShiftOneValidFrame()
 					if (!frame) break
@@ -720,6 +716,8 @@ export class UniMqttSocketBmsTransport {
 
 	async disconnect(): Promise<void> {
 		this._connected = false
+		this._bootSessionExclusive = false
+		this._collector.reset()
 		this._sessionId = ''
 		this._stopHeartbeat()
 		if (this._pending) {
@@ -763,7 +761,39 @@ export class UniMqttSocketBmsTransport {
 		pending.wakeupTimer = null
 	}
 
+	async beginExclusiveBootSession({ drainTimeoutMs = 1200 }: { drainTimeoutMs?: number } = {}): Promise<void> {
+		if (this._bootSessionExclusive) throw new BmsProtocolError('Socket transport is already reserved for OTA')
+		this._bootSessionExclusive = true
+		this._rejectPending(new BmsProtocolError('Socket request canceled for OTA exclusive session'))
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const drained = await Promise.race([
+			this._queue.then(() => true, () => true),
+			new Promise<boolean>((resolve) => {
+				timer = setTimeout(() => resolve(false), Math.max(100, drainTimeoutMs))
+			}),
+		])
+		if (timer) clearTimeout(timer)
+		if (!drained) {
+			this._bootSessionExclusive = false
+			throw new BmsProtocolError('Socket request queue did not drain for OTA')
+		}
+		this._queue = Promise.resolve()
+		this._collector.reset()
+		this.logger?.info?.('[socket] OTA exclusive session ready')
+	}
+
+	endExclusiveBootSession(): void {
+		if (!this._bootSessionExclusive) return
+		if (this._pending?.expectBoot) this._rejectPending(new BmsProtocolError('Socket OTA session ended'))
+		this._bootSessionExclusive = false
+		this._collector.reset()
+		this.logger?.info?.('[socket] OTA exclusive session ended')
+	}
+
 	request(frameBytes: Uint8Array | ArrayLike<number>, options: BmsRequestOptions = {}): Promise<Uint8Array> {
+		if (this._bootSessionExclusive && !isBootFrameBytes(frameBytes)) {
+			return Promise.reject(new BmsProtocolError('Socket transport is reserved for OTA'))
+		}
 		const requestOptions: BmsRequestOptions & { timeoutMs: number } = {
 			...options,
 			timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
@@ -783,6 +813,7 @@ export class UniMqttSocketBmsTransport {
 		const rawReq = frameBytes instanceof Uint8Array ? frameBytes : Uint8Array.from(frameBytes)
 		const req = buildMqttSocketReadFrame(rawReq)
 		const expectBoot = req[0] === 0x55 && req[1] !== 0x7f
+		if (this._bootSessionExclusive && !expectBoot) throw new BmsProtocolError('Socket transport is reserved for OTA')
 		const bootTrace = expectBoot ? getBootFrameTrace(req) : null
 		if (!expectBoot && req.length < 6) throw new BmsProtocolError('Invalid request frame bytes')
 		if (expectBoot && req.length < 9) throw new BmsProtocolError('Invalid boot request frame bytes')
@@ -796,12 +827,15 @@ export class UniMqttSocketBmsTransport {
 			waitBeforeSendMs = this.minFrameIntervalMs - delta
 			await sleep(waitBeforeSendMs)
 		}
+		if (this._bootSessionExclusive && !expectBoot) throw new BmsProtocolError('Socket transport is reserved for OTA')
+		if (!this._connected || !this._socketTask) throw new BmsProtocolError('WebSocket is not connected')
 
 		const expect: ReqExpect = expectBoot
 			? {
 					functionCode: req[3] & 0xff,
 					targetAddress: req[1] & 0xff,
 					sourceAddress: req[2] & 0xff,
+					bootRequested: req[3] === 0x53 && req.length >= 11 ? ((req[6] << 8) | req[7]) + 1 : undefined,
 				}
 			: {
 					functionCode: reqFunctionCode,
@@ -818,14 +852,14 @@ export class UniMqttSocketBmsTransport {
 				}
 
 		const deferred = defer<Uint8Array>()
+		const graceMs = expect.bootRequested != null ? Math.max(0, requestOptions.bootAckGraceMs ?? 0) : 0
 		const timer = setTimeout(() => {
-			if (this._pending && this._pending.reject === deferred.reject) {
-				const p = this._pending
-				this._clearPendingTimers(p)
-				this._pending = null
-			}
-			deferred.reject(new BmsProtocolError(`Socket request timeout after ${timeoutMs}ms`, { expect }))
-		}, timeoutMs)
+			if (this._pending?.reject !== deferred.reject) return
+			this._clearPendingTimers(this._pending)
+			this._pending = null
+			this._collector.reset()
+			deferred.reject(new BmsProtocolError(`Socket request timeout after ${timeoutMs}ms + ${graceMs}ms grace`, { expect, bootAckGraceMs: graceMs }))
+		}, timeoutMs + graceMs)
 		this._pending = { resolve: deferred.resolve, reject: deferred.reject, expect, timer, expectBoot }
 
 		try {
@@ -833,6 +867,9 @@ export class UniMqttSocketBmsTransport {
 			const txStartedAt = Date.now()
 			this._socketTask.send({ data: hex })
 			this._lastTxAt = Date.now()
+			if (expectBoot && (req[3] & 0xff) === 0x53) {
+				this.logger?.debug?.(`[socket] tx frame len=${req.length} hex=${hex}`)
+			}
 			if (
 				shouldScheduleSocketWakeupResend(req, {
 					expectBoot,
@@ -870,6 +907,7 @@ export class UniMqttSocketBmsTransport {
 					this.logger.info('[socket] boot request timing', {
 						...bootTrace,
 						timeoutMs,
+						bootAckGraceMs: graceMs,
 						minFrameIntervalMs: this.minFrameIntervalMs,
 						waitBeforeSendMs,
 						rttMs: Date.now() - txStartedAt,
@@ -888,11 +926,14 @@ export class UniMqttSocketBmsTransport {
 						waitBeforeSendMs,
 						elapsedMs: Date.now() - serialStartedAt,
 						err: formatErr(e),
+						error: e,
 					})
 			}
 			const pending = this._pending
-			if (pending) this._clearPendingTimers(pending)
-			this._pending = null
+			if (pending?.reject === deferred.reject) {
+				this._clearPendingTimers(pending)
+				this._pending = null
+			}
 			throw e
 		}
 	}
@@ -918,6 +959,9 @@ export class UniMqttSocketBmsTransport {
 			this.logger?.debug && this.logger.debug('[socket] expected response callback failed:', e)
 		}
 		resolve(frameBytes)
+		if (expectBoot && (frameBytes[3] & 0xff) === 0x53) {
+			this.logger?.debug?.(`[socket] rx frame len=${frameBytes.length} hex=${bytesToHexUpper(frameBytes)}`)
+		}
 	}
 
 	private _isExpectedResponse(frameBytes: Uint8Array, expect: ReqExpect, expectBoot?: boolean): boolean {
