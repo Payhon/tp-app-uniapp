@@ -76,3 +76,24 @@ export function parseBootFrame(frameBytes: Uint8Array | ArrayLike<number>): Boot
 	if ((crc & 0xffff) !== (calc & 0xffff)) throw new BmsProtocolError('Boot frame CRC mismatch')
 	return { sourceAddress, targetAddress, command, data, raw: bytes }
 }
+
+export function isExpectedBootResponse(
+	frameBytes: Uint8Array,
+	expect: { functionCode: number; targetAddress: number; sourceAddress: number; bootRequested?: number }
+): boolean {
+	const parsed = parseBootFrame(frameBytes)
+	if (parsed.targetAddress !== expect.targetAddress || parsed.command !== expect.functionCode) return false
+	if (parsed.command === 0x54 && parsed.data.length < 1) return false
+	// 仪表透传 Bootloader 的回包源地址可能为 0x01/0xFC/0xFD；0x00 是广播查询。
+	if (
+		expect.sourceAddress !== 0x00 && parsed.sourceAddress !== expect.sourceAddress &&
+		!(expect.sourceAddress === 0xfc && (parsed.sourceAddress === 0x01 || parsed.sourceAddress === 0xfd))
+	) return false
+	if (parsed.command === 0x53 && expect.bootRequested != null) {
+		if (parsed.data.length !== 3) return false
+		const requested = (parsed.data[1] << 8) | parsed.data[2]
+		// 旧成功 ACK 继续等待当前包；未来/越界游标交给升级引擎立即报错，不能伪装成超时。
+		if (parsed.data[0] === 0 && requested < expect.bootRequested) return false
+	}
+	return true
+}

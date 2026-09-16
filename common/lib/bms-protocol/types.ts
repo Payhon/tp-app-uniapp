@@ -16,6 +16,8 @@ export type LoggerLike = {
 
 export type BmsRequestOptions = {
 	timeoutMs?: number
+	/** OTA 0x53 重发前继续接收 ACK 的缓冲时间，不用于普通请求。 */
+	bootAckGraceMs?: number
 	writeApiTimeoutMs?: number
 	suppressTimeoutLog?: boolean
 	disableAlternateWriteRetry?: boolean

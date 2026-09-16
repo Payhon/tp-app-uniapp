@@ -1,10 +1,14 @@
-import type { BmsRequestTransport, LoggerLike } from './types'
+import type { BmsRequestOptions, BmsRequestTransport, LoggerLike } from './types'
 import { decodeAscii } from './register-view'
 import { BOOT_FRAME, buildBootFrame, parseBootFrame } from './boot-frame'
 import {
 	clampBootPacketDelayMs,
 	MOBILE_BOOT_FINALIZE_DELAY_MS,
-	MOBILE_BOOT_PACKET_RETRY_DELAY_MS,
+	MOBILE_BOOT_PAGE_BOUNDARY_DELAY_MS,
+	MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS,
+	MOBILE_BOOT_RETRY_TIMEOUT_MS,
+	MOBILE_BOOT_MAX_RETRIES,
+	MOBILE_BOOT_FINALIZE_TIMEOUT_MS,
 	MOBILE_BOOT_POST_ACK_DELAY_BUDGET_MS,
 	MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS,
 	resolveBootPageBoundaryDelayMs,
@@ -36,9 +40,20 @@ export type BootOtaResult = {
 type BootOtaTransport = BmsRequestTransport & {
 	writeFrame?: (frameBytes: Uint8Array, options?: { writeWithResponse?: boolean }) => Promise<void> | void
 	requestWithResponse?: BmsRequestTransport['request']
+	isExplicitDisconnectError?: (error: unknown) => boolean
 }
 
-const PACKET_SIZE_OPTIONS = [64, 128, 256, 512, 1024]
+export const BOOT_PACKET_SIZE_OPTIONS = [64, 128, 256, 512, 1024] as const
+export const BOOT_DATA_FRAME_OVERHEAD_BYTES = 11
+
+export function resolveBootMaxPacketSizeForMtu(mtu: number): number {
+	const attPayloadSize = Math.max(0, Math.floor(mtu) - 3)
+	for (let index = BOOT_PACKET_SIZE_OPTIONS.length - 1; index >= 0; index -= 1) {
+		const packetSize = BOOT_PACKET_SIZE_OPTIONS[index]
+		if (packetSize + BOOT_DATA_FRAME_OVERHEAD_BYTES <= attPayloadSize) return packetSize
+	}
+	return 0
+}
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms))
@@ -133,53 +148,25 @@ function formatErr(err: unknown): string {
 }
 
 function isTimeoutError(err: unknown): boolean {
-	return formatErr(err).toLowerCase().includes('timeout')
+	return /^(ble|mqtt|socket) request timeout\b/i.test(formatErr(err))
 }
 
-function errorText(err: unknown): string {
-	if (!err) return ''
-	if (err instanceof Error) return err.message || String(err)
-	if (typeof err === 'string') return err
-	try {
-		const value = err as any
-		return String(value?.errMsg || value?.message || JSON.stringify(value) || value)
-	} catch (e) {
-		return String(err)
-	}
-}
-
-function errorCode(err: unknown): number | null {
-	const value = err as any
-	const raw = value?.errCode ?? value?.code ?? value?.errno
-	const n = Number(raw)
-	return Number.isFinite(n) ? n : null
-}
-
-function isBleTerminalWriteError(err: unknown): boolean {
-	const code = errorCode(err)
-	const msg = errorText(err).toLowerCase()
-	return (
-		code === 10004 ||
-		code === 10006 ||
-		code === 1509003 ||
-		msg.includes('writevaluetocharacteristics') ||
-		msg.includes('writeblecharacteristicvalue:fail') ||
-		msg.includes('no connection') ||
-		msg.includes('no device') ||
-		msg.includes('not connected') ||
-		msg.includes('device not found')
-	)
+function isSubmittedFinalizeDisconnectError(err: unknown): boolean {
+	const extra = (err as { extra?: unknown } | null)?.extra
+	if (!extra || typeof extra !== 'object') return false
+	const marker = extra as { bootFrameSubmitted?: boolean; command?: number }
+	return marker.bootFrameSubmitted === true && ((marker.command ?? -1) & 0xff) === 0x54
 }
 
 async function bootRequest(
 	transport: BmsRequestTransport,
 	frame: Uint8Array,
-	{ logger }: { logger?: LoggerLike } = {}
+	{ logger, ...requestOptions }: BmsRequestOptions & { logger?: LoggerLike } = {}
 ) {
 	try {
 		logger?.debug && logger.debug('[boot] tx', { cmd: cmdHex(frame[3]), len: frame.length, hex: bytesToHex(frame) })
 	} catch (e) {}
-	const respBytes = await transport.request(frame)
+	const respBytes = await transport.request(frame, requestOptions)
 	try {
 		logger?.debug && logger.debug('[boot] rx', { len: respBytes.length, hex: bytesToHex(respBytes) })
 	} catch (e) {}
@@ -188,6 +175,21 @@ async function bootRequest(
 		logger?.warn && logger.warn('[boot] unexpected response cmd', { expect: frame[3], got: resp.command })
 	}
 	return resp
+}
+
+// OTA控制命令的超时重试；不改变面板独立版本查询的等待策略。
+async function bootControlRequest(transport: BmsRequestTransport, frame: Uint8Array, options: BmsRequestOptions = {}) {
+	for (let retry = 0; ; retry += 1) {
+		try {
+			return await transport.request(frame, {
+				...options,
+				timeoutMs: retry === 0 ? MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS : MOBILE_BOOT_RETRY_TIMEOUT_MS,
+				bootAckGraceMs: 0,
+			})
+		} catch (error) {
+			if (!isTimeoutError(error) || retry >= MOBILE_BOOT_MAX_RETRIES) throw error
+		}
+	}
 }
 
 export async function bootQueryVersion({
@@ -220,7 +222,6 @@ export async function bootOtaUpgrade({
 	targetAddress,
 	queryTargetAddress,
 	dataTargetAddress,
-	fallbackDataTargetAddress,
 	sourceAddress = BOOT_FRAME.HOST_ADDR,
 	onProgress,
 	logger,
@@ -230,17 +231,12 @@ export async function bootOtaUpgrade({
 	enterBootTimeoutAsSuccess,
 	packetDelayMs,
 	pageBoundaryDelayMs,
-	adaptiveSlowdownOnPacketTimeout,
-	adaptivePacketDelayMs,
-	adaptivePageBoundaryDelayMs,
 	finalizeDelayMs,
 	finalizeTimeoutMs,
-	finalizeAssumeSuccessOnTimeout,
 	finalizeMaxAttempts,
 	finalizeDisableAlternateWriteRetry,
-	terminalPacketWriteErrorAsComplete,
+	allowPostFinalizeBleDisconnectSuccess,
 	requireFinalPacketAck,
-	finalizeBurstIntervalsMs,
 	tracePacketTiming,
 }: {
 	transport: BootOtaTransport
@@ -248,7 +244,6 @@ export async function bootOtaUpgrade({
 	targetAddress: number
 	queryTargetAddress?: number
 	dataTargetAddress?: number
-	fallbackDataTargetAddress?: number
 	sourceAddress?: number
 	onProgress?: (p: BootOtaProgress) => void
 	logger?: LoggerLike
@@ -258,41 +253,38 @@ export async function bootOtaUpgrade({
 	enterBootTimeoutAsSuccess?: boolean
 	packetDelayMs?: number
 	pageBoundaryDelayMs?: number
-	adaptiveSlowdownOnPacketTimeout?: boolean
-	adaptivePacketDelayMs?: number
-	adaptivePageBoundaryDelayMs?: number
 	finalizeDelayMs?: number
 	finalizeTimeoutMs?: number
-	finalizeAssumeSuccessOnTimeout?: boolean
 	finalizeMaxAttempts?: number
 	finalizeDisableAlternateWriteRetry?: boolean
-	terminalPacketWriteErrorAsComplete?: boolean
+	allowPostFinalizeBleDisconnectSuccess?: boolean
 	requireFinalPacketAck?: boolean
-	finalizeBurstIntervalsMs?: number[]
 	tracePacketTiming?: boolean
 }): Promise<BootOtaResult> {
 	if (!firmware || firmware.length === 0) throw new Error('Firmware data is empty')
 	const totalSize = firmware.length
 
 	let versionInfo: BootVersionInfo | null = null
+	const controlTransport: BmsRequestTransport = {
+		request: (frame, options) => bootControlRequest(transport, frame, options),
+	}
 	try {
 		onProgress?.({ stage: 'query', message: 'query' })
 		const queryTarget = queryTargetAddress ?? targetAddress
-		try {
-			versionInfo = await bootQueryVersion({ transport, targetAddress: queryTarget, sourceAddress, logger })
-		} catch (e) {
-			// retry once to match double-query behavior
-			versionInfo = await bootQueryVersion({ transport, targetAddress: queryTarget, sourceAddress, logger })
-		}
+		versionInfo = await bootQueryVersion({ transport: controlTransport, targetAddress: queryTarget, sourceAddress, logger })
 		logger?.info && logger.info('[boot] version', versionInfo)
 	} catch (e) {
+		if (!isTimeoutError(e)) throw e
 		logger?.warn && logger.warn('[boot] query version failed, continue', e)
 	}
 
 	if (!skipEnterBoot) {
 		onProgress?.({ stage: 'enter', message: 'enter' })
 		try {
-			await bootRequest(transport, buildBootFrame({ sourceAddress, targetAddress, command: 0x51 }), { logger })
+			const enterResp = await bootRequest(controlTransport, buildBootFrame({ sourceAddress, targetAddress, command: 0x51 }), { logger })
+			if (enterResp.command !== 0x51 || enterResp.data.length < 1 || enterResp.data[0] !== 0) {
+				throw new Error(`Boot enter rejected: status=${enterResp.data[0]}`)
+			}
 		} catch (e) {
 			if (!enterBootTimeoutAsSuccess || !isTimeoutError(e)) throw e
 			logger?.warn && logger.warn('[boot] enter boot timeout, continue', { err: formatErr(e) })
@@ -308,27 +300,30 @@ export async function bootOtaUpgrade({
 	preparePayload.set(sizePayload, 0)
 	preparePayload.set(baudPayload, 4)
 	const prepareResp = await bootRequest(
-		transport,
+		controlTransport,
 		buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: preparePayload }),
 		{ logger }
 	)
 	const prepareData = prepareResp.data
-	if (prepareData.length < 2) throw new Error('Boot prepare response too short')
+	if (prepareResp.command !== 0x52 || prepareData.length !== 2) throw new Error('Invalid Boot prepare response')
 	if ((prepareData[0] & 0xff) !== 0) throw new Error('Boot prepare failed')
 	const optionIdx = prepareData[1] & 0xff
-	let packetSize = PACKET_SIZE_OPTIONS[optionIdx] || PACKET_SIZE_OPTIONS[0]
-	if (maxPacketSize && packetSize > maxPacketSize) {
-		packetSize = PACKET_SIZE_OPTIONS.find((n) => n <= maxPacketSize) || packetSize
+	const packetSize = BOOT_PACKET_SIZE_OPTIONS[optionIdx]
+	if (!packetSize) throw new Error(`Boot prepare invalid packet size: ${optionIdx}`)
+	if (maxPacketSize != null && packetSize > maxPacketSize) {
+		// 0x52 是设备指定包长，不是主机可单方面改小的建议值。
+		throw new Error(`boot_ble_frame_exceeds_mtu:${packetSize + BOOT_DATA_FRAME_OVERHEAD_BYTES}`)
 	}
 	logger?.info && logger.info('[boot] prepare ok', { totalSize, optionIdx, packetSize })
-	// Hardware requires the first data packet within 700ms after the prepare ACK.
-	await sleep(MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS)
+	// 旧版收到准备 ACK 后立即发首包，不额外占用设备等待窗口。
+	if (MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS > 0) await sleep(MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS)
 
 	// Use data length = packetSize, payload = 2 bytes seq + data => payload length = packetSize + 2
 	const dataPacketSize = Math.max(1, packetSize)
 	const payloadLen = dataPacketSize + 2
 	logger?.info && logger.info('[boot] data packet size', { dataPacketSize, packetSize, payloadLen })
 	const packetTotal = Math.ceil(totalSize / dataPacketSize)
+	if (packetTotal > 0xffff) throw new Error('Boot firmware exceeds packet sequence range')
 	if (tracePacketTiming) {
 		logger?.info &&
 			logger.info('[boot] transfer timing config', {
@@ -337,28 +332,21 @@ export async function bootOtaUpgrade({
 				dataPacketSize,
 				payloadLen,
 				packetDelayMs: packetDelayMs ?? 0,
-				pageBoundaryDelayMs: pageBoundaryDelayMs ?? 0,
-				adaptiveSlowdownOnPacketTimeout: !!adaptiveSlowdownOnPacketTimeout,
-				adaptivePacketDelayMs,
-				adaptivePageBoundaryDelayMs,
+				pageBoundaryDelayMs: pageBoundaryDelayMs ?? MOBILE_BOOT_PAGE_BOUNDARY_DELAY_MS,
 			})
 	}
 	let packetIndex = 0
-	let retry = 0
-	const maxRetry = 5
-	const maxPacketRetry = 3
-	const primaryWriteTarget = dataTargetAddress ?? targetAddress
-	const fallbackWriteTarget =
-		fallbackDataTargetAddress != null && (fallbackDataTargetAddress & 0xff) !== (primaryWriteTarget & 0xff)
-			? (fallbackDataTargetAddress & 0xff)
-			: null
-	let activeWriteTarget = primaryWriteTarget
-	let lastRequested = -1
+	let recoveryCount = 0
+	const maxRecoveryCount = MOBILE_BOOT_MAX_RETRIES
+	const activeWriteTarget = dataTargetAddress ?? targetAddress
+	let highestRequested = 0
 	let finalizeAttempt = 0
 	let lastCrc = 0
-	let finalizeAlreadyOk = false
-	let currentPacketDelayMs = clampBootPacketDelayMs(packetDelayMs)
-	let currentPageBoundaryDelayMs = Math.max(0, pageBoundaryDelayMs ?? 0)
+	const currentPacketDelayMs = clampBootPacketDelayMs(packetDelayMs)
+	const currentPageBoundaryDelayMs = Math.max(
+		0,
+		pageBoundaryDelayMs ?? MOBILE_BOOT_PAGE_BOUNDARY_DELAY_MS
+	)
 
 	while (true) {
 		while (packetIndex < packetTotal) {
@@ -377,17 +365,6 @@ export async function bootOtaUpgrade({
 					})
 			}
 
-			onProgress?.({
-				stage: 'transfer',
-				...(packetSeqTrace(packetIndex) as {
-					packetIndex: number
-					packetIndexHex: string
-					expectedAck: number
-					expectedAckHex: string
-				}),
-				packetTotal,
-				percent: Math.min(99, Math.floor((packetIndex / packetTotal) * 100)),
-			})
 			if (currentPageBoundaryDelayMs > 0 && packetIndex > 0 && start > 0 && start % 4096 === 0) {
 				const effectivePageBoundaryDelayMs = resolveBootPageBoundaryDelayMs(
 					currentPacketDelayMs,
@@ -404,106 +381,48 @@ export async function bootOtaUpgrade({
 				if (effectivePageBoundaryDelayMs > 0) await sleep(effectivePageBoundaryDelayMs)
 			}
 
-			let resp: ReturnType<typeof parseBootFrame> | null = null
+			let resp: ReturnType<typeof parseBootFrame>
 			let packetRttMs = 0
 			let packetRetry = 0
-			let terminalPacketAssumedComplete = false
 			while (true) {
 				const packetAttemptStartedAt = Date.now()
 				try {
 					resp = await bootRequest(
 						transport,
 						buildBootFrame({ sourceAddress, targetAddress: activeWriteTarget, command: 0x53, payload }),
-						{ logger }
+						{ logger, timeoutMs: packetRetry === 0 ? MOBILE_BOOT_NON_FINALIZE_TIMEOUT_MS : MOBILE_BOOT_RETRY_TIMEOUT_MS, bootAckGraceMs: 0 }
 					)
 					packetRttMs = Date.now() - packetAttemptStartedAt
 					break
 				} catch (e) {
+					// 只有设备 ACK 超时可恢复；写入、断连和取消错误必须立即失败。
+					if (!isTimeoutError(e)) throw e
 					const elapsedMs = Date.now() - packetAttemptStartedAt
-					if (
-						terminalPacketWriteErrorAsComplete &&
-						packetIndex >= packetTotal - 1 &&
-						isBleTerminalWriteError(e)
-					) {
-						lastRequested = packetTotal
-						packetIndex = packetTotal
-						terminalPacketAssumedComplete = true
-						logger?.warn &&
-							logger.warn('[boot] terminal packet write error, continue finalize', {
-								...packetSeqTrace(packetTotal - 1),
-								packetTotal,
-								elapsedMs,
-								err: formatErr(e),
-							})
-						break
+					if (recoveryCount >= maxRecoveryCount) {
+						logger?.error?.('[boot] packet ACK retries exhausted', {
+							...packetSeqTrace(packetIndex), packetRetry, recoveryCount, maxRecoveryCount, elapsedMs, err: formatErr(e),
+						})
+						throw new Error(`boot_packet_no_ack:${packetIndex}`)
 					}
 					packetRetry += 1
-					if (adaptiveSlowdownOnPacketTimeout) {
-						const nextPacketDelayMs = clampBootPacketDelayMs(
-							Math.max(currentPacketDelayMs, adaptivePacketDelayMs ?? 100)
-						)
-						const nextPageBoundaryDelayMs = Math.max(currentPageBoundaryDelayMs, adaptivePageBoundaryDelayMs ?? 1500)
-						if (nextPacketDelayMs !== currentPacketDelayMs || nextPageBoundaryDelayMs !== currentPageBoundaryDelayMs) {
-							currentPacketDelayMs = nextPacketDelayMs
-							currentPageBoundaryDelayMs = nextPageBoundaryDelayMs
-							logger?.warn &&
-								logger.warn('[boot] adaptive slowdown enabled', {
-									...packetSeqTrace(packetIndex),
-									packetDelayMs: currentPacketDelayMs,
-									pageBoundaryDelayMs: currentPageBoundaryDelayMs,
-								})
-						}
-					}
-					logger?.warn &&
-						logger.warn('[boot] packet timeout, retry', {
-							...packetSeqTrace(packetIndex),
-							packetRetry,
-							attempt: packetRetry,
-							maxPacketRetry,
-							elapsedMs,
-							err: formatErr(e),
-						})
-					if (packetRetry >= maxPacketRetry) {
-						if (fallbackWriteTarget != null && activeWriteTarget !== fallbackWriteTarget) {
-							activeWriteTarget = fallbackWriteTarget
-							packetRetry = 0
-							logger?.warn &&
-								logger.warn('[boot] switch data target', {
-									...packetSeqTrace(packetIndex),
-									target: activeWriteTarget,
-								})
-							await sleep(MOBILE_BOOT_PACKET_RETRY_DELAY_MS)
-							continue
-						}
-						if (packetIndex === 0) {
-							throw new Error('boot_packet0_no_ack')
-						}
-						throw e
-					}
-					await sleep(MOBILE_BOOT_PACKET_RETRY_DELAY_MS)
+					recoveryCount += 1
+					logger?.warn?.('[boot] packet ACK timeout, retry same packet', {
+						...packetSeqTrace(packetIndex), packetRetry, recoveryCount, maxRecoveryCount, elapsedMs, err: formatErr(e),
+					})
 				}
 			}
-			if (terminalPacketAssumedComplete) break
-			if (!resp) throw new Error('Boot packet response is empty')
 
-			if (terminalPacketWriteErrorAsComplete && (resp.command & 0xff) === 0x54) {
-				const finishStatus = resp.data[0] & 0xff
-				if (finishStatus !== 0) throw new Error(`Boot finalize failed: status=${finishStatus}`)
-				lastRequested = packetTotal
-				packetIndex = packetTotal
-				lastCrc = crc32(firmware)
-				finalizeAlreadyOk = true
-				logger?.info && logger.info('[boot] finalize ok during data transfer', { packetTotal })
-				break
-			}
-
-			if (resp.data.length < 3) throw new Error('Boot packet response too short')
+			if (resp.command !== 0x53 || resp.data.length !== 3) throw new Error('Invalid Boot packet response')
 			const status = resp.data[0] & 0xff
 			const requested = bytesToU16BE(resp.data[1] & 0xff, resp.data[2] & 0xff)
-			lastRequested = requested
+			if (status === 0 && requested !== packetIndex + 1) {
+				throw new Error(`Boot unexpected packet ACK: ${requested}, expected ${packetIndex + 1}`)
+			}
 			const seqTrace = packetSeqTrace(packetIndex)
 			const ackTrace = ackSeqTrace(requested)
-			logger?.debug && logger.debug('[boot] packet ack', { ...seqTrace, status, ...ackTrace })
+			logger?.debug && logger.debug('[boot] packet ack', {
+				...seqTrace, status, ...ackTrace, rttMs: packetRttMs, packetRetry, recoveryCount, frameLen: payload.length + 9,
+			})
 			if (tracePacketTiming) {
 				logger?.info &&
 					logger.info('[boot] packet timing', {
@@ -511,7 +430,8 @@ export async function bootOtaUpgrade({
 						packetTotal,
 						status,
 						...ackTrace,
-						attempt: packetRetry + 1,
+						packetRetry,
+						recoveryCount,
 						rttMs: packetRttMs,
 						dataPacketSize,
 						packetDelayMs: currentPacketDelayMs,
@@ -519,34 +439,56 @@ export async function bootOtaUpgrade({
 					})
 			}
 
-			if (status === 0) {
-				if (requested >= 0 && requested < packetTotal && requested !== packetIndex + 1) {
-					packetIndex = requested
-					retry = 0
-					continue
+			if (status === 0 || (status === 3 && requested === packetIndex + 1)) {
+				if (requested > 0) {
+					const acknowledgedPacketIndex = Math.min(requested, packetTotal) - 1
+					onProgress?.({
+						stage: 'transfer',
+						...(packetSeqTrace(acknowledgedPacketIndex) as {
+							packetIndex: number
+							packetIndexHex: string
+							expectedAck: number
+							expectedAckHex: string
+						}),
+						packetTotal,
+						percent: Math.min(99, Math.floor((Math.min(requested, packetTotal) / packetTotal) * 100)),
+					})
 				}
-				packetIndex += 1
-				retry = 0
+				packetIndex = requested
+				if (requested > highestRequested) {
+					highestRequested = requested
+					recoveryCount = 0
+				}
 				if (currentPacketDelayMs > 0) await sleep(currentPacketDelayMs)
 				continue
 			}
 
 			// status: 1=not initialized, 2=write error, 3=sequence mismatch
-			if (status === 1 && retry < maxRetry) {
-				retry += 1
-				// Re-send prepare then retry requested packet index
-				await bootRequest(
-					transport,
+			if (status === 1 && recoveryCount < maxRecoveryCount) {
+				recoveryCount += 1
+				// Re-send prepare, then restart from packet zero.
+				const reprepare = await bootRequest(
+					controlTransport,
 					buildBootFrame({ sourceAddress, targetAddress, command: 0x52, payload: preparePayload }),
 					{ logger }
 				)
-				await sleep(MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS)
-				packetIndex = Math.min(requested, packetTotal - 1)
+				if (reprepare.command !== 0x52 || reprepare.data.length !== 2 || reprepare.data[0] !== 0 || reprepare.data[1] !== optionIdx) {
+					throw new Error('Boot reprepare failed or packet size changed')
+				}
+				if (MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS > 0) await sleep(MOBILE_BOOT_PREPARE_TO_DATA_DELAY_MS)
+				packetIndex = 0
+				onProgress?.({ stage: 'transfer', packetIndex: -1, packetTotal, percent: 0 })
 				continue
 			}
-			if (status === 3 && requested < packetTotal && retry < maxRetry) {
-				retry += 1
+			if (status === 3 && requested <= packetIndex && requested < packetTotal && recoveryCount < maxRecoveryCount) {
+				recoveryCount += 1
 				packetIndex = requested
+				onProgress?.({
+					stage: 'transfer',
+					packetIndex: requested - 1,
+					packetTotal,
+					percent: Math.floor((requested / packetTotal) * 100),
+				})
 				continue
 			}
 			if (status === 5) {
@@ -555,9 +497,11 @@ export async function bootOtaUpgrade({
 			throw new Error(`Boot packet failed: status=${status}`)
 		}
 
-		if (finalizeAlreadyOk) break
-		if (requireFinalPacketAck && lastRequested < packetTotal) {
-			throw new Error(`boot_transfer_incomplete:${lastRequested}/${packetTotal}`)
+		if (requireFinalPacketAck && packetIndex < packetTotal) {
+			throw new Error(`boot_transfer_incomplete:${packetIndex}/${packetTotal}`)
+		}
+		if (packetIndex < packetTotal) {
+			logger?.warn?.('[boot] data ACKs incomplete, require real finalize ACK', { requested: packetIndex, packetTotal })
 		}
 
 		lastCrc = crc32(firmware)
@@ -577,50 +521,25 @@ export async function bootOtaUpgrade({
 			logger?.info &&
 				logger.info('[boot] finalize delay before 0x54', {
 					delayMs: beforeFinalizeDelayMs,
-					lastRequested,
-					lastRequestedHex: seqHex(lastRequested),
+					requested: packetIndex,
+					requestedHex: seqHex(packetIndex),
 					packetTotal,
 				})
 			await sleep(beforeFinalizeDelayMs)
 		}
 		let finalizeOk = false
-		const maxFinalizeAttempts = Math.max(1, Math.floor(finalizeMaxAttempts ?? 3))
+		const maxFinalizeAttempts = Math.min(MOBILE_BOOT_MAX_RETRIES + 1, Math.max(1, Math.floor(finalizeMaxAttempts ?? MOBILE_BOOT_MAX_RETRIES + 1)))
 		for (finalizeAttempt = 1; finalizeAttempt <= maxFinalizeAttempts; finalizeAttempt += 1) {
-			if (finalizeAttempt > 1) await sleep(300)
+			const attemptTimeoutMs = finalizeAttempt === 1 ? finalizeTimeoutMs ?? MOBILE_BOOT_FINALIZE_TIMEOUT_MS : MOBILE_BOOT_RETRY_TIMEOUT_MS
 			let finishResp: ReturnType<typeof parseBootFrame> | null = null
-			const duplicateFinalizeTimers: ReturnType<typeof setTimeout>[] = []
 			try {
-				const scheduleFinalizeBurst = () => {
-					if (finalizeAttempt !== 1 || typeof transport.writeFrame !== 'function') return
-					const intervals = (finalizeBurstIntervalsMs || []).filter((ms) => Number.isFinite(ms) && ms > 0)
-					for (const delayMs of intervals) {
-						const timer = setTimeout(() => {
-							void (async () => {
-								try {
-									logger?.debug &&
-										logger.debug('[boot] tx duplicate', {
-											cmd: cmdHex(0x54),
-											delayMs,
-											len: finishFrame.length,
-											hex: bytesToHex(finishFrame),
-										})
-									await transport.writeFrame?.(finishFrame, { writeWithResponse: false })
-								} catch (e) {
-									logger?.warn && logger.warn('[boot] finalize duplicate write failed', { delayMs, err: e })
-								}
-							})()
-						}, delayMs)
-						duplicateFinalizeTimers.push(timer)
-					}
-				}
 				const requestWithResponse = transport.requestWithResponse
 				if (typeof requestWithResponse === 'function') {
 					logger?.debug &&
 						logger.debug('[boot] tx', { cmd: cmdHex(0x54), len: finishFrame.length, hex: bytesToHex(finishFrame) })
-					scheduleFinalizeBurst()
 					const respBytes = await requestWithResponse(finishFrame, {
-						timeoutMs: finalizeTimeoutMs,
-						suppressTimeoutLog: finalizeAssumeSuccessOnTimeout && lastRequested >= packetTotal,
+						timeoutMs: attemptTimeoutMs,
+						bootAckGraceMs: 0,
 						disableAlternateWriteRetry: finalizeDisableAlternateWriteRetry,
 					})
 					logger?.debug && logger.debug('[boot] rx', { len: respBytes.length, hex: bytesToHex(respBytes) })
@@ -630,10 +549,9 @@ export async function bootOtaUpgrade({
 						logger?.debug &&
 							logger.debug('[boot] tx', { cmd: cmdHex(0x54), len: finishFrame.length, hex: bytesToHex(finishFrame) })
 					} catch (e) {}
-					scheduleFinalizeBurst()
 					const respBytes = await transport.request(finishFrame, {
-						timeoutMs: finalizeTimeoutMs,
-						suppressTimeoutLog: finalizeAssumeSuccessOnTimeout && lastRequested >= packetTotal,
+						timeoutMs: attemptTimeoutMs,
+						bootAckGraceMs: 0,
 						disableAlternateWriteRetry: finalizeDisableAlternateWriteRetry,
 					})
 					try {
@@ -641,28 +559,25 @@ export async function bootOtaUpgrade({
 					} catch (e) {}
 					finishResp = parseBootFrame(respBytes)
 				}
-			} catch (e: any) {
-				const msg = String(e?.errMsg || e?.message || e || '').toLowerCase()
-				if (finalizeAssumeSuccessOnTimeout && msg.includes('ble request timeout') && lastRequested >= packetTotal) {
-					logger?.info && logger.info('[boot] finalize assume success after timeout', { finalizeAttempt })
+			} catch (e) {
+				if (
+					allowPostFinalizeBleDisconnectSuccess &&
+					packetIndex >= packetTotal &&
+					isSubmittedFinalizeDisconnectError(e) &&
+					transport.isExplicitDisconnectError?.(e)
+				) {
+					logger?.info && logger.info('[boot] finalize accepted after explicit BLE disconnect', { finalizeAttempt })
 					finalizeOk = true
 					break
 				}
+				if (!isTimeoutError(e)) throw e
 				logger?.warn && logger.warn('[boot] finalize attempt failed', { finalizeAttempt, err: e })
 				continue
-			} finally {
-				for (const timer of duplicateFinalizeTimers) clearTimeout(timer)
 			}
 
 			if (!finishResp) continue
-			if ((finishResp.command & 0xff) === 0x53) {
-				if (finishResp.data.length >= 3) {
-					const status = finishResp.data[0] & 0xff
-					const requested = bytesToU16BE(finishResp.data[1] & 0xff, finishResp.data[2] & 0xff)
-					lastRequested = requested
-					logger?.warn && logger.warn('[boot] finalize got data ack', { status, ...ackSeqTrace(requested) })
-				}
-				continue
+			if (finishResp.command !== 0x54 || finishResp.data.length < 1) {
+				throw new Error('Boot finalize failed: invalid response')
 			}
 			const finishStatus = finishResp.data[0] & 0xff
 			if (finishStatus !== 0) {
