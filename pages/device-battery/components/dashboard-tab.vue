@@ -103,7 +103,7 @@
 			</view>
 		</view>
 
-		<view class="protect-card">
+		<view v-if="showProtectionStatus" class="protect-card">
 			<view class="protect-card__head" @tap="toggleProtectCard">
 				<text class="protect-card__title">{{ $t('deviceDetail.dashboard.protectDetail') }}</text>
 				<view class="protect-card__meta">
@@ -149,6 +149,7 @@ const props = defineProps<{
 	battery: AppBatteryDetail | null
 	status: BmsStatus | null
 	connType: 'bluetooth' | 'mqtt' | 'offline'
+	showProtectionStatus: boolean
 }>()
 
 const { t, te } = useI18n()

@@ -127,6 +127,7 @@
 				:battery="battery"
 				:status="status"
 				:connType="connType"
+				:show-protection-status="canShowProtectionStatus"
 			/>
 			<cells-tab v-else-if="activeTab === 1" :status="status" />
 			<params-tab
@@ -239,8 +240,10 @@ type DeviceOtaCheckState = {
 }
 
 const DEVICE_HISTORY_PERMISSION = 'app_device_detail_history'
+const DEVICE_PROTECTION_STATUS_PERMISSION = 'app_device_detail_protection_status'
 const activeTab = ref<0 | 1 | 2 | 3>(0)
 const canShowHistoryTab = ref(false)
+const canShowProtectionStatus = ref(false)
 const otaRunning = ref(false)
 const historyTabRef = ref<HistoryTabExposed | null>(null)
 const allowScanHandoff = ref(false)
@@ -526,14 +529,21 @@ const showBmsDataActionButtons = computed(
 		(bmsDataLoadPhase.value === 'slow' || bmsDataLoadPhase.value === 'failed')
 )
 
-const loadHistoryPermission = async () => {
+const loadDetailUIPermissions = async () => {
+	const generation = capturePageLifecycle()
+	canShowHistoryTab.value = false
+	canShowProtectionStatus.value = false
 	try {
 		const resp = await fetchCurrentMobileUIPermissions()
+		if (!isPageLifecycleCurrent(generation)) return
 		const data = (resp as any)?.data || {}
 		const codes = Array.isArray(data?.ui_codes) ? data.ui_codes.map((item: unknown) => String(item || '').trim()) : []
 		canShowHistoryTab.value = codes.includes(DEVICE_HISTORY_PERMISSION)
+		canShowProtectionStatus.value = codes.includes(DEVICE_PROTECTION_STATUS_PERMISSION)
 	} catch (e) {
+		if (!isPageLifecycleCurrent(generation)) return
 		canShowHistoryTab.value = false
+		canShowProtectionStatus.value = false
 		console.warn('[device-detail] load mobile permissions failed', e)
 	}
 }
@@ -740,7 +750,7 @@ onLoad((query) => {
 	pageLifecycleGeneration += 1
 	const rawQuery = (query as any) || {}
 	detailEntrySource = normalizeDeviceDetailEntrySource(rawQuery.entry_source)
-	void loadHistoryPermission()
+	void loadDetailUIPermissions()
 	if (String(rawQuery.session_mode || '').trim() === 'instrument') {
 		const bleMac = normalizeMac(String(rawQuery.ble_mac || rawQuery.mac || ''))
 		if (!bleMac) {
