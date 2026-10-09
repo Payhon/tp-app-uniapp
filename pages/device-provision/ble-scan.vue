@@ -888,6 +888,8 @@ async function toggleScan() {
 }
 
 function selectDevice(d: DeviceRow) {
+	autoStartPending = false
+	navigated.value = true
 	stopScan().finally(() => {
 		const boundDevice = getBoundDeviceByRow(d)
 		if (boundDevice?.device_id && openBoundDeviceDetail(boundDevice.device_id)) {
@@ -947,8 +949,8 @@ onShow(() => {
 		// 离开页面或可见代次变化后，旧刷新任务既不能启动扫描，也不能抢占导航。
 		if (!pageVisible || blockedByLoginGuard || visibilityGeneration !== scheduledVisibilityGeneration) return
 
-		// 扫码模式：若目标设备已绑定，则不再进入扫描页
-		if (mode.value === 'qr' && targetMac.value && boundDevicesStore.hasBleMac(targetMac.value)) {
+		// 已绑定直达仅消费首次扫码入口，返回扫描页后不再自动进入详情并重连。
+		if (shouldAutoStart && autoStartPending && mode.value === 'qr' && targetMac.value && boundDevicesStore.hasBleMac(targetMac.value)) {
 			autoStartPending = false
 			const boundDevice = boundDevicesStore.findByBleMac(targetMac.value)
 			if (boundDevice?.device_id) {

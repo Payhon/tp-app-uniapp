@@ -23,13 +23,15 @@ function sourceBetween(start, end) {
   return pageSource.slice(from, to)
 }
 const handlers = compile(
-  sourceBetween('async function toggleScan()', 'function selectDevice(') +
+  sourceBetween('function detailEntrySourceQuery()', 'function clearList()') +
+  sourceBetween('function upsertDevice(', 'const onDeviceFound =') +
+  sourceBetween('async function toggleScan()', 'onLoad((option)') +
   sourceBetween('onLoad((option)', '</script>')
 )
 
 function createPage(query, options = {}) {
   const hooks = {}
-  const calls = { starts: 0, stops: 0, refreshes: 0, redirects: [], tabs: [] }
+  const calls = { starts: 0, stops: 0, refreshes: 0, redirects: [], navigations: [], tabs: [] }
   const context = vm.createContext({
     ...policy,
     onLoad: (fn) => { hooks.load = fn },
@@ -49,13 +51,23 @@ function createPage(query, options = {}) {
     defaultPageHeight: '667px',
     starting: { value: false },
     isScanning: { value: false },
+    navigated: { value: false },
+    rows: { value: new Map() },
+    orderedDeviceIds: { value: [] },
+    DEVICE_TYPE_METER: 'meter',
+    logFoundDeviceOnce() {},
+    isTargetDevice: () => ({ ok: true }),
+    resolveAdvMacFromFoundDevice: (device) => device.advMac || null,
+    resolveDeviceTypeByMac: () => 'bms',
+    appendBleScanDeviceId: (ids, id) => [...ids, id],
+    getBoundDeviceByRow: () => options.boundDevice,
     blockedByLoginGuard: false,
     pageVisible: false,
     visibilityGeneration: 0,
     autoStartRequested: false,
     autoStartConsumed: false,
     autoStartPending: false,
-    listSortScheduler: { cancel() {} },
+    listSortScheduler: { cancel() {}, markDirty() {} },
     boundDevicesStore: {
       refresh() {
         calls.refreshes += 1
@@ -67,6 +79,7 @@ function createPage(query, options = {}) {
     uni: {
       getStorageSync: () => undefined,
       redirectTo: ({ url }) => { calls.redirects.push(url) },
+      navigateTo: ({ url }) => { calls.navigations.push(url) },
       switchTab: ({ url }) => { calls.tabs.push(url) },
       showToast() {},
     },
@@ -117,6 +130,59 @@ async function main() {
   await flush()
   assert.equal(newQr.calls.starts, 1, 'a fresh QR navigation gets its own automatic start')
 
+  const target = { deviceId: 'native-BMS', name: 'BMS', advMac: qrQuery.mac, RSSI: -60 }
+  const bindingOptions = { boundDevice: null }
+  const returning = createPage(qrQuery, bindingOptions)
+  returning.hooks.show()
+  await flush()
+  returning.context.upsertDevice(target)
+  await flush()
+  assert.equal(returning.calls.navigations.length, 1, 'initial QR match enters provisioning once')
+  assert.ok(returning.calls.navigations[0].includes('/provision-wizard?'))
+  returning.hooks.hide()
+  bindingOptions.boundDevice = { device_id: 'newly-bound-BMS' }
+  // Binding changes the store while detail is open; returning must work with or without a prior disconnect.
+  returning.hooks.show()
+  await flush()
+  assert.equal(returning.calls.redirects.length, 0, 'new binding must not redirect back to detail on return')
+  assert.equal(returning.calls.starts, 1, 'returning must not restart discovery')
+  assert.equal(returning.context.isScanning.value, false)
+  returning.hooks.show()
+  returning.hooks.hide()
+  returning.hooks.show()
+  await flush()
+  assert.equal(returning.calls.redirects.length, 0, 'repeated visibility and background resume stay on scan page')
+  await returning.context.toggleScan()
+  returning.context.upsertDevice({ ...target, RSSI: -65 })
+  await flush()
+  assert.equal(returning.calls.starts, 2, 'manual discovery remains available after returning')
+  assert.equal(returning.context.rows.value.get(target.deviceId).RSSI, -65, 'manual discovery updates the list')
+  assert.equal(returning.calls.navigations.length, 1, 'manual discovery must not automatically select the target again')
+  returning.context.selectDevice(returning.context.rows.value.get(target.deviceId))
+  await flush()
+  assert.deepEqual(returning.calls.navigations, [
+    `/pages/device-provision/provision-wizard?deviceId=native-BMS&qrMac=${qrQuery.mac}&advMac=${qrQuery.mac}&entry_source=scan`,
+    '/pages/device-battery/detail?device_id=newly-bound-BMS&entry_source=scan',
+  ], 'tapping the bound device explicitly reopens detail')
+
+  const selected = createPage(qrQuery)
+  selected.hooks.show()
+  await flush()
+  selected.context.selectDevice({ ...target, deviceId: 'selected-BMS', advMac: 'AC6677889900', deviceType: 'bms' })
+  await flush()
+  assert.equal(selected.context.navigated.value, true, 'manual selection also consumes automatic navigation')
+  selected.hooks.hide()
+  selected.hooks.show()
+  await flush()
+  await selected.context.toggleScan()
+  selected.context.upsertDevice(target)
+  await flush()
+  assert.equal(selected.calls.navigations.length, 1, 'returning after manual selection requires another tap to connect')
+
+  newQr.context.upsertDevice(target)
+  await flush()
+  assert.equal(newQr.calls.navigations.length, 1, 'a fresh QR instance can automatically select its target')
+
   for (const mac of [undefined, '', 'invalid', 'AC1122']) {
     const invalid = createPage({ ...qrQuery, mac, auto_start: '1' })
     invalid.hooks.show()
@@ -137,6 +203,9 @@ async function main() {
   await flush()
   assert.equal(bound.calls.starts, 0, 'bound QR devices bypass scanning')
   assert.deepEqual(bound.calls.redirects, ['/pages/device-battery/detail?device_id=bound-BMS&entry_source=scan'])
+  bound.hooks.show()
+  await flush()
+  assert.equal(bound.calls.redirects.length, 1, 'an already consumed bound lookup must not redirect again')
 
   const blocked = createPage(qrQuery, { loggedIn: false })
   blocked.hooks.show()
@@ -160,7 +229,10 @@ async function main() {
   }
 
   const delayed = deferred()
-  const manualDuringRefresh = createPage(qrQuery, { refresh: () => delayed.promise })
+  const manualDuringRefresh = createPage(qrQuery, {
+    refresh: () => delayed.promise,
+    boundDevice: { device_id: 'late-bound-BMS' },
+  })
   manualDuringRefresh.hooks.show()
   await manualDuringRefresh.context.toggleScan()
   await manualDuringRefresh.context.toggleScan()
@@ -168,6 +240,7 @@ async function main() {
   await flush()
   assert.equal(manualDuringRefresh.calls.starts, 1, 'late refresh must not undo a manual start then stop')
   assert.equal(manualDuringRefresh.context.isScanning.value, false)
+  assert.equal(manualDuringRefresh.calls.redirects.length, 0, 'late refresh must not navigate after a manual action')
 
   const firstRefresh = deferred()
   let refreshCount = 0
