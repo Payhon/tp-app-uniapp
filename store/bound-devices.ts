@@ -64,6 +64,7 @@ export const useBoundDevicesStore = defineStore('boundDevices', {
 			const id = String(deviceId || '')
 			if (!id) return
 			this.list = this.list.filter((x) => String(x?.device_id || '') !== id)
+			syncBoundDeviceSnapshot(this.list)
 		},
 	async refresh(options?: { force?: boolean; viewMode?: HomeDeviceViewMode }) {
 		const isLoggedIn = Boolean(uni.getStorageSync('access_token'))
