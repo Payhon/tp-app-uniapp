@@ -824,8 +824,8 @@ async function startScan() {
 					uni.showModal({
 						title: t('common.tip'),
 						content: t('pages.deviceProvision.enableBluetoothTip'),
-						confirmText: t('common.confirm'),
-						cancelText: t('common.cancel'),
+						confirmText: t('common.modalConfirm'),
+						cancelText: t('common.modalCancel'),
 						success: (res: UniApp.ShowModalRes) => {
 							if (res.confirm) openBtSetting()
 						},

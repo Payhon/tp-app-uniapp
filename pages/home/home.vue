@@ -654,8 +654,8 @@ const confirmUnbind = () => {
 	uni.showModal({
 		title: t('common.tip') as string,
 		content: t('home.deviceMenu.unbindConfirm') as string,
-		cancelText: t('common.cancel') as string,
-		confirmText: t('common.confirm') as string,
+		cancelText: t('common.modalCancel') as string,
+		confirmText: t('common.modalConfirm') as string,
 		success: async (res: { confirm: boolean }) => {
 			if (!res.confirm) return
 			if (submitting.value) return
@@ -687,8 +687,8 @@ const confirmRemove = () => {
 	uni.showModal({
 		title: t('common.tip') as string,
 		content: t('home.deviceMenu.removeConfirm') as string,
-		cancelText: t('common.cancel') as string,
-		confirmText: t('common.confirm') as string,
+		cancelText: t('common.modalCancel') as string,
+		confirmText: t('common.modalConfirm') as string,
 		success: async (res: { confirm: boolean }) => {
 			if (!res.confirm) return
 			if (submitting.value) return

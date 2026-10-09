@@ -49,7 +49,7 @@ export function createWxMiniappUpdateController({
 			title: translate('common.update.newVersionTitle'),
 			content: translate('common.update.miniProgramReady'),
 			showCancel: false,
-			confirmText: translate('common.confirm'),
+			confirmText: translate('common.modalConfirm'),
 			success: (result) => {
 				promptVisible = false
 				if (!result.confirm || !manager || applying || !updateReady) {
@@ -73,7 +73,7 @@ export function createWxMiniappUpdateController({
 			title: translate('common.update.miniProgramFailedTitle'),
 			content: translate('common.update.miniProgramFailedContent'),
 			showCancel: false,
-			confirmText: translate('common.confirm'),
+			confirmText: translate('common.modalConfirm'),
 			success: () => {
 				failurePromptVisible = false
 				updateFailed = false

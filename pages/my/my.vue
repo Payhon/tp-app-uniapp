@@ -610,8 +610,8 @@ const clearCache = () => {
   uni.showModal({
     title: t("common.tip"),
     content: t("pages.my.clearCacheConfirm"),
-    cancelText: t("common.cancel"),
-    confirmText: t("common.confirm"),
+    cancelText: t("common.modalCancel"),
+    confirmText: t("common.modalConfirm"),
     success: (res) => {
       if (!res.confirm) return;
       uni.showLoading({ title: t("common.loading") });

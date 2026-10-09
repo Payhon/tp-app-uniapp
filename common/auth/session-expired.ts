@@ -170,6 +170,7 @@ export function handleSessionExpired(): boolean {
 		title: i18n.global.t('common.tip') as string,
 		content: i18n.global.t('auth.sessionExpired') as string,
 		showCancel: false,
+		confirmText: i18n.global.t('common.modalConfirm') as string,
 		success: () => {
 			sessionExpiredModalOpen = false
 			navigateToLogin()

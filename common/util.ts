@@ -35,8 +35,8 @@ function update(showToast = false) {
 			uni.showModal({
 				title: t('common.update.newVersionTitle'),
 				content: t('common.update.latestVersion', { version: result.version }),
-				cancelText: t('common.update.later'),
-				confirmText: t('common.update.updateNow'),
+				cancelText: t('common.update.modalLater'),
+				confirmText: t('common.update.modalNow'),
 				success: (res: { confirm?: boolean }) => {
 					if (res.confirm) {
 						//

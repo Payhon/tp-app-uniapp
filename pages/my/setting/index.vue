@@ -1224,10 +1224,16 @@ const submitBind = async () => {
   }
 };
 
+const onConfirmModalFail = (error: unknown) => {
+  console.error("[setting] showModal failed", error);
+  uni.showToast({ title: t("common.modalFailed") as string, icon: "none" });
+};
+
 const doLogout = () => {
   uni.showModal({
     content: t("pages.accounts.logoutConfirm") as string,
-    confirmText: t("pages.accounts.logoutBtn") as string,
+    cancelText: t("common.modalCancel") as string,
+    confirmText: t("pages.accounts.logoutModalConfirm") as string,
     success: (res) => {
       if (!res.confirm) return;
       clearLocalLoginState();
@@ -1237,6 +1243,7 @@ const doLogout = () => {
         icon: "none",
       });
     },
+    fail: onConfirmModalFail,
   });
 };
 
@@ -1276,7 +1283,8 @@ const confirmDeleteAccount = async () => {
   uni.showModal({
     title: t("pages.my.settingPage.deleteAccount") as string,
     content: t("pages.my.settingPage.deleteAccountConfirm") as string,
-    confirmText: t("pages.my.settingPage.confirmDeleteAccount") as string,
+    cancelText: t("common.modalCancel") as string,
+    confirmText: t("pages.my.settingPage.deleteModalConfirm") as string,
     confirmColor: "#F56C6C",
     success: (res) => {
       if (!res.confirm) return;
@@ -1288,6 +1296,7 @@ const confirmDeleteAccount = async () => {
       }
       deleteAccountPopupVisible.value = true;
     },
+    fail: onConfirmModalFail,
   });
 };
 

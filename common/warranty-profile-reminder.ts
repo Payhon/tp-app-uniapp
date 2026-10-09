@@ -11,8 +11,8 @@ export async function shouldGuideWarrantyProfileAfterNewBinding(newlyBound: bool
 		uni.showModal({
 			title: i18n.global.t('pages.warranty.reminderDialogTitle') as string,
 			content: i18n.global.t('pages.warranty.reminderDialogContent') as string,
-			cancelText: i18n.global.t('pages.warranty.reminderLater') as string,
-			confirmText: i18n.global.t('pages.warranty.reminderNow') as string,
+			cancelText: i18n.global.t('pages.warranty.reminderLaterModal') as string,
+			confirmText: i18n.global.t('pages.warranty.reminderNowModal') as string,
 			confirmColor: '#0B3BFF',
 			success: (res: { confirm?: boolean }) => resolve(Boolean(res.confirm)),
 			fail: () => resolve(false),

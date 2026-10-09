@@ -1499,8 +1499,8 @@ const confirmModal = (content: string) =>
 		uni.showModal({
 			title: (t('common.tip') as string) || '',
 			content,
-			confirmText: (t('common.confirm') as string) || '',
-			cancelText: (t('common.cancel') as string) || '',
+			confirmText: (t('common.modalConfirm') as string) || '',
+			cancelText: (t('common.modalCancel') as string) || '',
 			success: (res) => resolve(!!res.confirm),
 			fail: () => resolve(false),
 		})
