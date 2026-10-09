@@ -295,7 +295,7 @@ const parseBooleanStorage = (raw: unknown, defaultValue: boolean) => {
 
 const isBluetoothAutoConnectEnabled = () => {
 	const raw = uni.getStorageSync(STORAGE_BT_AUTO_CONNECT)
-	return parseBooleanStorage(raw, true)
+	return parseBooleanStorage(raw, false)
 }
 
 const syncCurrentViewMode = () => {

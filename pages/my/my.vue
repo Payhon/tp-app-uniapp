@@ -276,7 +276,7 @@ const statusBarHeight = ref(0);
 const deviceCount = ref(0);
 const loadingDeviceCount = ref(false);
 
-const bluetoothAutoConnect = ref<boolean>(true);
+const bluetoothAutoConnect = ref<boolean>(false);
 const langSheetShow = ref(false);
 
 const parseBooleanStorage = (raw: unknown, defaultValue: boolean) => {
@@ -512,7 +512,7 @@ onLoad(() => {
   // #endif
 
   const raw = uni.getStorageSync(STORAGE_BT_AUTO_CONNECT);
-  bluetoothAutoConnect.value = parseBooleanStorage(raw, true);
+  bluetoothAutoConnect.value = parseBooleanStorage(raw, false);
   currentHomeViewMode.value = getStoredHomeDeviceViewMode(userStore.userInfo);
 });
 
@@ -633,7 +633,7 @@ const clearCache = () => {
         btAutoConnect !== undefined
       ) {
         uni.setStorageSync(STORAGE_BT_AUTO_CONNECT, btAutoConnect);
-        bluetoothAutoConnect.value = parseBooleanStorage(btAutoConnect, true);
+        bluetoothAutoConnect.value = parseBooleanStorage(btAutoConnect, false);
       }
       uni.hideLoading();
       uni.showToast({
