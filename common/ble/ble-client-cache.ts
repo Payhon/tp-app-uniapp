@@ -3,6 +3,7 @@ import { createUniBleBmsTransport, type UniBleBmsTransport } from '@/common/lib/
 import { mac12ToColon, normalizeMac, parseMacFromAdvertisement } from '@/common/device-provision/ble'
 import { acquireBleDiscoveryLease } from './ble-discovery-coordinator'
 import { getRememberedBleDeviceId, rememberBleDeviceId } from './ble-device-id-memory'
+import { syncBleBmsTimeOnce } from './ble-time-sync'
 
 type FoundBleDevice = {
 	deviceId: string
@@ -16,6 +17,7 @@ type FoundBleDevice = {
 export type BleClientEntry = {
 	key: string
 	mac: string
+	connectionMac: string | null
 	deviceId: string
 	client: BmsClient
 	transport: UniBleBmsTransport
@@ -29,6 +31,7 @@ export type BleClientEntry = {
 
 export type AdoptBleClientConnectionOptions = {
 	mac: unknown
+	connectionMac?: string | null
 	deviceId: string
 	client: BmsClient
 	transport: UniBleBmsTransport
@@ -322,6 +325,7 @@ const createBleClientEntry = ({
 	return {
 		key,
 		mac: key,
+		connectionMac: key,
 		deviceId,
 		client: new BmsClient({ transport, maxReadRegisters }),
 		transport,
@@ -572,6 +576,7 @@ export const canBleAutoConnect = (commType: unknown, bleMac: unknown) => {
 
 type ConnectBleOptions = {
 	mac: unknown
+	bmsCommType?: number | null
 	maxReadRegisters?: number
 	force?: boolean
 	probe?: boolean
@@ -588,6 +593,7 @@ const closeEntry = async (entry: BleClientEntry) => {
 
 export const adoptBleClientConnection = async ({
 	mac,
+	connectionMac,
 	deviceId,
 	client,
 	transport,
@@ -613,6 +619,7 @@ export const adoptBleClientConnection = async ({
 	const entry: BleClientEntry = {
 		key,
 		mac: key,
+		connectionMac: connectionMac === undefined ? key : normalizeBleMac(connectionMac),
 		deviceId: normalizedDeviceId,
 		client,
 		transport,
@@ -632,6 +639,7 @@ export const adoptBleClientConnection = async ({
 
 export const connectBleClient = async ({
 	mac,
+	bmsCommType,
 	maxReadRegisters,
 	force = false,
 	probe = false,
@@ -647,6 +655,17 @@ export const connectBleClient = async ({
 	if (closeTask && (!(await waitConnectTaskSettled(closeTask, 1200)) || !(await closeTask))) return null
 	if (isCancelled?.()) return null
 	const epoch = connectEpoch
+	const prepareEntry = async (entry: BleClientEntry | null): Promise<BleClientEntry | null> => {
+		if (!entry) return null
+		if (epoch === connectEpoch && !isCancelled?.()) {
+			await syncBleBmsTimeOnce(entry.client, entry.connectionMac, bmsCommType)
+		}
+		if (epoch !== connectEpoch || isCancelled?.() || cache.get(key) !== entry) {
+			if (cache.get(key) === entry) await closeBleClientEntry(entry)
+			return null
+		}
+		return entry
+	}
 
 	const desiredMax = Number.isFinite(maxReadRegisters as number) ? Number(maxReadRegisters) : undefined
 	const cached = cache.get(key)
@@ -666,20 +685,20 @@ export const connectBleClient = async ({
 			try {
 				await cached.client.readUuid()
 				touchEntry(cached)
-				return cached
+				return await prepareEntry(cached)
 			} catch (e) {
 				log('probe failed, reconnect', { mac: key })
 				await closeEntry(cached)
 			}
 		} else {
 			touchEntry(cached)
-			return cached
+			return prepareEntry(cached)
 		}
 	}
 
 	const existing = inFlight.get(key)
 	if (existing) {
-		if (!force) return existing
+		if (!force) return prepareEntry(await existing)
 		log('force connect waits existing pending task', { mac: key })
 		const settled = await waitConnectTaskSettled(existing, CONNECT_LOCK_WAIT_TIMEOUT_MS)
 		if (!settled) {
@@ -841,7 +860,7 @@ export const connectBleClient = async ({
 			cache.set(key, entry)
 			observeEntryDisconnect(entry)
 		}
-		return entry
+		return await prepareEntry(entry)
 	} finally {
 		if (inFlight.get(key) === task) {
 			inFlight.delete(key)

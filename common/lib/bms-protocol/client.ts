@@ -430,7 +430,7 @@ export class BmsClient {
 	async writeRegisters(
 		startAddress: number,
 		registerValues: Uint16Array,
-		{ functionCode = BMS_FUNC.WRITE_MULTIPLE_REGISTERS, targetAddress }: { functionCode?: number; targetAddress?: number } = {}
+		{ functionCode = BMS_FUNC.WRITE_MULTIPLE_REGISTERS, targetAddress, ...requestOptions }: { functionCode?: number; targetAddress?: number } & BmsRequestOptions = {}
 	): Promise<void> {
 		const ranges = chunkRanges(startAddress, registerValues.length, this.maxWriteRegisters);
 		let offset = 0;
@@ -444,7 +444,7 @@ export class BmsClient {
 				startAddress: r.startAddress,
 				registerValues: chunk,
 			});
-			const resp = await this._request(req);
+			const resp = await this._request(req, requestOptions);
 			if (resp.type === 'error') throw new BmsProtocolError('BMS error response', resp);
 			if (resp.type !== 'write') throw new BmsProtocolError('Unexpected response type', resp);
 			offset += r.quantity;
@@ -574,10 +574,13 @@ export class BmsClient {
 		return parsed
 	}
 
-	async syncTime(timestampSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
-		const raw = timestampSeconds >>> 0;
+	async syncTime(timestampSeconds = Math.floor(Date.now() / 1000), options: BmsRequestOptions = {}): Promise<void> {
+		if (!Number.isInteger(timestampSeconds) || timestampSeconds < 0 || timestampSeconds > 0xffffffff) {
+			throw new BmsProtocolError('timestampSeconds out of uint32 range', { timestampSeconds });
+		}
+		const raw = timestampSeconds;
 		const regs = new Uint16Array([(raw >>> 16) & 0xffff, raw & 0xffff]);
-		await this.writeRegisters(0x57c, regs);
+		await this.writeRegisters(0x57c, regs, options);
 	}
 
 	async readAllStatus(options: ReadAllStatusOptions = {}): Promise<BmsStatus> {

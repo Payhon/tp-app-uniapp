@@ -32,6 +32,7 @@ import {
 	type BleClientEntry,
 } from '@/common/ble/ble-client-cache'
 import { normalizeMac } from '@/common/device-provision/ble'
+import { syncBleBmsTimeOnce } from '@/common/ble/ble-time-sync'
 import type { DeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
 import type { BmsStatus } from '@/common/lib/bms-protocol/types'
 import {
@@ -1389,11 +1390,13 @@ export const useBatteryDetail = () => {
 		}
 	}
 
-	const attachBleEntry = (
+	const attachBleEntry = async (
 		entry: ReturnType<typeof getBleClientEntry>,
 		options?: { retain?: boolean; sessionToken?: DetailDataSessionToken }
 	) => {
 		if (!entry || (options?.sessionToken && !isSessionCurrent(options.sessionToken))) return false
+		await syncBleBmsTimeOnce(entry.client, entry.connectionMac, battery.value?.bms_comm_type)
+		if (getBleClientEntry(entry.key) !== entry || (options?.sessionToken && !isSessionCurrent(options.sessionToken))) return false
 		stopCloudPolling()
 		if (bleCacheKey && bleCacheKey !== entry.key) {
 			releaseBleClient(bleCacheKey)
@@ -1475,7 +1478,7 @@ export const useBatteryDetail = () => {
 		try {
 			if (!(await validateWarmBleEntry(entry, reason, expectedSession))) return false
 			if (!isSessionCurrent(expectedSession)) return false
-			attached = attachBleEntry(entry, { retain: false, sessionToken: expectedSession })
+			attached = await attachBleEntry(entry, { retain: false, sessionToken: expectedSession })
 			return attached
 		} finally {
 			if (!alreadyRetained && !attached) releaseBleClient(entry.key)
@@ -1717,6 +1720,7 @@ export const useBatteryDetail = () => {
 			closeRelaySocket()
 			const entry = await connectBleClient({
 				mac: decision.mac,
+				bmsCommType: battery.value?.bms_comm_type,
 				maxReadRegisters: BLE_MAX_READ_REGS,
 				force: !options?.preserveCurrentBle,
 				probe: options?.probe !== false,
@@ -1921,6 +1925,10 @@ export const useBatteryDetail = () => {
 				return false
 			}
 			battery.value = battery.value ? ({ ...battery.value, ...nextBattery } as AppBatteryDetail) : nextBattery
+			if (connType.value === 'bluetooth' && attachedBleEntry && !bleOtaActive) {
+				await syncBleBmsTimeOnce(attachedBleEntry.client, attachedBleEntry.connectionMac, nextBattery.bms_comm_type)
+				if (!isSessionCurrent(expectedSession) || latestDetailRequestSequence !== requestSequence) return false
+			}
 			log('load battery detail ok', {
 				device_number: (battery.value as any)?.device_number,
 				bms_comm_type: (battery.value as any)?.bms_comm_type,
@@ -1963,7 +1971,7 @@ export const useBatteryDetail = () => {
 				device_id: nextId,
 				device_number: handoff.bleMac,
 				device_name: handoff.deviceName || null,
-				bms_comm_type: handoff.bmsCommType ?? 1,
+				bms_comm_type: handoff.bmsCommType ?? null,
 				ble_mac: handoff.bleMac,
 				item_uuid: handoff.itemUuid || null,
 				comm_chip_id: null,
@@ -2148,6 +2156,7 @@ export const useBatteryDetail = () => {
 				debug('connecting', { attempt })
 				try {
 					const entry = await wait(connectBleClient({ mac: original.mac, preferredDeviceId: original.deviceId,
+						bmsCommType: battery.value?.bms_comm_type,
 						force: true, probe: false, singleAttempt: true, maxReadRegisters: original.maxReadRegisters,
 						isCancelled: () => !current(), onTransport: transport => { activeTransport = transport },
 					}))
@@ -2168,7 +2177,7 @@ export const useBatteryDetail = () => {
 					}
 					if (!current()) break
 					status.value = nextStatus
-					attachBleEntry(entry, { sessionToken: session })
+					if (!(await attachBleEntry(entry, { sessionToken: session }))) throw new Error('BLE reconnect became stale')
 					if (nextStatus) markFirstFrameSuccess()
 					recovered = true
 					debug('ready', { version, attempt })

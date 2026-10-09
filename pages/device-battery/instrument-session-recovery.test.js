@@ -74,7 +74,7 @@ function createHarness(options = {}) {
       notifyDisconnect() { for (const fn of [...listeners]) fn() },
       async disconnect() { calls.disconnects++; transport.notifyDisconnect(); await sleep(state.closeDelay || 0); if (state.closeFailure) throw new Error('close failed') },
     }
-    return { key: mac, mac, deviceId: 'meter-native-id', transport, connectedAt: now,
+    return { key: mac, mac, connectionMac: mac, deviceId: 'meter-native-id', transport, connectedAt: now,
       client: { ...bleClient, getTransport: () => transport, getAddresses: () => ({ sourceAddress: 0xfe }) } }
   }
   const closeTasks = new Map()
@@ -96,7 +96,7 @@ function createHarness(options = {}) {
     },
     disconnectBleClient: async () => { calls.disconnects++; return true },
     releaseBleClientAndDisconnectIfIdle: async () => true,
-    getBleClientEntry: () => null,
+    getBleClientEntry: mac => lastEntry?.key === mac ? lastEntry : null,
     invalidateBleConnectAttempts() {}, retainBleClient() {}, releaseBleClient() {},
   }
   const context = vm.createContext({
@@ -136,6 +136,7 @@ function createHarness(options = {}) {
     execute(localRequire, exports)
     return exports
   }
+  mocks['@/common/ble/ble-time-sync'] = load(path.join(__dirname, '../../common/ble/ble-time-sync.ts'))
   const detail = load(path.join(__dirname, 'useBatteryDetail.ts')).useBatteryDetail()
   Object.assign(context, detail, {
     resolveDetailPollingPolicy: load(path.join(__dirname, 'detail-polling-policy.ts')).resolveDetailPollingPolicy,

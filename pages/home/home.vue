@@ -411,7 +411,7 @@ const autoConnectBleDevices = async () => {
 		if (!item?.id) continue
 		const decision = canBleAutoConnect(item?.bmsCommType, item?.bleMac)
 		if (!decision.ok || !decision.mac) continue
-		const entry = await connectBleClient({ mac: decision.mac, maxReadRegisters: BLE_MAX_READ_REGS, source: 'home_auto' })
+		const entry = await connectBleClient({ mac: decision.mac, bmsCommType: item.bmsCommType, maxReadRegisters: BLE_MAX_READ_REGS, source: 'home_auto' })
 		if (!entry) continue
 		if (!homePageVisible || token !== autoConnectToken) return
 		if (!homeBleKeys.has(entry.key)) {

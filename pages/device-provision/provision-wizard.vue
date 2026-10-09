@@ -61,6 +61,7 @@ import { BmsClient } from '@/common/lib/bms-protocol/client'
 import { BMS_PARAM } from '@/common/lib/bms-protocol/param-registry'
 import { createUniBleBmsTransport } from '@/common/lib/bms-protocol/uni-ble-transport'
 import { adoptBleClientConnection } from '@/common/ble/ble-client-cache'
+import { syncBleBmsTimeOnce } from '@/common/ble/ble-time-sync'
 import { mac12ToColon, normalizeMac } from '@/common/device-provision/ble'
 import { saveDeviceDetailHandoff } from '@/common/device-provision/detail-handoff'
 import {
@@ -242,6 +243,9 @@ async function runProvision() {
 		// 根据 bms_comm_type 判断是否需要写 DTU；只有 2/3 代表带 4G 通讯。
 		// TODO: 若后续规则变化（例如 null 也代表 4G），在这里调整默认值。
 		const commType = Number(provisionInfo.bms_comm_type || 0)
+		// iOS deviceId 是 UUID；只使用广播/扫码或原生 MAC，不能用透传读出的 BMS MAC 替代。
+		const connectionMac = advMac.value || qrMac.value || normalizeMac(deviceId.value)
+		await syncBleBmsTimeOnce(client, connectionMac, commType)
 		const needWriteDtu = commType === 2 || commType === 3
 		setStep('readUuid', 'done')
 
@@ -297,6 +301,7 @@ async function runProvision() {
 		if (boundDeviceId && bleMac) {
 			const adopted = await adoptBleClientConnection({
 				mac: bleMac,
+				connectionMac,
 				deviceId: deviceId.value,
 				client,
 				transport,
